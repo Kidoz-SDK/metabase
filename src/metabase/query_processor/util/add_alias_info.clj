@@ -46,6 +46,7 @@
   If this clause is 'selected', this is the position the clause will appear in the results (i.e. the corresponding
   column index)."
   (:require
+   [clojure.string :as str]
    [clojure.walk :as walk]
    [medley.core :as m]
    [metabase.driver :as driver]
@@ -352,7 +353,7 @@
   (cond
     join-alias              (prefix-field-alias join-alias (or alias-from-join field-name))
     alias-from-source-query alias-from-source-query
-    :else                   field-name))
+    :else                   (str/replace field-name #"_id." "")))
 
 (defmulti ^:private clause-alias-info
   {:arglists '([inner-query unique-alias-fn clause])}
