@@ -91,3 +91,6 @@ dev/src/dev/nocommit/
 .clj-kondo/metosin/malli-types-clj
 
 .github/static-viz-sources.yaml
+
+# ignore local folder customization
+desktop.ini
