@@ -5,7 +5,7 @@ import crossfilter from "crossfilter";
 
 import { isDimension, isMetric, isDate } from "metabase-lib/types/utils/isa";
 
-export const MAX_SERIES = 2000;
+export const MAX_SERIES = 100;
 
 const SPLIT_AXIS_UNSPLIT_COST = -100;
 const SPLIT_AXIS_COST_FACTOR = 2;
