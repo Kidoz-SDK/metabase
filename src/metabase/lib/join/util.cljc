@@ -104,4 +104,4 @@
         (if-let [join-alias (or (current-join-alias col)
                                 (implicit-join-name metadata-providerable col))]
           (joined-field-desired-alias join-alias source-alias)
-          (str/replace source-alias #"_id." "")))))
+          (str/replace source-alias #"^_id\\." "")))))
