@@ -1,7 +1,6 @@
 (ns metabase.lib.join.util
   "Some small join-related helper functions which are used from a few different namespaces."
   (:require
-   [clojure.string :as str]
    [metabase.lib.dispatch :as lib.dispatch]
    [metabase.lib.metadata :as lib.metadata]
    [metabase.lib.options :as lib.options]
@@ -85,11 +84,9 @@
     MyJoin__my_field
 
   You should pass the results thru a unique name function."
-  [metadata-providerable :- ::lib.schema.metadata/metadata-providerable
-   col                   :- ::lib.schema.metadata/column]
-  (or (:lib/ref-name col)
-      (let [source-alias ((some-fn :lib/source-column-alias :name) col)]
-        (if-let [join-alias (or (current-join-alias col)
-                                (implicit-join-name metadata-providerable col))]
-          (joined-field-desired-alias join-alias source-alias)
-          (str/replace source-alias #"_id." "")))))
+  [query          :- ::lib.schema/query
+   field-metadata :- ::lib.schema.metadata/column]
+  (if-let [join-alias (or (current-join-alias field-metadata)
+                          (implicit-join-name query field-metadata))]
+    (joined-field-desired-alias join-alias (:name field-metadata))
+    (:name field-metadata)))
