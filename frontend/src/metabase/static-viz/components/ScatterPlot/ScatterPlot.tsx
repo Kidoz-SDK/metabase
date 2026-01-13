@@ -9,7 +9,7 @@ import { getLegendItems } from "metabase/visualizations/echarts/cartesian/model/
 import { getScatterPlotModel } from "metabase/visualizations/echarts/cartesian/scatter/model";
 import { getScatterPlotOption } from "metabase/visualizations/echarts/cartesian/scatter/option";
 
-import { computeStaticComboChartSettings } from "../ComboChart/settings";
+import Watermark from "../../watermark.svg?component";
 import { Legend } from "../Legend";
 import { calculateLegendRows } from "../Legend/utils";
 
@@ -21,23 +21,19 @@ const LEGEND_PADDING = 8;
 
 export function ScatterPlot({
   rawSeries,
-  dashcardSettings,
+  settings,
   renderingContext,
   width = WIDTH,
   height = HEIGHT,
   isStorybook = false,
+  hasDevWatermark = false,
 }: StaticChartProps) {
   const chart = init(null, null, { renderer: "svg", ssr: true, width, height });
 
-  const computedVisualizationSettings = computeStaticComboChartSettings(
-    rawSeries,
-    dashcardSettings,
-    renderingContext,
-  );
-
   const chartModel = getScatterPlotModel(
     rawSeries,
-    computedVisualizationSettings,
+    settings,
+    [],
     renderingContext,
   );
 
@@ -52,7 +48,7 @@ export function ScatterPlot({
 
   const chartMeasurements = getChartMeasurements(
     chartModel,
-    computedVisualizationSettings,
+    settings,
     false,
     width,
     height,
@@ -64,7 +60,7 @@ export function ScatterPlot({
     chartMeasurements,
     null,
     [],
-    computedVisualizationSettings,
+    settings,
     width,
     false,
     renderingContext,
@@ -83,6 +79,17 @@ export function ScatterPlot({
       <Group top={legendHeight}>
         <g dangerouslySetInnerHTML={{ __html: chartSvg }}></g>
       </Group>
+      {hasDevWatermark && (
+        <Watermark
+          x={legendHeight}
+          y="0"
+          height={height}
+          width={width}
+          preserveAspectRatio="xMinYMin slice"
+          fill={renderingContext.getColor("text-secondary")}
+          opacity={0.2}
+        />
+      )}
     </svg>
   );
 }

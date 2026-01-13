@@ -10,8 +10,12 @@ import {
   isFullyParameterized,
   isPreviewShown,
 } from "metabase/collections/utils";
+import EventSandbox from "metabase/common/components/EventSandbox";
 import CS from "metabase/css/core/index.css";
-import type { IconName } from "metabase/ui";
+import { getIcon } from "metabase/lib/icon";
+import { modelToUrl } from "metabase/lib/urls";
+import { PLUGIN_MODERATION } from "metabase/plugins";
+import { Box, Flex, Group, Icon, Text } from "metabase/ui";
 import Visualization from "metabase/visualizations/components/Visualization";
 import type Database from "metabase-lib/v1/metadata/Database";
 import type { Bookmark, Collection, CollectionItem } from "metabase-types/api";
@@ -48,59 +52,99 @@ const PinnedQuestionCard = ({
   const isPreview = isPreviewShown(item);
 
   const actionMenu = (
-    <ActionMenu
-      item={item}
-      collection={collection}
-      databases={databases}
-      bookmarks={bookmarks}
-      onCopy={onCopy}
-      onMove={onMove}
-      createBookmark={onCreateBookmark}
-      deleteBookmark={onDeleteBookmark}
-    />
+    // This component is used within a `<Link>` component,
+    // so we must prevent events from triggering the activation of the link
+    <EventSandbox preventDefault sandboxedEvents={["onClick"]}>
+      <ActionMenu
+        item={item}
+        collection={collection}
+        databases={databases}
+        bookmarks={bookmarks}
+        onCopy={onCopy}
+        onMove={onMove}
+        createBookmark={onCreateBookmark}
+        deleteBookmark={onDeleteBookmark}
+      />
+    </EventSandbox>
   );
 
   const positionedActionMenu = (
     <CardActionMenuContainer>{actionMenu}</CardActionMenuContainer>
   );
 
+  const DEFAULT_DESCRIPTION: Record<string, string> = {
+    card: t`A question`,
+    metric: t`A metric`,
+  };
+
   return (
     <CardRoot
-      to={item.getUrl()}
+      to={modelToUrl(item)}
       isPreview={isPreview}
-      className={cx(CS.hoverParent, CS.hoverVisibility)}
+      className={cx(CS.hoverChild, CS.hoverVisibility)}
     >
-      {!isPreview && positionedActionMenu}
-      {isPreview ? (
-        <PinnedQuestionLoader id={item.id}>
-          {({ question, rawSeries, loading, error, errorIcon }) =>
-            loading ? (
-              <CardPreviewSkeleton
-                name={question?.displayName()}
-                display={question?.display()}
-                description={question?.description()}
-                actionMenu={actionMenu}
+      <Flex h="100%" direction="column">
+        {isPreview ? (
+          <Group justify="space-between" py="0.5rem" px="1rem">
+            <Group gap="0.5rem">
+              <Text fw="bold">{item.name}</Text>
+              <PLUGIN_MODERATION.ModerationStatusIcon
+                status={item.moderated_status}
+                filled
               />
-            ) : (
-              <Visualization
-                actionButtons={actionMenu}
-                rawSeries={rawSeries}
-                error={error}
-                errorIcon={errorIcon}
-                showTitle
-                isDashboard
-              />
-            )
-          }
-        </PinnedQuestionLoader>
-      ) : (
-        <CardStaticSkeleton
-          name={item.name}
-          description={item.description ?? t`A question`}
-          icon={item.getIcon() as unknown as { name: IconName }}
-          tooltip={getSkeletonTooltip(item)}
-        />
-      )}
+            </Group>
+            <Group>
+              {item.description && isPreview && (
+                <Icon
+                  className={cx(CS.hoverChild, CS.hoverChildSmooth)}
+                  name="info"
+                  color="text-light"
+                  tooltip={item.description}
+                />
+              )}
+              {actionMenu}
+            </Group>
+          </Group>
+        ) : (
+          positionedActionMenu
+        )}
+        <Box flex="1 0 0">
+          {isPreview ? (
+            <PinnedQuestionLoader id={item.id}>
+              {({ question, rawSeries, loading, error, errorIcon }) =>
+                loading ? (
+                  <CardPreviewSkeleton
+                    display={question?.display()}
+                    description={question?.description()}
+                  />
+                ) : (
+                  <Visualization
+                    rawSeries={rawSeries}
+                    error={error}
+                    errorIcon={errorIcon}
+                    isDashboard
+                  />
+                )
+              }
+            </PinnedQuestionLoader>
+          ) : (
+            <CardStaticSkeleton
+              name={item.name}
+              nameRightSection={
+                <PLUGIN_MODERATION.ModerationStatusIcon
+                  status={item.moderated_status}
+                  filled
+                />
+              }
+              description={
+                item.description || DEFAULT_DESCRIPTION[item.model] || ""
+              }
+              icon={getIcon(item)}
+              tooltip={getSkeletonTooltip(item)}
+            />
+          )}
+        </Box>
+      </Flex>
     </CardRoot>
   );
 };

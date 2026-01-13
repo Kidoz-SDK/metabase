@@ -2,10 +2,10 @@ import _ from "underscore";
 
 import ErrorBoundary from "metabase/ErrorBoundary";
 import { useCollectionQuery, useTableQuery } from "metabase/common/hooks";
-import { useSelector, useDispatch } from "metabase/lib/redux";
+import { useDispatch, useSelector } from "metabase/lib/redux";
 import { isUploadAborted, isUploadInProgress } from "metabase/lib/uploads";
 import { isEmpty } from "metabase/lib/validate";
-import { getAllUploads, clearAllUploads } from "metabase/redux/uploads";
+import { clearAllUploads, getAllUploads } from "metabase/redux/uploads";
 import type { CollectionId, TableId } from "metabase-types/api";
 import type { FileUpload } from "metabase-types/store/upload";
 
@@ -13,16 +13,17 @@ import useStatusVisibility from "../../hooks/use-status-visibility";
 import FileUploadStatusLarge from "../FileUploadStatusLarge";
 
 export const FileUploadStatus = () => {
-  const uploads = useSelector(getAllUploads);
+  const uploadsMap = useSelector(getAllUploads);
+  const uploads = Object.values(uploadsMap);
   const dispatch = useDispatch();
   const resetUploads = () => dispatch(clearAllUploads());
 
   const groupedTables = _.groupBy(
-    uploads.filter(upload => upload.tableId),
+    uploads.filter((upload) => upload.tableId),
     "tableId",
   );
   const groupedCollections = _.groupBy(
-    uploads.filter(upload => upload.collectionId),
+    uploads.filter((upload) => upload.collectionId),
     "collectionId",
   );
 
@@ -31,7 +32,7 @@ export const FileUploadStatus = () => {
 
   return (
     <>
-      {tables.map(tableId => {
+      {tables.map((tableId) => {
         return (
           <FileUploadStatusContent
             key={`uploads-table-${tableId}`}
@@ -41,7 +42,7 @@ export const FileUploadStatus = () => {
           />
         );
       })}
-      {collections.map(collectionId => {
+      {collections.map((collectionId) => {
         return (
           <FileUploadStatusContent
             key={`uploads-collection-${collectionId}`}
@@ -67,7 +68,7 @@ const FileUploadStatusContent = ({
   resetUploads: () => void;
 }) => {
   const isActive = uploads.some(
-    upload => isUploadInProgress(upload) || isUploadAborted(upload),
+    (upload) => isUploadInProgress(upload) || isUploadAborted(upload),
   );
   const isVisible = useStatusVisibility(isActive);
 

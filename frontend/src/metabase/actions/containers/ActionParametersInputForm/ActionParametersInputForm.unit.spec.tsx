@@ -1,9 +1,8 @@
-import { waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import fetchMock from "fetch-mock";
 import _ from "underscore";
 
-import { getIcon, render, screen } from "__support__/ui";
+import { getIcon, render, screen, waitFor } from "__support__/ui";
 import {
   createMockActionParameter,
   createMockFieldSettings,
@@ -19,13 +18,13 @@ import ActionParametersInputModal from "./ActionParametersInputModal";
 const parameter1 = createMockActionParameter({
   id: "parameter_1",
   name: "Parameter 1",
-  type: "type/Text",
+  type: "string/=",
 });
 
 const parameter2 = createMockActionParameter({
   id: "parameter_2",
   name: "Parameter 2",
-  type: "type/Text",
+  type: "string/=",
 });
 
 const mockAction = createMockQueryAction({
@@ -47,7 +46,6 @@ const mockAction = createMockQueryAction({
 const defaultProps: ActionParametersInputFormProps = {
   action: mockAction,
   mappedParameters: [],
-  prefetchesInitialValues: false,
   initialValues: {},
   onCancel: _.noop,
   onSubmitSuccess: _.noop,
@@ -124,12 +122,12 @@ describe("Actions > ActionParametersInputForm", () => {
         createMockActionParameter({
           id: "parameter_1",
           "display-name": "Parameter 1",
-          type: "type/Text",
+          type: "string/=",
         }),
         createMockActionParameter({
           id: "parameter_2",
           "display-name": "Parameter 2",
-          type: "type/Integer",
+          type: "number/=",
         }),
       ],
     });
@@ -168,7 +166,6 @@ describe("Actions > ActionParametersInputForm", () => {
       initialValues: {
         id: 888,
       },
-      prefetchesInitialValues: true,
     });
 
     expect(
@@ -212,7 +209,7 @@ describe("Actions > ActionParametersInputForm", () => {
 
       await userEvent.hover(editActionTrigger);
 
-      expect(screen.getByText("Edit this action")).toBeInTheDocument();
+      expect(await screen.findByText("Edit this action")).toBeInTheDocument();
 
       await userEvent.click(editActionTrigger);
 

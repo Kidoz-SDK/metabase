@@ -2,8 +2,8 @@ import { DataPermissionValue } from "metabase/admin/permissions/types";
 import type { Group, GroupsPermissions } from "metabase-types/api";
 
 import {
-  buildDetailsPermission,
   DETAILS_PERMISSION_OPTIONS,
+  buildDetailsPermission,
 } from "./details-permission";
 
 const defaultGroupId = 1;
@@ -23,10 +23,11 @@ const getPermissionGraph = (value = "yes"): GroupsPermissions =>
         details: value,
       },
     },
-  } as any);
+  }) as any;
 
 const isAdmin = true;
 const isNotAdmin = false;
+const isNotExternal = false;
 
 const defaultGroup: Group = {
   id: defaultGroupId,
@@ -39,6 +40,7 @@ describe("buildDetailsPermission", () => {
       { databaseId },
       groupId,
       isNotAdmin,
+      isNotExternal,
       getPermissionGraph(),
       defaultGroup,
       "fields",
@@ -48,6 +50,7 @@ describe("buildDetailsPermission", () => {
       { databaseId },
       groupId,
       isNotAdmin,
+      isNotExternal,
       getPermissionGraph(),
       defaultGroup,
       "tables",
@@ -62,6 +65,7 @@ describe("buildDetailsPermission", () => {
       { databaseId },
       groupId,
       isAdmin,
+      isNotExternal,
       getPermissionGraph(),
       defaultGroup,
       "schemas",
@@ -78,6 +82,7 @@ describe("buildDetailsPermission", () => {
       { databaseId },
       groupId,
       isNotAdmin,
+      isNotExternal,
       getPermissionGraph(),
       defaultGroup,
       "schemas",
@@ -92,6 +97,7 @@ describe("buildDetailsPermission", () => {
       { databaseId },
       groupId,
       isNotAdmin,
+      isNotExternal,
       getPermissionGraph(),
       defaultGroup,
       "schemas",
@@ -109,6 +115,7 @@ describe("buildDetailsPermission", () => {
         { databaseId },
         groupId,
         isNotAdmin,
+        isNotExternal,
         getPermissionGraph(),
         defaultGroup,
         "schemas",
@@ -127,6 +134,7 @@ describe("buildDetailsPermission", () => {
         { databaseId },
         groupId,
         isNotAdmin,
+        isNotExternal,
         getPermissionGraph("no"),
         defaultGroup,
         "schemas",

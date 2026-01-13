@@ -10,7 +10,7 @@ import {
   NodeListItemName,
   NodeListTitle,
   NodeListTitleText,
-} from "./NodeList.styled";
+} from "./NodeList";
 
 interface ConnectedTableListProps {
   tables: Table[];
@@ -26,7 +26,7 @@ const ConnectedTableList = ({
       <NodeListIcon name="connections" size="14" />
       <NodeListTitleText>{t`${tables.length} connections`}</NodeListTitleText>
     </NodeListTitle>
-    {tables.map(table => (
+    {tables.map((table) => (
       <li key={table.id}>
         <NodeListItemLink onClick={() => onTableClick(table)}>
           <NodeListItemIcon name="table" />

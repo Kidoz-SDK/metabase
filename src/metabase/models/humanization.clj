@@ -10,7 +10,7 @@
   There used to also be `:advanced`, which was the default until enough customers
   complained that we first fixed it and then the fix wasn't good enough so we removed it."
   (:require
-   [metabase.models.setting :as setting :refer [defsetting]]
+   [metabase.settings.core :as setting :refer [defsetting]]
    [metabase.util :as u]
    [metabase.util.humanization :as u.humanization]
    [metabase.util.i18n :refer [deferred-tru tru]]
@@ -51,7 +51,7 @@
                           {:display_name new-strategy-display-name}))))
         (t2/reducible-select [model :id :name :display_name])))
 
-(mu/defn ^:private re-humanize-table-and-field-names!
+(mu/defn- re-humanize-table-and-field-names!
   "Update the non-custom display names of all Tables & Fields in the database using new values obtained from
   the (obstensibly swapped implementation of) `name->human-readable-name`."
   [old-strategy :- :keyword]
@@ -63,8 +63,8 @@
     ;; check to make sure `new-strategy` is a valid strategy, or throw an Exception it is it not.
     (when-not (get-method u.humanization/name->human-readable-name new-strategy)
       (throw (IllegalArgumentException.
-               (tru "Invalid humanization strategy ''{0}''. Valid strategies are: {1}"
-                    new-strategy (keys (methods u.humanization/name->human-readable-name))))))
+              (tru "Invalid humanization strategy ''{0}''. Valid strategies are: {1}"
+                   new-strategy (keys (methods u.humanization/name->human-readable-name))))))
     (let [old-strategy (setting/get-value-of-type :keyword :humanization-strategy)]
       ;; ok, now set the new value
       (setting/set-value-of-type! :keyword :humanization-strategy new-value)
@@ -75,10 +75,14 @@
                  (name old-strategy) (name new-strategy))
       (re-humanize-table-and-field-names! old-strategy))))
 
+;;; these kondo warnings are ignored for now because I'm planning on moving this namespace out of `util` to eliminate
+;;; the dependency of `util` of `settings` -- will fix them after this namespace gets moved. -- Cam
+
+#_{:clj-kondo/ignore [:metabase/defsetting-namespace]}
 (defsetting ^{:added "0.28.0"} humanization-strategy
   (deferred-tru
-    (str "To make table and field names more human-friendly, Metabase will replace dashes and underscores in them "
-         "with spaces. We’ll capitalize each word while at it, so ‘last_visited_at’ will become ‘Last Visited At’."))
+   (str "To make table and field names more human-friendly, Metabase will replace dashes and underscores in them "
+        "with spaces. We’ll capitalize each word while at it, so ‘last_visited_at’ will become ‘Last Visited At’."))
   :type       :keyword
   :default    :simple
   :visibility :settings-manager

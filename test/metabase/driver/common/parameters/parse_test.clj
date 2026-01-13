@@ -1,10 +1,12 @@
 (ns metabase.driver.common.parameters.parse-test
   (:require
    [clojure.test :refer :all]
-   [metabase.driver.common.parameters.parse :as params.parse]))
+   ^{:clj-kondo/ignore [:deprecated-namespace]} [metabase.driver.common.parameters :as params]
+   ^{:clj-kondo/ignore [:deprecated-namespace]} [metabase.driver.common.parameters.parse :as params.parse]
+   [metabase.lib.parse :as lib.parse]))
 
-(def ^:private ^{:arglists '([field-name])} param    (var-get #'params.parse/param))
-(def ^:private ^{:arglists '([& args])}     optional (var-get #'params.parse/optional))
+(defn- param [field-name] (params/->Param field-name))
+(defn- optional [& args] (params/->Optional args))
 
 (defn- normalize-tokens
   [tokens]
@@ -33,7 +35,7 @@
 
            "/*SELECT {{foo}}*/" [:block-comment-begin "SELECT " :param-begin "foo" :param-end :block-comment-end]}]
     (is (= expected
-           (normalize-tokens (#'params.parse/tokenize query true)))
+           (normalize-tokens (#'lib.parse/tokenize query true)))
         (format "%s should get tokenized to %s" (pr-str query) (pr-str expected)))))
 
 (deftest ^:parallel tokenize-no-sql-comments-test
@@ -44,7 +46,7 @@
            "/* [[AND num_toucans > {{num_toucans}} --]] */"
            ["/* " :optional-begin "AND num_toucans > " :param-begin "num_toucans" :param-end " --" :optional-end " */"]}]
     (is (= expected
-           (normalize-tokens (#'params.parse/tokenize query false)))
+           (normalize-tokens (#'lib.parse/tokenize query false)))
         (format "%s should get tokenized to %s" (pr-str query) (pr-str expected)))))
 
 (deftest ^:parallel parse-test
@@ -132,3 +134,21 @@
                             ["{{{foo}}: \"/* {{bar}} */\"}"
                              ["{" (param "foo") ": \"/* " (param "bar") " */\"}"]]]]
       (is (= result (normalize-tokens (params.parse/parse query false)))))))
+
+(deftest ^:parallel tokens-in-strings-test
+  (testing "skip malformed parameter tokens in strings"
+    (is (= ["'{{'"] (params.parse/parse "'{{'")))
+    (is (= ["'{{"] (params.parse/parse "'{{")))
+    (is (= ["'{{}}'"] (params.parse/parse "'{{}}'")))
+    (is (= ["'[['"] (params.parse/parse "'[['")))
+    (is (= ["'[[]]'"] (params.parse/parse "'[[]]'")))
+    (is (= ["'[[{{]]'"] (params.parse/parse "'[[{{]]'"))))
+  (testing "Parse well-formed tokens in strings"
+    (is (= ["'" (param "x") "'"] (params.parse/parse "'{{x}}'")))
+    (is (= ["'" (param "snippet: 'test'") "'"] (params.parse/parse "'{{snippet: 'test'}}'")))
+    (is (= ["'{{" (param "x") "'"] (params.parse/parse "'{{{{x}}'")))
+    (is (= ["'[[" (param "x") "'"] (params.parse/parse "'[[{{x}}'")))
+    (is (= ["'" (optional (param "x")) "'"] (params.parse/parse "'[[{{x}}]]'"))))
+  (testing "skip comment start in strings"
+    (is (= ["concat('--'," (param "x") ")"] (params.parse/parse "concat('--',{{x}})")))
+    (is (= ["concat('/*'," (param "x") ")"] (params.parse/parse "concat('/*',{{x}})")))))

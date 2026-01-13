@@ -1,7 +1,9 @@
 (ns metabase.lib.column-group
+  (:refer-clojure :exclude [select-keys])
   (:require
    [medley.core :as m]
    [metabase.lib.card :as lib.card]
+   [metabase.lib.field.util :as lib.field.util]
    [metabase.lib.join :as lib.join]
    [metabase.lib.join.util :as lib.join.util]
    [metabase.lib.metadata :as lib.metadata]
@@ -10,7 +12,9 @@
    [metabase.lib.schema.id :as lib.schema.id]
    [metabase.lib.schema.metadata :as lib.schema.metadata]
    [metabase.lib.util :as lib.util]
-   [metabase.util.malli :as mu]))
+   [metabase.util.i18n :as i18n]
+   [metabase.util.malli :as mu]
+   [metabase.util.performance :refer [select-keys]]))
 
 (def ^:private GroupType
   [:enum
@@ -72,13 +76,14 @@
         (lib.metadata.calculation/display-info query stage-number table))
       (when-let [card (some->> (:source-card stage) (lib.metadata/card query))]
         (lib.metadata.calculation/display-info query stage-number card))
-      ;; for multi-stage queries return an empty string (#30108)
+      ;; multi-stage queries (#30108)
       (when (next (:stages query))
-        {:display-name ""})
+        {:display-name (i18n/tru "Summaries")})
       ;; if this is a native query or something else that doesn't have a source Table or source Card then use the
       ;; stage display name.
       {:display-name (lib.metadata.calculation/display-name query stage-number stage)}))
-   {:is-from-join           false
+   {:is-main-group          true
+    :is-from-join           false
     :is-implicitly-joinable false}))
 
 (defmethod display-info-for-group-method :group-type/join.explicit
@@ -86,7 +91,7 @@
   (merge
    (or
     (when join-alias
-      (when-let [join (lib.join/resolve-join query stage-number join-alias)]
+      (when-let [join (lib.join/maybe-resolve-join query stage-number join-alias)]
         (lib.metadata.calculation/display-info query stage-number join)))
     (when table-id
       (when-let [table (lib.metadata/table query table-id)]
@@ -95,18 +100,20 @@
       (if-let [card (lib.metadata/card query card-id)]
         (lib.metadata.calculation/display-info query stage-number card)
         {:display-name (lib.card/fallback-display-name card-id)})))
-   {:is-from-join           true
+   {:is-main-group          false
+    :is-from-join           true
     :is-implicitly-joinable false}))
 
 (defmethod display-info-for-group-method :group-type/join.implicit
-  [query stage-number {:keys [fk-field-id], :as _column-group}]
+  [query stage-number {:keys [fk-field-id fk-field-name fk-join-alias], :as _column-group}]
   (merge
    (when-let [;; TODO: This is clumsy and expensive; there is likely a neater way to find the full FK column.
               ;; Note that using `lib.metadata/field` is out - we need to respect metadata overrides etc. in models, and
               ;; `lib.metadata/field` uses the field's original status.
-              fk-column (->> (lib.util/query-stage query stage-number)
-                             (lib.metadata.calculation/visible-columns query stage-number)
+              fk-column (->> (lib.metadata.calculation/visible-columns query stage-number)
                              (m/find-first #(and (= (:id %) fk-field-id)
+                                                 (= (lib.field.util/inherited-column-name %) fk-field-name)
+                                                 (= (lib.join.util/current-join-alias %) fk-join-alias)
                                                  (:fk-target-field-id %))))]
      (let [fk-info (lib.metadata.calculation/display-info query stage-number fk-column)]
        ;; Implicitly joined column pickers don't use the target table's name, they use the FK field's name with
@@ -115,7 +122,8 @@
        ;; meaning (eg. ORDERS.customer_id vs. ORDERS.supplier_id both linking to a PEOPLE table).
        ;; See #30109 for more details.
        (update fk-info :display-name lib.util/strip-id)))
-   {:is-from-join           false
+   {:is-main-group          false
+    :is-from-join           false
     :is-implicitly-joinable true}))
 
 (defmethod lib.metadata.calculation/display-info-method :metadata/column-group
@@ -130,10 +138,11 @@
   [column-metadata]
   {::group-type :group-type/join.implicit,
    :fk-field-id (:fk-field-id column-metadata)
+   :fk-field-name (:fk-field-name column-metadata)
    :fk-join-alias (:fk-join-alias column-metadata)})
 
 (defmethod column-group-info-method :source/joins
-  [{:keys [table-id], :lib/keys [card-id], :as column-metadata}]
+  [{:keys [table-id], card-id :lib/card-id, :as col}]
   (merge
    {::group-type :group-type/join.explicit}
    ;; if we're in the process of BUILDING a join and using this in combination
@@ -141,7 +150,7 @@
    ;; joinable -- either the Card we're joining, or the Table we're joining. Prefer `:lib/card-id` because when we
    ;; join a Card the Fields might have `:table-id` but we want the entire Card to appear as one group. See #32493
    (or
-    (when-let [join-alias (lib.join.util/current-join-alias column-metadata)]
+    (when-let [join-alias (lib.join.util/current-join-alias col)]
       {:join-alias join-alias})
     (when card-id
       {:card-id card-id})
@@ -152,7 +161,7 @@
   [_column-metadata]
   {::group-type :group-type/main})
 
-(mu/defn ^:private column-group-info :- [:map [::group-type GroupType]]
+(mu/defn- column-group-info :- [:map [::group-type GroupType]]
   "The value we should use to `group-by` inside [[group-columns]]."
   [column-metadata :- ::lib.schema.metadata/column]
   (column-group-info-method column-metadata))

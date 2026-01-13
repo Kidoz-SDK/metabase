@@ -37,23 +37,22 @@
    Metric definitions.
 
    Note that the binding process is 1:N, where a single dimension may match to multiple fields.
-   A field can only bind to one dimension.
-   "
+   A field can only bind to one dimension."
   (:require
    [clojure.math.combinatorics :as math.combo]
    [clojure.string :as str]
-   [clojure.walk :as walk]
    [java-time.api :as t]
    [medley.core :as m]
-   [metabase.legacy-mbql.normalize :as mbql.normalize]
-   [metabase.legacy-mbql.util :as mbql.u]
-   [metabase.models.field :as field :refer [Field]]
+   [metabase.lib-be.core :as lib-be]
+   [metabase.lib.core :as lib]
+   [metabase.lib.schema.metadata :as lib.schema.metadata]
+   [metabase.lib.schema.ref :as lib.schema.ref]
    [metabase.models.interface :as mi]
-   [metabase.models.legacy-metric :refer [LegacyMetric]]
-   [metabase.models.table :refer [Table]]
    [metabase.util :as u]
    [metabase.util.date-2 :as u.date]
    [metabase.util.malli :as mu]
+   [metabase.util.malli.schema :as ms]
+   [metabase.warehouse-schema.models.field :as field]
    [metabase.xrays.automagic-dashboards.dashboard-templates :as dashboard-templates]
    [metabase.xrays.automagic-dashboards.schema :as ads]
    [metabase.xrays.automagic-dashboards.util :as magic.util]
@@ -62,110 +61,85 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Code for creation of instantiated affinities
 
-(defn find-field-ids
-  "A utility function for pulling field definitions from mbql queries and return their IDs.
-   Does something like this already exist in our utils? I was unable to find anything like it."
-  [m]
-  (let [fields (atom #{})]
-    (walk/prewalk
-      (fn [v]
-        (when (vector? v)
-          (let [[f id] v]
-            (when (and id (= :field f))
-              (swap! fields conj id))))
-        v)
-      m)
-    @fields))
+(defmulti ->reference
+  "Get a reference for a given model to be injected into a template (either MBQL, native query, or string)."
+  {:arglists '([template-type model])}
+  (fn [template-type model]
+    [template-type (mi/model model)]))
 
-(defn semantic-groups
-  "From a :model/LegacyMetric, construct a mapping of semantic types of linked fields to
-   sets of fields that can satisfy that type. A linked field is one that is in the
-   source table for the metric contribute to the metric itself, is not a PK, and
-   has a semantic_type (we assume nil semantic_type fields are boring)."
-  [{:keys [table_id definition]}]
-  (let [field-ids            (find-field-ids definition)
-        potential-dimensions (t2/select :model/Field
-                               :id [:not-in field-ids]
-                               :table_id table_id
-                               :semantic_type [:not-in [:type/PK]])]
-    (update-vals
-      (->> potential-dimensions
-           (group-by :semantic_type))
-      set)))
-
-(defmulti
-  ^{:doc      "Get a reference for a given model to be injected into a template
-          (either MBQL, native query, or string)."
-    :arglists '([template-type model])}
-  ->reference (fn [template-type model]
-                [template-type (mi/model model)]))
-
-(defn- optimal-datetime-resolution
+(defn- optimal-temporal-resolution
   [field]
   (let [[earliest latest] (some->> field
                                    :fingerprint
                                    :type
                                    :type/DateTime
                                    ((juxt :earliest :latest))
-                                   (map u.date/parse))]
+                                   (map u.date/parse))
+        can-use?  #(lib.schema.ref/valid-temporal-unit-for-base-type? (:base_type field) %)]
     (if (and earliest latest)
-      ;; e.g. if 3 hours > [duration between earliest and latest] then use `:minute` resolution
-      (condp u.date/greater-than-period-duration? (u.date/period-duration earliest latest)
-        (t/hours 3) :minute
-        (t/days 7) :hour
-        (t/months 6) :day
-        (t/years 10) :month
-        :year)
-      :day)))
+      (let [duration   (u.date/period-duration earliest latest)
+            less-than? #(u.date/greater-than-period-duration? % duration)]
+        (cond
+         ;; e.g. if [duration between earliest and latest] < 3 hours then use `:minute` resolution
+          (and (less-than? (t/hours 3))  (can-use? :minute)) :minute
+          (and (less-than? (t/days 7))   (can-use? :hour))   :hour
+          (and (less-than? (t/months 6)) (can-use? :day))    :day
+          (and (less-than? (t/years 10)) (can-use? :month))  :month
+          (can-use? :year) :year
+          (can-use? :hour) :hour))
+      (if (can-use? :day) :day :hour))))
 
-(defmethod ->reference [:mbql Field]
-  [_ {:keys [fk_target_field_id id link aggregation name base_type] :as field}]
-  (let [reference (mbql.normalize/normalize
-                    (cond
-                      link [:field id {:source-field link}]
-                      fk_target_field_id [:field fk_target_field_id {:source-field id}]
-                      id [:field id nil]
-                      :else [:field name {:base-type base_type}]))]
-    (cond
-      (isa? base_type :type/Temporal)
-      (mbql.u/with-temporal-unit reference (keyword (or aggregation
-                                                        (optimal-datetime-resolution field))))
+(mu/defn field->metadata :- ::lib.schema.metadata/column
+  "Convert a Field from the app DB to Lib column metadata, and do a bunch of weird additional transformations that
+  I (Cam) do not really understand (see below).
+
+ TODO (Cam 10/21/25) -- we wouldn't need to do this at all if we further reworked the X-Ray code to either fetch
+ `:metadata/column`s directly or use Metadata Providers."
+  [{fk-target-field-id :fk_target_field_id, base-type :base_type, :keys [id link aggregation], :as field} :- (ms/InstanceOf :model/Field)]
+  (let [col (if fk-target-field-id
+              (-> (t2/select-one :metadata/column :id fk-target-field-id)
+                  (assoc :fk-field-id id, :lib/source :source/implicitly-joinable))
+              (lib-be/instance->metadata field :metadata/column))]
+    (cond-> col
+      link
+      (assoc :fk-field-id link, :lib/source :source/implicitly-joinable)
+
+      (isa? base-type :type/Temporal)
+      (lib/with-temporal-bucket (keyword (or aggregation
+                                             (optimal-temporal-resolution field))))
 
       (and aggregation
-           (isa? base_type :type/Number))
-      (mbql.u/update-field-options reference assoc-in [:binning :strategy] (keyword aggregation))
+           (isa? base-type :type/Number))
+      (lib/with-binning {:strategy (keyword aggregation)}))))
 
-      :else
-      reference)))
-
-(defmethod ->reference [:string Field]
+(defmethod ->reference [:string :model/Field]
   [_ {:keys [display_name full-name link]}]
   (cond
     full-name full-name
     link (format "%s → %s"
-                 (-> (t2/select-one Field :id link) :display_name (str/replace #"(?i)\sid$" ""))
+                 (-> (t2/select-one :model/Field :id link) :display_name (str/replace #"(?i)\sid$" ""))
                  display_name)
     :else display_name))
 
-(defmethod ->reference [:string Table]
+(defmethod ->reference [:string :model/Table]
   [_ {:keys [display_name full-name]}]
   (or full-name display_name))
 
-(defmethod ->reference [:string LegacyMetric]
+(defmethod ->reference [:string :xrays/Metric]
   [_ {:keys [name full-name]}]
   (or full-name name))
 
-(defmethod ->reference [:mbql LegacyMetric]
-  [_ {:keys [id definition]}]
+(defmethod ->reference [:mbql :xrays/Metric]
+  [_ {:keys [id], :as metric}]
   (if id
     [:metric id]
-    (-> definition :aggregation first)))
+    (:xrays/aggregation metric)))
 
-(defmethod ->reference [:native Field]
+(defmethod ->reference [:native :model/Field]
   [_ field]
   (field/qualified-name field))
 
-(defmethod ->reference [:native Table]
+(defmethod ->reference [:native :model/Table]
   [_ {:keys [name]}]
   name)
 
@@ -175,44 +149,43 @@
         (map? form) ((some-fn :full-name :name) form))
       form))
 
-(defn transform-metric-aggregate
+(mu/defn transform-metric-aggregate :- ::ads/external-op
   "Map a metric aggregate definition from nominal types to semantic types."
-  [m decoder]
-  (walk/prewalk
-    (fn [v]
-      (if (vector? v)
-        (let [[d n] v]
-          (if (= "dimension" d)
-            (decoder n)
-            v))
-        v))
-    m))
+  [[ag-type & args] dimension-name->field]
+  {:lib/type :lib/external-op
+   :operator (keyword ag-type)
+   :args     (mapv (fn [arg]
+                     (if (and (vector? arg)
+                              (= (first arg) "dimension"))
+                       (when-let [field (dimension-name->field (second arg))]
+                         (field->metadata field))
+                       arg))
+                   args)})
 
-(mu/defn ground-metric :- [:sequential ads/grounded-metric]
+(mu/defn ground-metric :- [:sequential ::ads/grounded-metric]
   "Generate \"grounded\" metrics from the mapped dimensions (dimension name -> field matches).
    Since there may be multiple matches to a dimension, this will produce a sequence of potential matches."
   [{metric-name       :metric-name
     metric-score      :score
-    metric-definition :metric} :- ads/normalized-metric-template
-   ground-dimensions :- ads/dim-name->matching-fields]
+    metric-definition :metric} :- ::ads/normalized-metric-template
+   ground-dimensions :- ::ads/dim-name->matching-fields]
   (let [named-dimensions (dashboard-templates/collect-dimensions metric-definition)]
     (->> (map (comp :matches ground-dimensions) named-dimensions)
          (apply math.combo/cartesian-product)
          (map (partial zipmap named-dimensions))
          (map (fn [nm->field]
-                (let [xform (update-vals nm->field (partial ->reference :mbql))]
-                  {:metric-name           metric-name
-                   :metric-title          metric-name
-                   :metric-score          metric-score
-                   :metric-definition     {:aggregation
-                                           [(transform-metric-aggregate metric-definition xform)]}
-                   ;; Required for title interpolation in grounded-metrics->dashcards
-                   :dimension-name->field nm->field}))))))
+                {:metric-name           metric-name
+                 :metric-title          metric-name
+                 :metric-score          metric-score
+                 :metric-definition     {:xrays/aggregations
+                                         [(transform-metric-aggregate metric-definition nm->field)]}
+                 ;; Required for title interpolation in grounded-metrics->dashcards
+                 :dimension-name->field nm->field})))))
 
-(mu/defn grounded-metrics :- [:sequential ads/grounded-metric]
+(mu/defn grounded-metrics :- [:sequential ::ads/grounded-metric]
   "Given a set of metric definitions and grounded (assigned) dimensions, produce a sequence of grounded metrics."
-  [metric-templates :- [:sequential ads/normalized-metric-template]
-   ground-dimensions :- ads/dim-name->matching-fields]
+  [metric-templates :- [:sequential ::ads/normalized-metric-template]
+   ground-dimensions :- ::ads/dim-name->matching-fields]
   (mapcat #(ground-metric % ground-dimensions) metric-templates))
 
 (defn normalize-seq-of-maps
@@ -229,15 +202,12 @@
 (defn- fieldspec-matcher
   "Generate a predicate of the form (f field) -> truthy value based on a fieldspec."
   [fieldspec]
-  (if (and (string? fieldspec)
-           (dashboard-templates/ga-dimension? fieldspec))
-    (comp #{fieldspec} :name)
-    (fn [{:keys [semantic_type target] :as field}]
-      (cond
-        ;; This case is mostly relevant for native queries
-        (#{:type/PK :type/FK} fieldspec) (isa? semantic_type fieldspec)
-        target (recur target)
-        :else (and (not (magic.util/key-col? field)) (magic.util/field-isa? field fieldspec))))))
+  (fn [{:keys [semantic_type target] :as field}]
+    (cond
+      ;; This case is mostly relevant for native queries
+      (#{:type/PK :type/FK} fieldspec) (isa? semantic_type fieldspec)
+      target (recur target)
+      :else (and (not (magic.util/key-col? field)) (magic.util/field-isa? field fieldspec)))))
 
 (defn- name-regex-matcher
   "Generate a truthy predicate of the form (f field) -> truthy value based on a regex applied to the field name."
@@ -304,10 +274,11 @@
 (def ^:private ^{:arglists '([field])} id-or-name
   (some-fn :id :name))
 
-(defn- candidate-bindings
+(mu/defn- candidate-bindings
   "For every field in a given context determine all potential dimensions each field may map to.
   This will return a map of field id (or name) to collection of potential matching dimensions."
-  [context dimension-specs]
+  [context :- ::ads/context
+   dimension-specs]
   ;; TODO - Fix this so that the intermediate representations aren't so crazy.
   ;; all-bindings a map of binding dim identifier to binding def which contains
   ;; field matches which are all the same field except they are merged with the binding.
@@ -328,8 +299,7 @@
         ancestors for both table and field are counted);
      2) Number of fields in the definition, which would include additional filters
         (`named`, `max_cardinality`, `links_to`, ...) etc.;
-     3) The manually assigned score for the binding definition
-  "
+     3) The manually assigned score for the binding definition"
   [candidate-binding-values]
   (letfn [(score [a]
             (let [[_ definition] a]
@@ -365,13 +335,12 @@
                     :matches [\"CREATED_AT\"]}}
     {\"CreateTimestamp\" {:field_type [:type/CreationTimestamp],
                           :score 80
-                          :matches [\"CREATED_AT\"]}})
-   "
+                          :matches [\"CREATED_AT\"]}})"
   [candidate-binding-values]
   (let [scored-bindings (score-bindings candidate-binding-values)]
     (second (last (sort-by first scored-bindings)))))
 
-(mu/defn find-dimensions :- ads/dim-name->dim-defs+matches
+(mu/defn find-dimensions :- ::ads/dim-name->dim-defs+matches
   "Bind fields to dimensions from the dashboard template and resolve overloaded cases in which multiple fields match the
   dimension specification.
 
@@ -380,7 +349,7 @@
    (see `most-specific-definition` for details).
 
   The context is passed in, but it only needs tables and fields in `candidate-bindings`. It is not extensively used."
-  [context dimension-specs :- [:maybe [:sequential ads/dimension-template]]]
+  [context dimension-specs :- [:maybe [:sequential ::ads/dimension-template]]]
   (->> (candidate-bindings context dimension-specs)
        (map (comp most-specific-matched-dimension val))
        (apply merge-with (fn [a b]
@@ -392,13 +361,14 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TODO - Deduplicate from core
-(def ^:private ^{:arglists '([source])} source->db
-  (comp (partial t2/select-one :model/Database :id) (some-fn :db_id :database_id)))
+(mu/defn- source->db :- (ms/InstanceOf :model/Database)
+  [source :- (ms/InstanceOf #{:model/Table :model/Card})]
+  (t2/select-one :model/Database :id ((some-fn :db_id :database_id) source)))
 
 (defn- enriched-field-with-sources [{:keys [tables source]} field]
   (assoc field
-    :link (m/find-first (comp :link #{(:table_id field)} u/the-id) tables)
-    :db (source->db source)))
+         :link (m/find-first (comp :link #{(:table_id field)} u/the-id) tables)
+         :db (source->db source)))
 
 (defn- add-field-links-to-definitions [dimensions field]
   (->> dimensions
@@ -416,11 +386,11 @@
 
 (defn- add-field-self-reference [{{:keys [entity]} :root :as context} dimensions]
   (cond-> dimensions
-    (= Field (mi/model entity))
+    (= :model/Field (mi/model entity))
     (add-field-links-to-definitions (enriched-field-with-sources context entity))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn grounded-filters
+(mu/defn grounded-filters :- [:sequential ::ads/grounded-filter]
   "Take filter templates (as from a dashboard template's :filters) and ground dimensions and produce a map of the
   filter name to grounded versions of the filter."
   [filter-templates ground-dimensions]
@@ -429,40 +399,36 @@
                (let [[fname {:keys [filter] :as v}] (first fltr)
                      dims (dashboard-templates/collect-dimensions v)
                      opts (->> (map (comp
-                                      (partial map (partial ->reference :mbql))
-                                      :matches
-                                      ground-dimensions) dims)
+                                     :matches
+                                     ground-dimensions) dims)
                                (apply math.combo/cartesian-product)
                                (map (partial zipmap dims)))]
-                 (seq (for [opt opts
-                            :let [f
-                                  (walk/prewalk
-                                    (fn [x]
-                                      (if (vector? x)
-                                        (let [[ds dim-name] x]
-                                          (if (and (= "dimension" ds)
-                                                   (string? dim-name))
-                                            (opt dim-name)
-                                            x))
-                                        x))
-                                    filter)]]
+                 (seq (for [opt  opts
+                            :let [[op & args] filter
+                                  f
+                                  {:lib/type :lib/external-op
+                                   :operator (keyword op)
+                                   :args     (mapv (fn [arg]
+                                                     (if (and (vector? arg)
+                                                              (= (first arg) "dimension"))
+                                                       (when-let [field (opt (second arg))]
+                                                         (field->metadata field))
+                                                       arg))
+                                                   args)}]]
                         (assoc v :filter f :filter-name fname))))))
        flatten))
 
-(mu/defn identify
-  :- [:map
-      [:dimensions ads/dim-name->matching-fields]
-      [:metrics [:sequential ads/grounded-metric]]]
+(mu/defn identify :- ::ads/grounded-values
   "Identify interesting metrics and dimensions of a `thing`. First identifies interesting dimensions, and then
   interesting metrics which are satisfied.
   Metrics from the template are assigned a score of 50; user defined metrics a score of 95"
-  [{{:keys [linked-metrics]} :root :as context}
+  [context :- ::ads/context
    {:keys [dimension-specs
            metric-specs
            filter-specs]} :- [:map
-                               [:dimension-specs [:maybe [:sequential ads/dimension-template]]]
-                               [:metric-specs [:maybe [:sequential ads/metric-template]]]
-                               [:filter-specs [:maybe [:sequential ads/filter-template]]]]]
+                              [:dimension-specs [:maybe [:sequential ::ads/dimension-template]]]
+                              [:metric-specs    [:maybe [:sequential ::ads/metric-template]]]
+                              [:filter-specs    [:maybe [:sequential ::ads/filter-template]]]]]
   (let [dims      (->> (find-dimensions context dimension-specs)
                        (add-field-self-reference context))
         metrics   (-> (normalize-seq-of-maps :metric metric-specs)
@@ -470,38 +436,12 @@
         set-score (fn [score metrics]
                     (map #(assoc % :metric-score score) metrics))]
     {:dimensions dims
-     :metrics    (concat (set-score 50 metrics) (set-score 95 linked-metrics)
+     :metrics    (concat (set-score 50 metrics)
                          (let [entity (-> context :root :entity)]
                            ;; metric x-rays talk about "this" in the template
-                           (when (mi/instance-of? :model/LegacyMetric entity)
+                           (when (mi/instance-of? :xrays/Metric entity)
                              [{:metric-name       "this"
                                :metric-title      (:name entity)
-                               :metric-definition {:aggregation [(->reference :mbql entity)]}
+                               :metric-definition {:xrays/aggregations [(:xrays/aggregation entity)]}
                                :metric-score      dashboard-templates/max-score}])))
      :filters (grounded-filters filter-specs dims)}))
-
-(defn card->dashcard
-  "Convert a card to a dashboard card."
-  [{:keys [width height] :as card}]
-  {:id                     (gensym)
-   :size_x                 width
-   :size_y                 height
-   :dashboard_tab_id       nil
-   :card                   (dissoc card :width :height)
-   :visualization_settings {}})
-
-(defn make-layout
-  "Assign `:row` and `:col` values to the provied seq of dashcards."
-  [dashcards]
-  (loop [[{:keys [size_x size_y] :as dashcard} & dashcards] dashcards
-         [xmin ymin xmax ymax] [0 0 0 0]
-         final-cards []]
-    (if dashcard
-      (let [dashcard (assoc dashcard :row ymin :col xmax)
-            bounds   (if (> xmax 20)
-                       [xmin ymax 0 (+ ymax size_y)]
-                       [xmin ymin (+ xmax size_x) (max ymax (+ ymin size_y))])]
-        (recur dashcards
-               bounds
-               (conj final-cards dashcard)))
-      final-cards)))

@@ -1,8 +1,8 @@
 import {
-  handleActions,
   combineReducers,
   createAction,
   createThunkAction,
+  handleActions,
 } from "metabase/lib/redux";
 import { MetabaseApi, RevisionsApi } from "metabase/services";
 
@@ -11,7 +11,7 @@ export const UPDATE_PREVIEW_SUMMARY =
 
 export const updatePreviewSummary = createAction(
   UPDATE_PREVIEW_SUMMARY,
-  async query => {
+  async (query) => {
     const result = await MetabaseApi.dataset(query);
     return result.data.rows[0][0];
   },
@@ -21,11 +21,9 @@ export const updatePreviewSummary = createAction(
 
 export const FETCH_REVISIONS = "metabase/admin/datamodel/FETCH_REVISIONS";
 
-export const fetchRevisions = createThunkAction(
+export const fetchSegmentRevisions = createThunkAction(
   FETCH_REVISIONS,
-  ({ entity, id }) =>
-    async () =>
-      RevisionsApi.get({ entity, id }),
+  (id) => async () => RevisionsApi.get({ entity: "segment", id }),
 );
 
 // reducers

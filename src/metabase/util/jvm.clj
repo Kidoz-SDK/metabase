@@ -2,36 +2,24 @@
   "JVM-specific utilities and helpers.
   You don't want to import this namespace directly - these functions are re-exported by [[metabase.util]]."
   (:require
-   [clojure.java.classpath :as classpath]
    [clojure.string :as str]
-   [clojure.tools.namespace.find :as ns.find]
-   [metabase.shared.util.i18n :refer [tru]]
    [metabase.util.format :as u.format]
-   [metabase.util.log :as log]
-   [nano-id.core :as nano-id])
+   [metabase.util.log :as log])
   (:import
    (java.net InetAddress InetSocketAddress Socket)
-   (java.util Base64 Base64$Decoder Base64$Encoder Locale PriorityQueue Random)
-   (java.util.concurrent TimeoutException)))
+   (java.nio.charset StandardCharsets)
+   (java.util
+    Base64
+    Base64$Decoder
+    Base64$Encoder
+    Locale
+    PriorityQueue)
+   (java.util.concurrent Executors ExecutorService TimeoutException)))
 
 (set! *warn-on-reflection* true)
 
-(defn generate-nano-id
-  "Generates a random NanoID string. Usually these are used for the entity_id field of various models.
-  If an argument is provided, it's taken to be an identity-hash string and used to seed the RNG,
-  producing the same value every time."
-  ([] (nano-id/nano-id))
-  ([seed-str]
-   (let [seed (Long/parseLong seed-str 16)
-         rnd  (Random. seed)
-         gen  (nano-id/custom
-               "_-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-               21
-               (fn [len]
-                 (let [ba (byte-array len)]
-                   (.nextBytes rnd ba)
-                   ba)))]
-     (gen))))
+(defonce ^:private ^ExecutorService virtual-thread-executor
+  (Executors/newVirtualThreadPerTaskExecutor))
 
 (defmacro varargs
   "Make a properly-tagged Java interop varargs argument. This is basically the same as `into-array` but properly tags
@@ -39,7 +27,7 @@
 
     (u/varargs String)
     (u/varargs String [\"A\" \"B\"])"
-  {:style/indent 1, :arglists '([klass] [klass xs])}
+  {:style/indent [:defn], :arglists '([klass] [klass xs])}
   [klass & [objects]]
   (vary-meta `(into-array ~klass ~objects)
              assoc :tag (format "[L%s;" (.getTypeName ^Class (ns-resolve *ns* klass)))))
@@ -59,7 +47,7 @@
     (catch Throwable _ false)))
 
 (defn host-up?
-  "Returns true if the host given by hostname is reachable, false otherwise "
+  "Returns true if the host given by hostname is reachable, false otherwise"
   [^String hostname]
   (try
     (let [host-addr (InetAddress/getByName hostname)]
@@ -117,8 +105,7 @@
   (=
     (take-last 2 (sort-by identity kompare coll))
     (transduce (map identity) (u/sorted-take 2 kompare) coll))
-  But the entire collection is not in memory, just at most
-  "
+  But the entire collection is not in memory, just at most"
   [size kompare]
   (fn bounded-heap-acc
     ([] (PriorityQueue. size kompare))
@@ -162,6 +149,17 @@
    nil
    (full-exception-chain e)))
 
+(defn all-ex-messages
+  "Returns a list of all non-nil messages in an exception, starting from the outermost and working inward.
+  If no messages are found, returns nil."
+  [^Throwable e]
+  (loop [ex e
+         messages []]
+    (if ex
+      (recur (.getCause ex)
+             (conj messages (.getMessage ex)))
+      (seq (remove nil? messages)))))
+
 (defn do-with-auto-retries
   "Execute `f`, a function that takes no arguments, and return the results.
    If `f` fails with an exception, retry `f` up to `num-retries` times until it succeeds.
@@ -170,7 +168,6 @@
 
    For implementing more fine grained retry policies like exponential backoff,
    consider using the `metabase.util.retry` namespace."
-  {:style/indent 1}
   [num-retries f]
   (if (<= num-retries 0)
     (f)
@@ -193,32 +190,47 @@
   consider using the `metabase.util.retry` namespace."
   {:style/indent 1}
   [num-retries & body]
-  `(do-with-auto-retries ~num-retries
-     (fn [] ~@body)))
+  `(do-with-auto-retries
+    ~num-retries
+    (fn [] ~@body)))
 
 (def ^:private ^Base64$Decoder base64-decoder
   "A shared Base64 decoder instance."
   (Base64/getDecoder))
+
+(defn bytes-to-string
+  "Converts UTF-8 bytes into a string."
+  ^String [^bytes bs]
+  (String. bs StandardCharsets/UTF_8))
 
 (defn decode-base64-to-bytes
   "Decodes a Base64 string into bytes."
   ^bytes [^String string]
   (.decode base64-decoder string))
 
-;;; TODO -- this is only used [[metabase.analytics.snowplow-test]] these days
 (defn decode-base64
   "Decodes the Base64 string `input` to a UTF-8 string."
   [input]
-  (new java.lang.String (decode-base64-to-bytes input) "UTF-8"))
+  (bytes-to-string (decode-base64-to-bytes input)))
 
 (def ^:private ^Base64$Encoder base64-encoder
   "A shared Base64 encoder instance."
   (Base64/getEncoder))
 
+(defn string-to-bytes
+  "Converts a string into UTF-8 bytes"
+  ^bytes [^String input]
+  (.getBytes input StandardCharsets/UTF_8))
+
 (defn encode-base64
   "Encodes the UTF-8 encoding of the string `input` to a Base64 string."
   ^String [^String input]
-  (.encodeToString base64-encoder (.getBytes input "UTF-8")))
+  (.encodeToString base64-encoder (string-to-bytes input)))
+
+(defn encode-base64-bytes
+  "Encodes the bytes `input` to a Base64 string."
+  ^String [^bytes input]
+  (.encodeToString base64-encoder input))
 
 (def ^:private do-with-us-locale-lock (Object.))
 
@@ -265,17 +277,6 @@
   [& body]
   `(do-with-us-locale (fn [] ~@body)))
 
-;; This is made `^:const` so it will get calculated when the uberjar is compiled. `find-namespaces` won't work if
-;; source is excluded; either way this takes a few seconds, so doing it at compile time speeds up launch as well.
-(defonce ^:const ^{:doc "Vector of symbols of all Metabase namespaces, excluding test namespaces. This is intended
-  for use by various routines that load related namespaces, such as task and events
-  initialization."}
-  metabase-namespace-symbols
-  (vec (sort (for [ns-symb (ns.find/find-namespaces (classpath/system-classpath))
-                   :when   (and (str/starts-with? ns-symb "metabase")
-                                (not (str/includes? ns-symb "test")))]
-               ns-symb))))
-
 (defn deref-with-timeout
   "Call `deref` on a something derefable (e.g. a future or promise), and throw an exception if it takes more than
   `timeout-ms`. If `ref` is a future it will attempt to cancel it as well."
@@ -284,7 +285,7 @@
     (when (= result ::timeout)
       (when (future? reff)
         (future-cancel reff))
-      (throw (TimeoutException. (tru "Timed out after {0}" (u.format/format-milliseconds timeout-ms)))))
+      (throw (TimeoutException. (format "Timed out after %s" (u.format/format-milliseconds timeout-ms)))))
     result))
 
 (defn do-with-timeout
@@ -302,7 +303,12 @@
 
 (defn poll
   "Returns `(thunk)` if the result satisfies the `done?` predicate within the timeout and nil otherwise.
-  The default timeout is 1000ms and the default interval is 100ms."
+  The default timeout is 1000ms and the default interval is 100ms.
+
+    (u/poll {:thunk       (fn [] (upload!))
+             :done?       (fn [response] (get-in response [:status :done]))
+             :timeout-ms  1000
+             :interval-ms 100})"
   [{:keys [thunk done? timeout-ms interval-ms]
     :or   {timeout-ms 1000 interval-ms 100}}]
   (let [start-time (System/currentTimeMillis)]
@@ -315,5 +321,40 @@
             (if (>= elapsed-time timeout-ms)
               nil ; timeout reached
               (do
-                (Thread/sleep interval-ms)
+                (Thread/sleep (long interval-ms))
                 (recur)))))))))
+
+;; Following function is not compatible with Safari 16.3 and older because it uses lookbehind regex.
+(defn parse-currency
+  "Parse a currency String to a BigDecimal. Handles a variety of different formats, such as:
+
+    $1,000.00
+    -£127.54
+    -127,54 €
+    kr-127,54
+    € 127,54-
+    ¥200"
+  ^java.math.BigDecimal [^String s]
+  (when-not (str/blank? s)
+    (bigdec
+     (reduce
+      (partial apply str/replace)
+      s
+      [;; strip out any current symbols
+       [#"[^\d,.-]+"          ""]
+       ;; now strip out any thousands separators
+       [#"(?<=\d)[,.](\d{3})" "$1"]
+       ;; now replace a comma decimal seperator with a period
+       [#","                  "."]
+       ;; move minus sign at end to front
+       [#"(^[^-]+)-$"         "-$1"]]))))
+
+(defn run-in-virtual-thread
+  "Run `thunk` in a virtual thread. Returns the j.u.concurrent.Future immediately. The Future will contain the return value."
+  [thunk]
+  (.submit virtual-thread-executor ^Runnable thunk))
+
+(defmacro in-virtual-thread*
+  "Run body once in a virtual thread. Uses ^:once metadata and `bound-fn*` to define the function."
+  [& body]
+  `(run-in-virtual-thread (bound-fn* (^:once fn [] ~@body))))

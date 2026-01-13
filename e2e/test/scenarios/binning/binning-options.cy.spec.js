@@ -1,13 +1,6 @@
+const { H } = cy;
 import { SAMPLE_DB_ID } from "e2e/support/cypress_data";
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
-import {
-  restore,
-  popover,
-  openTable,
-  visitQuestionAdhoc,
-  getBinningButtonForDimension,
-  summarize,
-} from "e2e/support/helpers";
 
 const { ORDERS_ID, ORDERS, PEOPLE_ID, PEOPLE, PRODUCTS_ID, PRODUCTS } =
   SAMPLE_DATABASE;
@@ -87,6 +80,9 @@ const LONGITUDE_BUCKETS = [
   "Bin every 1 degree",
   "Bin every 10 degrees",
   "Bin every 20 degrees",
+  "Bin every 0.05 degrees",
+  "Bin every 0.01 degrees",
+  "Bin every 0.005 degrees",
   "Don't bin",
 ];
 
@@ -102,7 +98,7 @@ const LONGITUDE_BUCKETS = [
 describe("scenarios > binning > binning options", () => {
   beforeEach(() => {
     cy.intercept("POST", "/api/dataset").as("dataset");
-    restore();
+    H.restore();
     cy.signInAsAdmin();
   });
 
@@ -132,7 +128,11 @@ describe("scenarios > binning > binning options", () => {
       getTitle("Count by Longitude: Auto binned");
 
       openBinningListForDimension("Longitude", "Auto binned");
-      getAllOptions({ options: LONGITUDE_BUCKETS, isSelected: "Auto bin" });
+      getAllOptions({
+        options: LONGITUDE_BUCKETS,
+        isSelected: "Auto bin",
+        shouldExpandList: true,
+      });
     });
   });
 
@@ -186,29 +186,30 @@ describe("scenarios > binning > binning options", () => {
       cy.findByText("Longitude: Auto binned").click();
       openBinningListForDimension("Longitude", "Auto binned");
 
-      getAllOptions({ options: LONGITUDE_BUCKETS, isSelected: "Auto bin" });
+      getAllOptions({
+        options: LONGITUDE_BUCKETS,
+        isSelected: "Auto bin",
+        shouldExpandList: true,
+      });
     });
   });
 
   context("via time series footer (metabase#11183)", () => {
-    // TODO: enable again when metabase#35546 is completed
-    it.skip("should render time series binning options correctly", () => {
-      openTable({ table: ORDERS_ID });
-
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Created At").click();
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Distribution").click();
-
+    it("should render time series binning options correctly", () => {
+      H.openTable({ table: ORDERS_ID });
+      H.tableHeaderClick("Created At");
+      H.popover().findByText("Distribution").click();
       getTitle("Count by Created At: Month");
-
-      // Check all binning options from the footer
-      cy.findAllByTestId("select-button-content").contains("Month").click();
-      getAllOptions({ options: TIME_BUCKETS, isSelected: "Month" });
+      cy.findByTestId("timeseries-bucket-button").click();
+      H.popover().within(() => {
+        cy.findByText("Month")
+          .parent()
+          .should("have.attr", "aria-selected", "true");
+      });
     });
   });
 
-  context.skip("implicit joins (metabase#16674)", () => {
+  context("implicit joins (metabase#16674)", { tags: "@skip" }, () => {
     it("should work for time series", () => {
       chooseInitialBinningOption({
         table: ORDERS_ID,
@@ -240,7 +241,7 @@ describe("scenarios > binning > binning options", () => {
     });
   });
 
-  context.skip("explicit joins (metabase#16675)", () => {
+  context("explicit joins (metabase#16675)", { tags: "@skip" }, () => {
     beforeEach(() => {
       cy.intercept("POST", "/api/dataset").as("dataset");
     });
@@ -278,8 +279,8 @@ describe("scenarios > binning > binning options", () => {
 });
 
 function chooseInitialBinningOption({ table, column, mode = null } = {}) {
-  openTable({ table, mode });
-  summarize({ mode });
+  H.openTable({ table, mode });
+  H.summarize({ mode });
 
   if (mode === "notebook") {
     cy.findByText("Count of rows").click();
@@ -294,9 +295,9 @@ function chooseInitialBinningOptionForExplicitJoin({
   baseTableQuery,
   column,
 } = {}) {
-  visitQuestionAdhoc({ dataset_query: baseTableQuery });
+  H.visitQuestionAdhoc({ dataset_query: baseTableQuery });
 
-  summarize();
+  H.summarize();
 
   cy.findByTestId("sidebar-right").within(() => {
     cy.findByText("Count"); // Test fails without this because of some weird race condition
@@ -305,7 +306,7 @@ function chooseInitialBinningOptionForExplicitJoin({
 }
 
 function openBinningListForDimension(column, binning) {
-  getBinningButtonForDimension({ name: column, isSelected: true })
+  H.getBinningButtonForDimension({ name: column, isSelected: true })
     .should("contain", binning)
     .click();
 }
@@ -315,20 +316,21 @@ function getTitle(title) {
 }
 
 function getAllOptions({ options, isSelected, shouldExpandList } = {}) {
-  const selectedOption = options.find(option => option === isSelected);
-  const regularOptions = options.filter(option => option !== isSelected);
+  const selectedOption = options.find((option) => option === isSelected);
+  const regularOptions = options.filter((option) => option !== isSelected);
 
   // Custom question has two popovers open.
   // The binning options are in the latest (last) one.
   // Using `.last()` works even when only one popover is open so it covers both scenarios.
-  popover()
+  // eslint-disable-next-line no-unsafe-element-filtering
+  H.popover()
     .last()
     .within(() => {
       if (shouldExpandList) {
         cy.findByText("More…").click();
       }
 
-      regularOptions.forEach(option => {
+      regularOptions.forEach((option) => {
         // Implicit assertion - will fail if string is rendered multiple times
         cy.findByText(option);
       });

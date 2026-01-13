@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { createMockMetadata } from "__support__/metadata";
 import { render, screen } from "__support__/ui";
-import ChartSettings from "metabase/visualizations/components/ChartSettings";
+import { QuestionChartSettings } from "metabase/visualizations/components/ChartSettings";
 import registerVisualizations from "metabase/visualizations/register";
 import Question from "metabase-lib/v1/Question";
 import { createMockColumn } from "metabase-types/api/mocks";
@@ -53,15 +53,15 @@ const setup = () => {
       ),
     );
 
-    const onChange = update => {
-      setQuestion(q => {
+    const onChange = (update) => {
+      setQuestion((q) => {
         const newQuestion = q.updateSettings(update);
         return new Question(thaw(newQuestion.card()), metadata);
       });
     };
 
     return (
-      <ChartSettings
+      <QuestionChartSettings
         onChange={onChange}
         series={[
           {
@@ -82,7 +82,6 @@ const setup = () => {
                 createMockColumn({
                   name: "pivot-grouping",
                   display_name: "pivot-grouping",
-                  expression_name: "pivot-grouping",
                   field_ref: ["expression", "pivot-grouping"],
                   source: "breakout",
                   base_type: "type/Integer",
@@ -93,7 +92,6 @@ const setup = () => {
           },
         ]}
         initial={{ section: "Data" }}
-        noPreview
         question={question}
       />
     );

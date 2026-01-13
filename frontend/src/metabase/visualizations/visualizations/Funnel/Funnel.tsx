@@ -1,20 +1,23 @@
 import cx from "classnames";
+import React from "react";
 import { t } from "ttag";
 import _ from "underscore";
 
 import CS from "metabase/css/core/index.css";
+import { formatNullable } from "metabase/lib/formatting/nullable";
 import ChartCaption from "metabase/visualizations/components/ChartCaption";
 import { TransformedVisualization } from "metabase/visualizations/components/TransformedVisualization";
 import { ChartSettingOrderedSimple } from "metabase/visualizations/components/settings/ChartSettingOrderedSimple";
 import { useBrowserRenderingContext } from "metabase/visualizations/hooks/use-browser-rendering-context";
+import { groupRawSeriesMetrics } from "metabase/visualizations/lib/dataset";
 import {
-  MinRowsError,
   ChartSettingsError,
+  MinRowsError,
 } from "metabase/visualizations/lib/errors";
 import { columnSettings } from "metabase/visualizations/lib/settings/column";
 import {
-  metricSetting,
   dimensionSetting,
+  metricSetting,
 } from "metabase/visualizations/lib/settings/utils";
 import {
   getDefaultSize,
@@ -30,12 +33,19 @@ import type { DatasetData, RawSeries, RowValue } from "metabase-types/api";
 
 import FunnelNormal from "../../components/FunnelNormal";
 
+import type { FunnelRow } from "./types";
+
+const getUniqueFunnelRows = (rows: FunnelRow[]) => {
+  return [...new Map(rows.map((row) => [row.key, row])).values()];
+};
+
 Object.assign(Funnel, {
-  uiName: t`Funnel`,
+  getUiName: () => t`Funnel`,
   identifier: "funnel",
   iconName: "funnel",
   noHeader: true,
   minSize: getMinSize("funnel"),
+  supportsVisualizer: true,
   defaultSize: getDefaultSize("funnel"),
   isSensible({ cols }: DatasetData) {
     return cols.length === 2;
@@ -65,43 +75,14 @@ Object.assign(Funnel, {
     }
   },
 
-  placeholderSeries: [
-    {
-      card: {
-        display: "funnel",
-        visualization_settings: {
-          "funnel.type": "funnel",
-          "funnel.dimension": "Total Sessions",
-          "funnel.metric": "Sessions",
-        },
-        dataset_query: { type: "null" },
-      },
-      data: {
-        rows: [
-          ["Homepage", 1000],
-          ["Product Page", 850],
-          ["Tiers Page", 700],
-          ["Trial Form", 200],
-          ["Trial Confirmation", 40],
-        ],
-        cols: [
-          {
-            name: "Total Sessions",
-            base_type: "type/Text",
-          },
-          {
-            name: "Sessions",
-            base_type: "type/Integer",
-          },
-        ],
-      },
-    },
-  ],
+  hasEmptyState: true,
 
   settings: {
     ...columnSettings({ hidden: true }),
     ...dimensionSetting("funnel.dimension", {
+      // eslint-disable-next-line ttag/no-module-declaration -- see metabase#5504
       section: t`Data`,
+      // eslint-disable-next-line ttag/no-module-declaration -- see metabase#5504
       title: t`Column with steps`,
       dashboard: false,
       useRawSeries: true,
@@ -114,6 +95,7 @@ Object.assign(Funnel, {
       readDependencies: ["funnel.rows"],
     },
     "funnel.rows": {
+      // eslint-disable-next-line ttag/no-module-declaration -- see metabase#5504
       section: t`Data`,
       widget: ChartSettingOrderedSimple,
       getValue: (
@@ -125,16 +107,16 @@ Object.assign(Funnel, {
         settings: ComputedVisualizationSettings,
       ) => {
         const dimensionIndex = cols.findIndex(
-          col => col.name === settings["funnel.dimension"],
+          (col) => col.name === settings["funnel.dimension"],
         );
         const orderDimension = settings["funnel.order_dimension"];
         const dimension = settings["funnel.dimension"];
 
         const rowsOrder = settings["funnel.rows"];
-        const rowsKeys = rows.map(row => row[dimensionIndex]);
+        const rowsKeys = rows.map((row) => formatNullable(row[dimensionIndex]));
 
         const getDefault = (keys: RowValue[]) =>
-          keys.map(key => ({
+          keys.map((key) => ({
             key,
             name: key,
             enabled: true,
@@ -142,21 +124,23 @@ Object.assign(Funnel, {
         if (
           !rowsOrder ||
           !_.isArray(rowsOrder) ||
-          !rowsOrder.every(setting => setting.key !== undefined) ||
+          !rowsOrder.every((setting) => setting.key !== undefined) ||
           orderDimension !== dimension
         ) {
-          return getDefault(rowsKeys);
+          return getUniqueFunnelRows(getDefault(rowsKeys));
         }
 
         const removeMissingOrder = (keys: RowValue[], order: any) =>
           order.filter((o: any) => keys.includes(o.key));
         const newKeys = (keys: RowValue[], order: any) =>
-          keys.filter(key => !order.find((o: any) => o.key === key));
+          keys.filter((key) => !order.find((o: any) => o.key === key));
 
-        return [
+        const funnelRows = [
           ...removeMissingOrder(rowsKeys, rowsOrder),
           ...getDefault(newKeys(rowsKeys, rowsOrder)),
         ];
+
+        return getUniqueFunnelRows(funnelRows);
       },
       props: {
         hasEditSettings: false,
@@ -168,19 +152,29 @@ Object.assign(Funnel, {
       dataTestId: "funnel-row-sort",
     },
     ...metricSetting("funnel.metric", {
+      // eslint-disable-next-line ttag/no-module-declaration -- see metabase#5504
       section: t`Data`,
+
+      // eslint-disable-next-line ttag/no-module-declaration -- see metabase#5504
       title: t`Measure`,
+
       dashboard: false,
       useRawSeries: true,
       showColumnSetting: true,
     }),
     "funnel.type": {
+      // eslint-disable-next-line ttag/no-module-declaration -- see metabase#5504
       title: t`Funnel type`,
+
+      // eslint-disable-next-line ttag/no-module-declaration -- see metabase#5504
       section: t`Display`,
+
       widget: "select",
       props: {
         options: [
+          // eslint-disable-next-line ttag/no-module-declaration -- see metabase#5504
           { name: t`Funnel`, value: "funnel" },
+          // eslint-disable-next-line ttag/no-module-declaration -- see metabase#5504
           { name: t`Bar chart`, value: "bar" },
         ],
       },
@@ -196,20 +190,30 @@ export function Funnel(props: VisualizationProps) {
     headerIcon,
     settings,
     showTitle,
+    isVisualizerViz,
     actionButtons,
     className,
     onChangeCardAndRun,
     rawSeries,
     fontFamily,
+    getHref,
+    isDashboard,
+    isEditing,
+    titleMenuItems,
   } = props;
   const hasTitle = showTitle && settings["card.title"];
 
-  const renderingContext = useBrowserRenderingContext(fontFamily);
+  const groupedRawSeries = groupRawSeriesMetrics(
+    rawSeries,
+    settings["funnel.dimension"],
+  );
+
+  const renderingContext = useBrowserRenderingContext({ fontFamily });
 
   if (settings["funnel.type"] === "bar") {
     return (
       <TransformedVisualization
-        originalProps={props}
+        originalProps={{ ...props, rawSeries: groupedRawSeries }}
         VisualizationComponent={BarChart}
         transformSeries={funnelToBarTransform}
         renderingContext={renderingContext}
@@ -217,18 +221,31 @@ export function Funnel(props: VisualizationProps) {
     );
   }
 
+  // We can't navigate a user to a particular card from a visualizer viz,
+  // so title selection is disabled in this case
+  const canSelectTitle =
+    !!onChangeCardAndRun &&
+    (!isVisualizerViz || React.Children.count(titleMenuItems) === 1);
+
   return (
     <div className={cx(className, CS.flex, CS.flexColumn, CS.p1)}>
       {hasTitle && (
         <ChartCaption
-          series={rawSeries}
+          series={groupedRawSeries}
           settings={settings}
           icon={headerIcon}
+          getHref={canSelectTitle ? getHref : undefined}
           actionButtons={actionButtons}
-          onChangeCardAndRun={onChangeCardAndRun}
+          hasInfoTooltip={!isDashboard || !isEditing}
+          onChangeCardAndRun={canSelectTitle ? onChangeCardAndRun : undefined}
+          titleMenuItems={titleMenuItems}
         />
       )}
-      <FunnelNormal {...props} className={CS.flexFull} />
+      <FunnelNormal
+        {...props}
+        rawSeries={groupedRawSeries}
+        className={CS.flexFull}
+      />
     </div>
   );
 }

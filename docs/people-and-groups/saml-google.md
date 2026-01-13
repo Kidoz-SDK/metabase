@@ -10,10 +10,11 @@ redirect_from:
 
 1. Set up a [custom SAML app](https://support.google.com/a/answer/6087519) in your [Google admin console](https://admin.google.com).
 2. As you follow Google's instructions, you'll need to:
-  - [Save information about Google for Metabase](#saving-google-idp-info-for-metabase).
-  - [Provide Google info to Metabase](#filling-out-the-metabase-saml-form).
-  - [Provide Metabase info to Google ](#filling-out-service-provider-details).
-  - [Set up attribute mappings in Google](#setting-up-attribute-mappings).
+
+- [Save information about Google for Metabase](#saving-google-idp-info-for-metabase).
+- [Provide Google info to Metabase](#filling-out-the-metabase-saml-form).
+- [Provide Metabase info to Google ](#filling-out-service-provider-details).
+- [Set up attribute mappings in Google](#setting-up-attribute-mappings).
 
 See [authenticating with SAML](./authenticating-with-saml.md) for general SAML info.
 
@@ -30,10 +31,11 @@ On the **Google Identity Provider details** page:
 1. From your Google **IdP metadata**, locate the **issuer**.
    - The **issuer** looks like this: `https://accounts.google.com/o/saml2/`.
 2. Go to your Metabase SAML form (**Admin settings** > **Authentication** > **SAML**).
-2. Put the **issuer** in the Metabase **SAML Identity Provider Issuer** field.
-3. Put the **SSO URL** in the Metabase **SAML Identity Provider URL** field.
-4. Paste the **certificate** in the Metabase **SAML Identity Provider Certificate** field.
-  - Make sure to include any header and footer comments (like `---BEGIN CERTIFICATE---`).
+3. Put the **issuer** in the Metabase **SAML Identity Provider Issuer** field.
+4. Put the **SSO URL** in the Metabase **SAML Identity Provider URL** field.
+5. Paste the **certificate** in the Metabase **SAML Identity Provider Certificate** field.
+
+- Make sure to include any header and footer comments (like `---BEGIN CERTIFICATE---`).
 
 ## Filling out service provider details
 
@@ -56,6 +58,13 @@ For example, to add the attribute "First name":
    - The attribute looks like this: `http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname`.
 4. Paste the **User's first name attribute** under your Google **App attributes**.
 5. Repeat steps 1-3 for the attributes "Last name" and "Email".
+
+## Setting up synchronize group membership
+
+1. In Google Admin, you can EITHER:
+   - Set up a multi-value [custom user attribute](https://support.google.com/a/answer/6208725?hl=en#zippy=%2Cadd-a-new-custom-attribute) for your users. Recommended if you manage multiple SAML app permissions in Google or if you lack existing Google Groups that align with your desired Metabase groups.
+   - [Map to existing Google Groups](https://support.google.com/a/answer/11143403?hl=en).
+2. Follow the instructions for [Configuring the group schema](./authenticating-with-saml.md#configuring-the-group-schema-in-metabase) using the `App attribute` that you used in Google as the Group attribute name in Metabase.
 
 ## Troubleshooting SAML issues
 

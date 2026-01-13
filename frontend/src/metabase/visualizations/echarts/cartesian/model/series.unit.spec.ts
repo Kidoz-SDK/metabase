@@ -2,10 +2,8 @@ import type {
   BreakoutChartColumns,
   CartesianChartColumns,
 } from "metabase/visualizations/lib/graph/columns";
-import type {
-  ComputedVisualizationSettings,
-  RenderingContext,
-} from "metabase/visualizations/types";
+import { SERIES_COLORS_SETTING_KEY } from "metabase/visualizations/shared/settings/series";
+import type { ComputedVisualizationSettings } from "metabase/visualizations/types";
 import type { SingleSeries } from "metabase-types/api";
 import {
   createMockCard,
@@ -23,13 +21,6 @@ const createMockComputedVisualizationSettings = (
     series: () => ({}),
     ...opts,
   });
-};
-
-const renderingContextMock: RenderingContext = {
-  formatValue: value => `formatted: ${value}`,
-  getColor: colorName => colorName,
-  measureText: () => 0,
-  fontFamily: "Lato",
 };
 
 describe("series", () => {
@@ -115,8 +106,8 @@ describe("series", () => {
         const result = getCardsSeriesModels(
           rawSeries,
           cardsColumns,
+          [],
           createMockComputedVisualizationSettings(),
-          renderingContextMock,
         );
 
         expect(result).toHaveLength(1);
@@ -131,6 +122,7 @@ describe("series", () => {
           name: metricColumns.metrics[0].column.display_name,
           tooltipName: metricColumns.metrics[0].column.display_name,
           vizSettingsKey: metricColumns.metrics[0].column.name,
+          visible: true,
         });
       });
 
@@ -141,6 +133,7 @@ describe("series", () => {
         const result = getCardsSeriesModels(
           rawSeries,
           cardsColumns,
+          [],
           createMockComputedVisualizationSettings({
             series_settings: {
               [metricColumns.metrics[0].column.name]: {
@@ -148,7 +141,6 @@ describe("series", () => {
               },
             },
           }),
-          renderingContextMock,
         );
 
         expect(result).toHaveLength(1);
@@ -157,6 +149,43 @@ describe("series", () => {
           name: "foo",
           tooltipName: "foo",
         });
+      });
+
+      it("should convert series colors to hex format (metabase#56232)", () => {
+        const rawSeries = [metricSeries];
+        const cardsColumns = [metricColumns];
+
+        const result = getCardsSeriesModels(
+          rawSeries,
+          cardsColumns,
+          [],
+          createMockComputedVisualizationSettings({
+            [SERIES_COLORS_SETTING_KEY]: {
+              [metricColumns.metrics[0].column.name]: "hsla(358, 71%, 62%, 1)",
+            },
+          }),
+        );
+
+        expect(result).toHaveLength(1);
+        expect(result[0]).toMatchObject({
+          dataKey: "1:count",
+          color: "#E3595E",
+        });
+      });
+
+      it("should mark series as invisible if it's dataKey is in hiddenSeries list", () => {
+        const rawSeries = [metricSeries];
+        const cardsColumns = [metricColumns];
+
+        const result = getCardsSeriesModels(
+          rawSeries,
+          cardsColumns,
+          ["1:count"],
+          createMockComputedVisualizationSettings(),
+        );
+
+        expect(result).toHaveLength(1);
+        expect(result[0].visible).toBe(false);
       });
     });
 
@@ -168,8 +197,8 @@ describe("series", () => {
         const result = getCardsSeriesModels(
           rawSeries,
           cardsColumns,
+          [],
           createMockComputedVisualizationSettings(),
-          renderingContextMock,
         );
 
         expect(result).toHaveLength(2);
@@ -179,11 +208,11 @@ describe("series", () => {
           columnIndex: breakoutColumns.metric.index,
           dataKey: "2:count:type1",
           legacySeriesSettingsObjectKey: {
-            card: { _seriesKey: "formatted: type1" },
+            card: { _seriesKey: "type1" },
           },
-          name: "formatted: type1",
+          name: "type1",
           tooltipName: breakoutColumns.metric.column.display_name,
-          vizSettingsKey: "formatted: type1",
+          vizSettingsKey: "type1",
         });
         expect(result[1]).toMatchObject({
           cardId: breakoutSeries.card.id,
@@ -191,11 +220,11 @@ describe("series", () => {
           columnIndex: breakoutColumns.metric.index,
           dataKey: "2:count:type2",
           legacySeriesSettingsObjectKey: {
-            card: { _seriesKey: "formatted: type2" },
+            card: { _seriesKey: "type2" },
           },
-          name: "formatted: type2",
+          name: "type2",
           tooltipName: breakoutColumns.metric.column.display_name,
-          vizSettingsKey: "formatted: type2",
+          vizSettingsKey: "type2",
         });
       });
 
@@ -206,20 +235,20 @@ describe("series", () => {
         const result = getCardsSeriesModels(
           rawSeries,
           cardsColumns,
+          [],
           createMockComputedVisualizationSettings({
             series_settings: {
-              "formatted: type2": {
+              type2: {
                 title: "foo",
               },
             },
           }),
-          renderingContextMock,
         );
 
         expect(result).toHaveLength(2);
         expect(result[0]).toMatchObject({
           dataKey: "2:count:type1",
-          name: "formatted: type1",
+          name: "type1",
           tooltipName: breakoutColumns.metric.column.display_name,
         });
         expect(result[1]).toMatchObject({
@@ -247,8 +276,8 @@ describe("series", () => {
         const result = getCardsSeriesModels(
           rawSeries,
           cardsColumns,
+          [],
           createMockComputedVisualizationSettings(),
-          renderingContextMock,
         );
 
         expect(result).toHaveLength(2);
@@ -273,8 +302,8 @@ describe("series", () => {
         const result = getCardsSeriesModels(
           rawSeries,
           cardsColumns,
+          [],
           createMockComputedVisualizationSettings(),
-          renderingContextMock,
         );
 
         expect(result).toHaveLength(3);
@@ -296,11 +325,11 @@ describe("series", () => {
           columnIndex: breakoutColumns.metric.index,
           dataKey: "2:count:type1",
           legacySeriesSettingsObjectKey: {
-            card: { _seriesKey: "breakout card: formatted: type1" },
+            card: { _seriesKey: "breakout card: type1" },
           },
-          name: "breakout card: formatted: type1",
+          name: "breakout card: type1",
           tooltipName: breakoutColumns.metric.column.display_name,
-          vizSettingsKey: "breakout card: formatted: type1",
+          vizSettingsKey: "breakout card: type1",
         });
         expect(result[2]).toMatchObject({
           cardId: breakoutSeries.card.id,
@@ -308,11 +337,11 @@ describe("series", () => {
           columnIndex: breakoutColumns.metric.index,
           dataKey: "2:count:type2",
           legacySeriesSettingsObjectKey: {
-            card: { _seriesKey: "breakout card: formatted: type2" },
+            card: { _seriesKey: "breakout card: type2" },
           },
-          name: "breakout card: formatted: type2",
+          name: "breakout card: type2",
           tooltipName: breakoutColumns.metric.column.display_name,
-          vizSettingsKey: "breakout card: formatted: type2",
+          vizSettingsKey: "breakout card: type2",
         });
       });
 
@@ -320,17 +349,17 @@ describe("series", () => {
         const result = getCardsSeriesModels(
           rawSeries,
           cardsColumns,
+          [],
           createMockComputedVisualizationSettings({
             series_settings: {
               [metricColumns.metrics[0].column.name]: {
                 title: "foo",
               },
-              "breakout card: formatted: type2": {
+              "breakout card: type2": {
                 title: "bar",
               },
             },
           }),
-          renderingContextMock,
         );
 
         expect(result).toHaveLength(3);
@@ -341,7 +370,7 @@ describe("series", () => {
         });
         expect(result[1]).toMatchObject({
           dataKey: "2:count:type1",
-          name: "breakout card: formatted: type1",
+          name: "breakout card: type1",
           tooltipName: breakoutColumns.metric.column.display_name,
         });
         expect(result[2]).toMatchObject({

@@ -1,28 +1,29 @@
 import { useState } from "react";
-import { connect } from "react-redux";
 import type { Route } from "react-router";
 import { t } from "ttag";
 import _ from "underscore";
 
-import { LeaveConfirmationModal } from "metabase/components/LeaveConfirmationModal";
-import Modal from "metabase/components/Modal";
+import { skipToken, useGetActionQuery } from "metabase/api";
+import { LeaveRouteConfirmModal } from "metabase/common/components/LeaveConfirmModal";
+import Modal from "metabase/common/components/Modal";
+import useBeforeUnload from "metabase/common/hooks/use-before-unload";
+import { useCallbackEffect } from "metabase/common/hooks/use-callback-effect";
 import type {
   CreateActionParams,
   UpdateActionParams,
 } from "metabase/entities/actions";
-import Actions from "metabase/entities/actions";
-import Database from "metabase/entities/databases";
-import Questions from "metabase/entities/questions";
-import useBeforeUnload from "metabase/hooks/use-before-unload";
-import { useCallbackEffect } from "metabase/hooks/use-callback-effect";
+import { Actions } from "metabase/entities/actions";
+import { Databases } from "metabase/entities/databases";
+import { Questions } from "metabase/entities/questions";
+import { connect } from "metabase/lib/redux";
 import { getMetadata } from "metabase/selectors/metadata";
 import type Question from "metabase-lib/v1/Question";
 import type Metadata from "metabase-lib/v1/metadata/Metadata";
 import type {
   CardId,
   DatabaseId,
-  WritebackActionId,
   WritebackAction,
+  WritebackActionId,
   WritebackQueryAction,
 } from "metabase-types/api";
 import type { State } from "metabase-types/store";
@@ -30,7 +31,6 @@ import type { State } from "metabase-types/store";
 import { isSavedAction } from "../../utils";
 
 import ActionContext, { useActionContext } from "./ActionContext";
-import { ACE_ELEMENT_ID } from "./ActionContext/QueryActionContextProvider";
 import ActionCreatorView from "./ActionCreatorView";
 import type { FormValues as CreateActionFormValues } from "./CreateActionForm";
 import CreateActionForm from "./CreateActionForm";
@@ -45,10 +45,6 @@ interface OwnProps {
 
   onSubmit?: (action: WritebackAction) => void;
   onClose?: () => void;
-}
-
-interface ActionLoaderProps {
-  initialAction?: WritebackAction;
 }
 
 interface ModelLoaderProps {
@@ -66,11 +62,7 @@ interface DispatchProps {
 
 export type ActionCreatorProps = OwnProps;
 
-type Props = OwnProps &
-  ActionLoaderProps &
-  ModelLoaderProps &
-  StateProps &
-  DispatchProps;
+type Props = OwnProps & ModelLoaderProps & StateProps & DispatchProps;
 
 const mapStateToProps = (state: State) => ({
   metadata: getMetadata(state),
@@ -156,7 +148,6 @@ function ActionCreator({
   };
 
   const showSaveModal = () => {
-    ensureAceEditorClosed();
     setShowSaveModal(true);
   };
 
@@ -201,7 +192,7 @@ function ActionCreator({
       )}
 
       {route && (
-        <LeaveConfirmationModal
+        <LeaveRouteConfirmModal
           isEnabled={showUnsavedChangesWarning}
           route={route}
         />
@@ -210,19 +201,15 @@ function ActionCreator({
   );
 }
 
-function ensureAceEditorClosed() {
-  // @ts-expect-error — `ace` isn't typed yet
-  const editor = window.ace?.edit(ACE_ELEMENT_ID);
-  editor?.completer?.popup?.hide();
-}
-
 function ActionCreatorWithContext({
-  initialAction,
   metadata,
   databaseId,
   action,
   ...props
 }: Props) {
+  const { data: initialAction } = useGetActionQuery(
+    props.actionId != null ? { id: props.actionId } : skipToken,
+  );
   // This is needed in case we already have an action and pass it from the outside
   const contextAction = action || initialAction;
 
@@ -232,27 +219,17 @@ function ActionCreatorWithContext({
       databaseId={databaseId}
       metadata={metadata}
     >
-      <ActionCreator
-        {...props}
-        initialAction={initialAction}
-        databaseId={databaseId}
-        metadata={metadata}
-      />
+      <ActionCreator {...props} databaseId={databaseId} metadata={metadata} />
     </ActionContext>
   );
 }
 
 // eslint-disable-next-line import/no-default-export -- deprecated usage
 export default _.compose(
-  Actions.load({
-    id: (state: State, props: OwnProps) => props.actionId,
-    loadingAndErrorWrapper: false,
-    entityAlias: "initialAction",
-  }),
   Questions.load({
     id: (state: State, props: OwnProps) => props?.modelId,
     entityAlias: "model",
   }),
-  Database.loadList(),
+  Databases.loadList(),
   connect(mapStateToProps, mapDispatchToProps),
 )(ActionCreatorWithContext);

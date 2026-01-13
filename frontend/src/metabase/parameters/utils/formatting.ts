@@ -1,15 +1,20 @@
-import { ngettext, msgid } from "ttag";
+import { msgid, ngettext } from "ttag";
 
 import { formatValue } from "metabase/lib/formatting";
+import * as Lib from "metabase-lib";
+import Field from "metabase-lib/v1/metadata/Field";
 import type { UiParameter } from "metabase-lib/v1/parameters/types";
 import {
   getFields,
   hasFields,
 } from "metabase-lib/v1/parameters/utils/parameter-fields";
 import {
-  isFieldFilterParameter,
   getParameterType,
+  isDateParameter,
+  isFieldFilterParameter,
+  isTemporalUnitParameter,
 } from "metabase-lib/v1/parameters/utils/parameter-type";
+import type { ParameterValue, RowValue } from "metabase-types/api";
 
 import { formatDateValue } from "./date-formatting";
 
@@ -34,24 +39,27 @@ function formatWithInferredType(value: any, parameter: UiParameter) {
 }
 
 export function formatParameterValue(
-  value: string | number | number[],
+  rawValue: string | number | number[] | ParameterValue,
   parameter: UiParameter,
 ) {
-  if (Array.isArray(value) && value.length > 1) {
-    return renderNumberOfSelections(value.length);
+  if (Array.isArray(rawValue) && rawValue.length > 1) {
+    return renderNumberOfSelections(rawValue.length);
   }
 
-  value = Array.isArray(value) ? value[0] : value;
+  const value: RowValue = Array.isArray(rawValue) ? rawValue[0] : rawValue;
 
-  const type = getParameterType(parameter);
-  if (type === "date") {
-    return formatDateValue(String(value), parameter);
+  if (isDateParameter(parameter)) {
+    return formatDateValue(parameter, String(value));
+  }
+
+  if (isTemporalUnitParameter(parameter)) {
+    return typeof value === "string" ? Lib.describeTemporalUnit(value) : null;
   }
 
   if (isFieldFilterParameter(parameter)) {
     // skip formatting field filter parameters mapped to native query variables
     if (parameter.hasVariableTemplateTagTarget) {
-      return value;
+      return String(value);
     }
 
     // format using the parameter's first targeted field
@@ -59,9 +67,9 @@ export function formatParameterValue(
       const fields = getFields(parameter);
       const [firstField] = fields;
       // when a parameter targets multiple fields we won't know
-      // which parameter the value is associated with, meaning we
-      // are unable to remap the value to the correct field
-      const remap = fields.length === 1;
+      // which parameter the value is associated with, so we take
+      // the first field for remapping
+      const remap = Field.remappedField(fields) != null;
       return formatValue(value as string, {
         column: firstField,
         maximumFractionDigits: 20,

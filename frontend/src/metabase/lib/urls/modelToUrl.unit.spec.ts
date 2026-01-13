@@ -1,12 +1,13 @@
 import { modelToUrl } from "./modelToUrl";
+
 describe("urls > modelToUrl", () => {
-  it("should return null for unknown model", () => {
+  it("should return 404 for unknown model", () => {
     expect(
       // @ts-expect-error - testing the error case
       modelToUrl({
         model: "pikachu",
       }),
-    ).toBeNull();
+    ).toContain("/404");
   });
 
   it("should return a question URL for a card", () => {
@@ -60,5 +61,15 @@ describe("urls > modelToUrl", () => {
         },
       }),
     ).toBe("/question#?db=22&table=33");
+  });
+
+  it("should return a document URL for a document", () => {
+    expect(
+      modelToUrl({
+        model: "document",
+        name: "My Cool Document",
+        id: 123,
+      }),
+    ).toBe("/document/123");
   });
 });

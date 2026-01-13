@@ -2,7 +2,7 @@ import { t } from "ttag";
 import _ from "underscore";
 
 import { useListPopularItemsQuery } from "metabase/api";
-import LoadingAndErrorWrapper from "metabase/components/LoadingAndErrorWrapper";
+import { LoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper";
 import { getIcon } from "metabase/lib/icon";
 import { getName } from "metabase/lib/name";
 import * as Urls from "metabase/lib/urls";
@@ -33,7 +33,7 @@ export const HomePopularSection = (): JSX.Element => {
           <HomeModelCard
             key={index}
             title={getName(item)}
-            icon={getIcon(item, { variant: "secondary" })}
+            icon={getIcon(item)}
             url={Urls.modelToUrl(item) ?? ""}
           />
         ))}
@@ -44,7 +44,7 @@ export const HomePopularSection = (): JSX.Element => {
 };
 
 const getTitle = (popularItems: PopularItem[]) => {
-  const models = _.uniq(popularItems.map(item => item.model));
+  const models = _.uniq(popularItems.map((item) => item.model));
 
   if (models.length !== 1) {
     return t`Here are some popular items`;

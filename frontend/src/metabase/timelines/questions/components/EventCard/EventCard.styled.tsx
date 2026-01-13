@@ -1,10 +1,11 @@
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
 
-import Markdown from "metabase/core/components/Markdown";
-import { alpha, color } from "metabase/lib/colors";
+import Markdown from "metabase/common/components/Markdown";
+import { alpha } from "metabase/lib/colors";
 import { Icon } from "metabase/ui";
 
-export interface CardRootProps {
+interface CardRootProps {
   isSelected?: boolean;
 }
 
@@ -12,13 +13,13 @@ export const CardRoot = styled.div<CardRootProps>`
   display: flex;
   padding: 0.25rem 0.75rem;
   border-left: 0.25rem solid
-    ${props => (props.isSelected ? color("brand") : "transparent")};
-  background-color: ${props =>
+    ${(props) => (props.isSelected ? "var(--mb-color-brand)" : "transparent")};
+  background-color: ${(props) =>
     props.isSelected ? alpha("brand", 0.03) : "transparent"};
   cursor: pointer;
 
   &:hover {
-    background-color: ${alpha("brand", 0.03)};
+    background-color: ${() => alpha("brand", 0.03)};
   }
 `;
 
@@ -48,7 +49,7 @@ export const CardBody = styled.div`
 `;
 
 export const CardTitle = styled.div`
-  color: ${color("text-dark")};
+  color: var(--mb-color-text-dark);
   font-size: 1rem;
   line-height: 1.25rem;
   font-weight: bold;
@@ -56,7 +57,7 @@ export const CardTitle = styled.div`
 `;
 
 export const CardDescription = styled(Markdown)`
-  color: ${color("text-dark")};
+  color: var(--mb-color-text-dark);
   margin-top: 0.25rem;
   word-wrap: break-word;
 `;
@@ -68,7 +69,7 @@ export const CardDateInfo = styled.div`
 `;
 
 export const CardCreatorInfo = styled.div`
-  color: ${color("text-medium")};
+  color: var(--mb-color-text-medium);
   margin-top: 0.25rem;
   font-size: 0.75rem;
 `;

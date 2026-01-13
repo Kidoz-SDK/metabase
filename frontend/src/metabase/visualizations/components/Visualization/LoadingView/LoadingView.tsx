@@ -1,18 +1,19 @@
-import { t, jt } from "ttag";
+import { jt, t } from "ttag";
 
+import type { CardSlownessStatus } from "metabase/dashboard/components/DashCard/types";
 import { duration } from "metabase/lib/formatting";
 
 import {
+  Duration,
   Root,
   ShortMessage,
-  Duration,
   SlowQueryMessageContainer,
   StyledLoadingSpinner,
 } from "./LoadingView.styled";
 
-interface LoadingViewProps {
-  isSlow: "usually-slow" | boolean;
-  expectedDuration: number;
+export interface LoadingViewProps {
+  isSlow: CardSlownessStatus | undefined;
+  expectedDuration?: number;
 }
 
 function SlowQueryView({ expectedDuration, isSlow }: LoadingViewProps) {
@@ -22,7 +23,9 @@ function SlowQueryView({ expectedDuration, isSlow }: LoadingViewProps) {
       {isSlow === "usually-slow" ? (
         <div>
           {jt`This usually takes an average of ${(
-            <Duration>{duration(expectedDuration)}</Duration>
+            <Duration key="duration">
+              {duration(expectedDuration ?? 0)}
+            </Duration>
           )}, but is currently taking longer.`}
         </div>
       ) : (

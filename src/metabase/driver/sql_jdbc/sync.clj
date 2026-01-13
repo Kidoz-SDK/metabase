@@ -16,6 +16,7 @@
  [sql-jdbc.sync.interface
   active-tables
   alter-columns-sql
+  alter-table-columns-sql
   column->semantic-type
   current-user-table-privileges
   database-type->base-type
@@ -28,12 +29,17 @@
 
  [sql-jdbc.describe-table
   add-table-pks
+  database-type->base-type-or-warn
   describe-fields
+  describe-fields-pre-process-xf
   describe-fields-sql
   describe-fks
   describe-fks-sql
+  describe-indexes
+  describe-indexes-sql
   describe-table
   describe-table-fields
+  describe-table-fields-xf
   describe-table-fks
   describe-table-indexes
   get-catalogs

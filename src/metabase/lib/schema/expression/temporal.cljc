@@ -1,22 +1,26 @@
 (ns metabase.lib.schema.expression.temporal
+  (:refer-clojure :exclude [some #?(:clj doseq) #?(:clj for)])
   (:require
    [clojure.set :as set]
+   [clojure.string :as str]
    [metabase.lib.hierarchy :as lib.hierarchy]
    [metabase.lib.schema.common :as common]
    [metabase.lib.schema.expression :as expression]
    [metabase.lib.schema.literal :as literal]
    [metabase.lib.schema.mbql-clause :as mbql-clause]
    [metabase.lib.schema.temporal-bucketing :as temporal-bucketing]
-   [metabase.shared.util.internal.time-common :as shared.ut.common]
-   [metabase.util.malli.registry :as mr])
+   [metabase.util :as u]
+   [metabase.util.malli.registry :as mr]
+   [metabase.util.performance :refer [some #?(:clj doseq) #?(:clj for)]]
+   [metabase.util.time.impl-common :as u.time.impl-common])
   #?@
-  (:clj
-   [(:import
-     (java.time ZoneId))]
-   :cljs
-   [(:require
-     ["moment" :as moment]
-     ["moment-timezone" :as mtz])]))
+   (:clj
+    [(:import
+      (java.time ZoneId))]
+    :cljs
+    [(:require
+      ["moment" :as moment]
+      ["moment-timezone" :as mtz])]))
 
 #?(:cljs
    ;; so the moment-timezone stuff gets loaded
@@ -55,21 +59,117 @@
   (mbql-clause/define-tuple-mbql-clause op :- :type/Integer
     [:schema [:ref ::expression/temporal]]))
 
+(mbql-clause/define-tuple-mbql-clause :date :- :type/Date
+  [:schema [:or
+            [:ref ::expression/string]      ;; parse string as date
+            [:ref ::expression/temporal]]]) ;; truncate datetime to date
+
+(mbql-clause/define-tuple-mbql-clause :today :- :type/Date)
+
+(def datetime-string-modes
+  "String modes supported by datetime() custom expression function."
+  #{:iso
+    :simple})
+
+(def datetime-binary-modes
+  "Binary modes supported by datetime() custom expression function."
+  #{:iso-bytes
+    :simple-bytes})
+
+(def datetime-number-modes
+  "Binary modes supported by datetime() custom expression function."
+  #{:unix-seconds
+    :unix-milliseconds
+    :unix-microseconds
+    :unix-nanoseconds})
+
+(def datetime-modes
+  "Modes supported by datetime() custom expression function."
+  (set/union datetime-string-modes
+             datetime-binary-modes
+             datetime-number-modes))
+
+(defn- datetime-mode->string [s]
+  (-> s
+      name
+      u/lower-case-en
+      (str/replace #"-" "")))
+
+(def ^:private datetime-mode-map
+  (into {} (for [k datetime-modes]
+             [(datetime-mode->string k) k])))
+
+(defn normalize-datetime-mode
+  "Convert a keyword or string to an internal datetime-mode keyword, or itself if it's not correct.
+
+   Is lenient on case and hyphens."
+  [s]
+  (get datetime-mode-map (datetime-mode->string s) s))
+
+(mbql-clause/define-mbql-clause :datetime :- :type/DateTime
+  [:cat
+   {:error/message (str "Valid " :datetime " clause")}
+   [:= {:decode/normalize common/normalize-keyword} :datetime]
+   [:alt
+    ;; string modes
+    [:cat
+     [:merge
+      ::common/options
+      [:map [:mode {:optional true} ; no mode should be iso string
+             (into [:enum {:decode/normalize normalize-datetime-mode}]
+                   datetime-string-modes)]]]
+     [:schema [:ref ::expression/string]]]
+
+    ;; number modes
+    [:cat
+     [:merge
+      ::common/options
+      [:map [:mode (into [:enum {:decode/normalize normalize-datetime-mode}]
+                         datetime-number-modes)]]]
+     [:schema [:ref ::expression/number]]]
+
+    ;; binary modes
+    [:cat
+     [:merge
+      ::common/options
+      [:map [:mode (into [:enum {:decode/normalize normalize-datetime-mode}]
+                         datetime-binary-modes)]]]
+     [:schema [:ref ::expression/expression]]]]])
+
+;; doesn't contain `:millisecond`
+(mr/def ::datetime-diff-unit
+  [:enum
+   {:error/message    "Valid datetime-diff unit"
+    :decode/normalize common/normalize-keyword-lower}
+   :day
+   :week
+   :month
+   :quarter
+   :year
+   :second
+   :minute
+   :hour])
+
 (mbql-clause/define-tuple-mbql-clause :datetime-diff :- :type/Integer
   #_:datetime1 [:schema [:ref ::expression/temporal]]
   #_:datetime2 [:schema [:ref ::expression/temporal]]
-  #_:unit [:ref ::temporal-bucketing/unit.date-time.truncate])
+  #_:unit [:ref ::datetime-diff-unit])
 
 (doseq [temporal-extract-op #{:get-second :get-minute :get-hour
-                              :get-day :get-day-of-week
-                              :get-month :get-quarter :get-year}]
+                              :get-day :get-month :get-quarter :get-year}]
   (mbql-clause/define-tuple-mbql-clause temporal-extract-op :- :type/Integer
     #_:datetime [:schema [:ref ::expression/temporal]]))
 
 (mr/def ::week-mode
-  [:enum {:decode/normalize common/normalize-keyword} :iso :us :instance])
+  [:enum {:decode/normalize common/normalize-keyword-lower} :iso :us :instance])
 
 (mbql-clause/define-catn-mbql-clause :get-week :- :type/Integer
+  [:datetime [:schema [:ref ::expression/temporal]]]
+  ;; TODO : the mode should probably go in the options map in modern MBQL rather than have it be a separate positional
+  ;; argument. But we can't refactor everything in one go, so that will have to be a future refactor.
+  [:mode     [:? [:schema [:ref ::week-mode]]]])
+
+(mbql-clause/define-catn-mbql-clause :get-day-of-week :- :type/Integer
   [:datetime [:schema [:ref ::expression/temporal]]]
   ;; TODO : the mode should probably go in the options map in modern MBQL rather than have it be a separate positional
   ;; argument. But we can't refactor everything in one go, so that will have to be a future refactor.
@@ -82,9 +182,13 @@
     (into [:enum
            {:error/message "valid timezone ID"
             :error/fn      (fn [{:keys [value]} _]
-                             (str "invalid timezone ID: " (pr-str value)))}]
+                             (str "invalid timezone ID: " (pr-str value)))
+            :description   "A valid timezone ID like: \"Asia/Aden\", \"America/Cuiaba\"."
+            ;; The timezone list is dynamic which make the .github/workflows/openapi-check.yml flaky on CI
+            ;; so we need to hack this to write a static schema
+            :json-schema   {:type "string"}}]
           (sort
-           #?( ;; 600 timezones on java 17
+           #?(;; 600 timezones on java 17
               :clj (ZoneId/getAvailableZoneIds)
               ;; 596 timezones on moment-timezone 0.5.38
               :cljs (.names (.-tz moment)))))
@@ -121,7 +225,7 @@
 (mbql-clause/define-mbql-clause :absolute-datetime
   [:cat
    {:error/message "valid :absolute-datetime clause"}
-   [:= {:decode/normalize common/normalize-keyword} :absolute-datetime]
+   [:= {:decode/normalize common/normalize-keyword-lower} :absolute-datetime]
    [:schema [:ref ::absolute-datetime.options]]
    [:alt
     [:cat
@@ -132,15 +236,15 @@
                [:ref ::literal/string.year-month]
                [:ref ::literal/string.year]]]
      [:schema [:or
-               [:= {:decode/normalize common/normalize-keyword} :default]
+               [:= {:decode/normalize common/normalize-keyword-lower} :default]
                [:ref ::temporal-bucketing/unit.date]]]]
     [:cat
      {:error/message ":absolute-datetime literal and unit for :type/DateTime"}
      [:schema [:or
-               [:= {:decode/normalize common/normalize-keyword} :current]
+               [:= {:decode/normalize common/normalize-keyword-lower} :current]
                [:ref ::literal/datetime]]]
      [:schema [:or
-               [:= {:decode/normalize common/normalize-keyword} :default]
+               [:= {:decode/normalize common/normalize-keyword-lower} :default]
                [:ref ::temporal-bucketing/unit.date-time]]]]]])
 
 (defmethod expression/type-of-method :absolute-datetime
@@ -157,8 +261,8 @@
    ;; `:absolute-datetime`.
    (when (string? value)
      (cond
-       (re-matches shared.ut.common/year-month-regex value) :type/Date
-       (re-matches shared.ut.common/year-regex value)       :type/Date))
+       (re-matches u.time.impl-common/year-month-regex value) :type/Date
+       (re-matches u.time.impl-common/year-regex value)       :type/Date))
    ;; for things that return a union of types like string literals, only the temporal types make sense, so filter out
    ;; everything else.
    (let [value-type (expression/type-of value)
@@ -172,21 +276,29 @@
 
 (mr/def ::relative-datetime.amount
   [:multi {:dispatch (some-fn keyword? string?)}
-   [true  [:= {:decode/normalize common/normalize-keyword} :current]]
+   [true  [:= {:decode/normalize common/normalize-keyword-lower} :current]]
    [false :int]])
 
+(mr/def ::relative-datetime.unit
+  [:or
+   [:= :default]
+   [:ref ::temporal-bucketing/unit.date-time.interval]])
+
+;;; TODO (Cam 7/16/25) -- I think unit is rewuired unless `n` is `:current`
 (mbql-clause/define-catn-mbql-clause :relative-datetime :- :type/DateTime
   [:n    [:schema [:ref ::relative-datetime.amount]]]
-  [:unit [:? [:schema [:ref ::temporal-bucketing/unit.date-time.interval]]]])
+  [:unit [:? [:schema [:ref ::relative-datetime.unit]]]])
 
 (mbql-clause/define-tuple-mbql-clause :time :- :type/Time
   #_:timestr [:schema [:ref ::expression/string]]
-  #_:unit [:ref ::temporal-bucketing/unit.time.interval])
+  #_:unit    [:or
+              [:= {:decode/normalize common/normalize-keyword-lower} :default]
+              [:ref ::temporal-bucketing/unit.time.interval]])
 
 ;;; this has some stuff that's missing from [[::temporal-bucketing/unit.date-time.extract]], like `:week-of-year-iso`
 (mr/def ::temporal-extract.unit
   [:enum
-   {:decode/normalize common/normalize-keyword}
+   {:decode/normalize common/normalize-keyword-lower}
    :year-of-era
    :quarter-of-year
    :month-of-year
@@ -195,6 +307,7 @@
    :week-of-year-instance
    :day-of-month
    :day-of-week
+   :day-of-week-iso
    :hour-of-day
    :minute-of-hour
    :second-of-minute])

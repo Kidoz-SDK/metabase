@@ -2,8 +2,8 @@ import fetchMock from "fetch-mock";
 
 import { getStore } from "__support__/entities-store";
 import { Api } from "metabase/api";
-import Questions from "metabase/entities/questions";
-import Schemas from "metabase/entities/schemas";
+import { Questions } from "metabase/entities/questions";
+import { Schemas } from "metabase/entities/schemas";
 import {
   ROOT_COLLECTION_VIRTUAL_SCHEMA,
   SAVED_QUESTIONS_VIRTUAL_DB_ID,
@@ -11,6 +11,7 @@ import {
 
 describe("schema entity", () => {
   let store;
+
   beforeEach(() => {
     store = getStore(
       {
@@ -31,7 +32,7 @@ describe("schema entity", () => {
     const { schemas, tables } = store.getState().entities;
     expect(schemas).toEqual({
       "1:public": {
-        database: "1",
+        database: 1,
         id: "1:public",
         name: "public",
         tables: [123, 234],
@@ -72,7 +73,7 @@ describe("schema entity", () => {
     const { schemas, tables } = store.getState().entities;
     expect(schemas).toEqual({
       "1:": {
-        database: "1",
+        database: 1,
         id: "1:",
         name: "",
         tables: [123, 234],

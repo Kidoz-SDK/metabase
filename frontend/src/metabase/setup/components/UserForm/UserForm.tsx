@@ -3,14 +3,15 @@ import { t } from "ttag";
 import _ from "underscore";
 import * as Yup from "yup";
 
-import FormInput from "metabase/core/components/FormInput";
-import FormSubmitButton from "metabase/core/components/FormSubmitButton";
-import { useFormSubmitButton, FormProvider } from "metabase/forms";
+import FormInput from "metabase/common/components/FormInput";
+import FormSubmitButton from "metabase/common/components/FormSubmitButton";
+import { Form, FormProvider, useFormSubmitButton } from "metabase/forms";
 import * as Errors from "metabase/lib/errors";
+import { validatePassword } from "metabase/setup/utils";
 import { Flex } from "metabase/ui";
 import type { UserInfo } from "metabase-types/store";
 
-import { UserFieldGroup, UserFormRoot } from "./UserForm.styled";
+import { UserFieldGroup } from "./UserForm.styled";
 
 const USER_SCHEMA = Yup.object({
   first_name: Yup.string().nullable().default(null).max(100, Errors.maxLength),
@@ -27,30 +28,24 @@ const USER_SCHEMA = Yup.object({
   password_confirm: Yup.string()
     .default("")
     .required(Errors.required)
+    // eslint-disable-next-line ttag/no-module-declaration -- see metabase#55045
     .oneOf([Yup.ref("password")], t`passwords do not match`),
 });
 
 interface UserFormProps {
   user?: UserInfo;
-  onValidatePassword: (password: string) => Promise<string | undefined>;
+  isHosted: boolean;
   onSubmit: (user: UserInfo) => Promise<void>;
 }
 
-export const UserForm = ({
-  user,
-  onValidatePassword,
-  onSubmit,
-}: UserFormProps) => {
+const validationContext = {
+  onValidatePassword: _.memoize(validatePassword),
+};
+
+export const UserForm = ({ user, isHosted, onSubmit }: UserFormProps) => {
   const initialValues = useMemo(() => {
     return user ?? USER_SCHEMA.getDefault();
   }, [user]);
-
-  const validationContext = useMemo(
-    () => ({
-      onValidatePassword: _.memoize(onValidatePassword),
-    }),
-    [onValidatePassword],
-  );
 
   return (
     <FormProvider
@@ -59,14 +54,14 @@ export const UserForm = ({
       validationContext={validationContext}
       onSubmit={onSubmit}
     >
-      <UserFormRoot>
+      <Form mt="md">
         <UserFieldGroup>
           <FormInput
             name="first_name"
             title={t`First name`}
             placeholder={t`Johnny`}
             nullable
-            autoFocus
+            autoFocus={!isHosted}
           />
           <FormInput
             name="last_name"
@@ -91,6 +86,10 @@ export const UserForm = ({
           type="password"
           title={t`Create a password`}
           placeholder={t`Shhh...`}
+          // Hosted instances always pass user information in the URLSearchParams
+          // during the initial setup. Password is the first empty field
+          // so it makes sense to focus on it.
+          autoFocus={isHosted && initialValues.site_name !== ""}
         />
         <FormInput
           name="password_confirm"
@@ -99,7 +98,7 @@ export const UserForm = ({
           placeholder={t`Shhh... but one more time so we get it right`}
         />
         <UserFormSubmitButton />
-      </UserFormRoot>
+      </Form>
     </FormProvider>
   );
 };

@@ -1,12 +1,20 @@
 import type { UserId } from "metabase-types/api/user";
 
-import type { CardDisplayType, CardId } from "./card";
-import type { Collection, CollectionId } from "./collection";
-import type { DashboardId } from "./dashboard";
+import type { CardId } from "./card";
+import type {
+  Collection,
+  CollectionId,
+  CollectionNamespace,
+  LastEditInfo,
+} from "./collection";
+import type { Dashboard, DashboardId } from "./dashboard";
 import type { DatabaseId, InitialSyncStatus } from "./database";
+import type { Field } from "./field";
+import type { ModerationReviewStatus } from "./moderation";
 import type { PaginationRequest, PaginationResponse } from "./pagination";
 import type { FieldReference } from "./query";
 import type { TableId } from "./table";
+import type { CardDisplayType } from "./visualization";
 
 const ENABLED_SEARCH_MODELS = [
   "collection",
@@ -18,32 +26,15 @@ const ENABLED_SEARCH_MODELS = [
   "table",
   "action",
   "indexed-entity",
+  "document",
+  "transform",
 ] as const;
 
 export const SEARCH_MODELS = [...ENABLED_SEARCH_MODELS, "segment"] as const;
 
-export type EnabledSearchModel = typeof ENABLED_SEARCH_MODELS[number];
+export type EnabledSearchModel = (typeof ENABLED_SEARCH_MODELS)[number];
 
-export type SearchModel = typeof SEARCH_MODELS[number];
-
-export interface SearchScore {
-  weight: number;
-  score: number;
-  name:
-    | "pinned"
-    | "bookmarked"
-    | "recency"
-    | "dashboard"
-    | "model"
-    | "official collection score"
-    | "verified"
-    | "text-consecutivity"
-    | "text-total-occurrences"
-    | "text-fullness";
-  match?: string;
-  "match-context-thunk"?: string;
-  column?: string;
-}
+export type SearchModel = (typeof SEARCH_MODELS)[number];
 
 interface BaseSearchResult<
   Id extends SearchResultId,
@@ -63,6 +54,7 @@ export type SearchResponse<
   models: Model[] | null;
   available_models: SearchModel[];
   table_db_id: DatabaseId | null;
+  engine: string;
 } & PaginationResponse;
 
 export type CollectionEssentials = Pick<
@@ -89,8 +81,14 @@ export interface SearchResult<
   archived: boolean | null;
   collection_position: number | null;
   collection: CollectionEssentials;
+  collection_type?: Collection["type"];
   table_id: TableId;
   bookmark: boolean | null;
+  dashboard:
+    | (Pick<Dashboard, "id" | "name"> & {
+        moderation_status: ModerationReviewStatus;
+      })
+    | null;
   database_id: DatabaseId;
   database_name: string | null;
   display: CardDisplayType | null;
@@ -98,7 +96,7 @@ export interface SearchResult<
   table_schema: string | null;
   collection_authority_level: "official" | null;
   updated_at: string;
-  moderated_status: string | null;
+  moderated_status: ModerationReviewStatus | null;
   model_id: CardId | null;
   model_name: string | null;
   model_index_id: number | null;
@@ -107,7 +105,6 @@ export interface SearchResult<
   initial_sync_status: InitialSyncStatus | null;
   dashboard_count: number | null;
   context: any; // this might be a dead property
-  scores: SearchScore[];
   last_edited_at: string | null;
   last_editor_id: UserId | null;
   last_editor_common_name: string | null;
@@ -115,15 +112,25 @@ export interface SearchResult<
   creator_common_name: string | null;
   created_at: string | null;
   can_write: boolean | null;
+  based_on_upload?: TableId | null;
+  "last-edit-info"?: LastEditInfo;
+  result_metadata?: Field[];
 }
+
+export type SearchContext =
+  | "search-bar"
+  | "search-app"
+  | "command-palette"
+  | "entity-picker";
 
 export type SearchRequest = {
   q?: string;
   archived?: boolean;
   table_db_id?: DatabaseId;
   models?: SearchModel[];
+  ids?: SearchResultId[];
   filter_items_in_personal_collection?: "only" | "exclude";
-  context?: "search-bar" | "search-app" | "command-palette";
+  context?: SearchContext;
   created_at?: string | null;
   created_by?: UserId[] | null;
   last_edited_at?: string | null;
@@ -131,11 +138,15 @@ export type SearchRequest = {
   search_native_query?: boolean | null;
   verified?: boolean | null;
   model_ancestors?: boolean | null;
+  include_dashboard_questions?: boolean | null;
+  include_metadata?: boolean | null;
+  non_temporal_dim_ids?: string | null;
+  has_temporal_dim?: boolean | null;
+  search_engine?: "appdb" | "in-place" | "semantic" | null;
+  display_type?: string[] | null;
 
   // this should be in ListCollectionItemsRequest but legacy code expects them here
   collection?: CollectionId;
-  namespace?: "snippets";
+  namespace?: CollectionNamespace;
+  calculate_available_models?: true;
 } & PaginationRequest;
-
-/** Model retrieved through the search endpoint */
-export type ModelResult = SearchResult<number, "dataset">;

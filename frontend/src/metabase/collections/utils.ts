@@ -1,11 +1,30 @@
 import { t } from "ttag";
 
-import { PLUGIN_COLLECTIONS } from "metabase/plugins";
-import type {
-  Collection,
-  CollectionId,
-  CollectionItem,
+import { PLUGIN_COLLECTIONS, PLUGIN_DATA_STUDIO } from "metabase/plugins";
+import {
+  type CardType,
+  type Collection,
+  type CollectionEssentials,
+  type CollectionId,
+  type CollectionItem,
+  type CollectionItemModel,
+  type CollectionType,
+  type User,
+  isBaseEntityID,
 } from "metabase-types/api";
+
+export type EntityType = CollectionItemModel;
+
+export function getEntityTypeFromCardType(cardType: CardType): EntityType {
+  switch (cardType) {
+    case "question":
+      return "card";
+    case "model":
+      return "dataset";
+    case "metric":
+      return "metric";
+  }
+}
 
 export function nonPersonalOrArchivedCollection(
   collection: Collection,
@@ -20,6 +39,25 @@ export function isRootPersonalCollection(
   return typeof collection.personal_owner_id === "number";
 }
 
+export function isDedicatedTenantCollectionRoot(
+  collection: Partial<Collection> | CollectionItem,
+): boolean {
+  return collection.type === "tenant-specific-root-collection";
+}
+
+export function isDedicatedTenantCollectionOfUser({
+  user,
+  collection,
+}: {
+  user: User;
+  collection: Collection;
+}): boolean {
+  return (
+    user.tenant_collection_id !== null &&
+    user.tenant_collection_id === collection.id
+  );
+}
+
 export function isPersonalCollection(
   collection: Pick<Collection, "is_personal">,
 ) {
@@ -27,7 +65,7 @@ export function isPersonalCollection(
 }
 
 export function isRootTrashCollection(
-  collection: Pick<Collection, "type">,
+  collection?: Pick<Collection, "type">,
 ): boolean {
   return collection?.type === "trash";
 }
@@ -44,12 +82,17 @@ export function isPublicCollection(
   return !isPersonalCollection(collection);
 }
 
-export function isEditableCollection(collection: Collection) {
+export function isEditableCollection(
+  collection: Collection,
+  { currentUser }: { currentUser: User },
+) {
   return (
     collection.can_write &&
     !isRootCollection(collection) &&
     !isRootPersonalCollection(collection) &&
-    !isTrashedCollection(collection)
+    !isTrashedCollection(collection) &&
+    !isLibraryCollection(collection) &&
+    !isDedicatedTenantCollectionOfUser({ user: currentUser, collection })
   );
 }
 
@@ -63,12 +106,6 @@ export function isInstanceAnalyticsCollection(
   );
 }
 
-export function getInstanceAnalyticsCustomCollection(
-  collections: Collection[],
-): Collection | null {
-  return PLUGIN_COLLECTIONS.getInstanceAnalyticsCustomCollection(collections);
-}
-
 export function isInstanceAnalyticsCustomCollection(
   collection: Collection,
 ): boolean {
@@ -76,6 +113,20 @@ export function isInstanceAnalyticsCustomCollection(
     PLUGIN_COLLECTIONS.CUSTOM_INSTANCE_ANALYTICS_COLLECTION_ENTITY_ID ===
     collection.entity_id
   );
+}
+
+export function isSyncedCollection(collection: Partial<Collection>): boolean {
+  return PLUGIN_COLLECTIONS.isSyncedCollection(collection);
+}
+
+export function isLibraryCollection(
+  collection: Pick<Collection, "type">,
+): boolean {
+  return PLUGIN_DATA_STUDIO.getLibraryCollectionType(collection.type) != null;
+}
+
+export function isExamplesCollection(collection: Collection): boolean {
+  return !!collection.is_sample && collection.name === "Examples";
 }
 
 // Replace the name for the current user's collection
@@ -94,7 +145,7 @@ export function currentUserPersonalCollections(
   userID: number,
 ): Collection[] {
   return collectionList
-    .filter(l => l.personal_owner_id === userID)
+    .filter((l) => l.personal_owner_id === userID)
     .map(preparePersonalCollection);
 }
 
@@ -116,18 +167,8 @@ export function isPersonalCollectionChild(
   if (!nonRootParentId) {
     return false;
   }
-  const parentCollection = collectionList.find(c => c.id === nonRootParentId);
+  const parentCollection = collectionList.find((c) => c.id === nonRootParentId);
   return Boolean(parentCollection && !!parentCollection.personal_owner_id);
-}
-
-export function isPersonalCollectionOrChild(
-  collection: Collection,
-  collectionList: Collection[],
-): boolean {
-  return (
-    isRootPersonalCollection(collection) ||
-    isPersonalCollectionChild(collection, collectionList)
-  );
 }
 
 export function isRootCollection(collection: Pick<Collection, "id">): boolean {
@@ -158,6 +199,25 @@ export function isReadOnlyCollection(collection: CollectionItem) {
   return isItemCollection(collection) && !collection.can_write;
 }
 
+export function canBookmarkItem({ model, type, archived }: CollectionItem) {
+  if (archived) {
+    return false;
+  }
+
+  if (type === "question" || type === "model" || type === "metric") {
+    return true;
+  }
+
+  switch (model) {
+    case "table":
+      return false;
+    case "collection":
+      return !isLibraryCollection({ type });
+    default:
+      return true;
+  }
+}
+
 export function canPinItem(item: CollectionItem, collection?: Collection) {
   return collection?.can_write && item.setPinned != null && !item.archived;
 }
@@ -173,10 +233,11 @@ export function canPreviewItem(item: CollectionItem, collection?: Collection) {
 
 export function canMoveItem(item: CollectionItem, collection?: Collection) {
   return (
-    collection?.can_write &&
+    (collection?.can_write || isRootTrashCollection(collection)) &&
     !isReadOnlyCollection(item) &&
     item.setCollection != null &&
-    !(isItemCollection(item) && isRootPersonalCollection(item))
+    !(isItemCollection(item) && isRootPersonalCollection(item)) &&
+    !isLibraryCollection(item as Pick<Collection, "type">)
   );
 }
 
@@ -184,17 +245,38 @@ export function canArchiveItem(item: CollectionItem, collection?: Collection) {
   return (
     collection?.can_write &&
     !isReadOnlyCollection(item) &&
-    !(isItemCollection(item) && isRootPersonalCollection(item)) &&
+    !(
+      isItemCollection(item) &&
+      (isRootPersonalCollection(item) || isDedicatedTenantCollectionRoot(item))
+    ) &&
+    !isLibraryCollection(item as Pick<Collection, "type">) &&
+    item.model !== "table" &&
     !item.archived
   );
 }
 
-export function canDeleteItem(item: CollectionItem, collection?: Collection) {
-  return item.archived && (item.can_write ?? collection?.can_write ?? true);
-}
-
 export function canCopyItem(item: CollectionItem) {
   return item.copy && !item.archived;
+}
+
+export function canPlaceEntityInCollection(
+  entityType: EntityType,
+  collectionType: CollectionType | null | undefined,
+): boolean {
+  return PLUGIN_DATA_STUDIO.canPlaceEntityInCollection(
+    entityType,
+    collectionType,
+  );
+}
+
+export function canPlaceEntityInCollectionOrDescendants(
+  entityType: EntityType,
+  collectionType: CollectionType | null | undefined,
+): boolean {
+  return PLUGIN_DATA_STUDIO.canPlaceEntityInCollectionOrDescendants(
+    entityType,
+    collectionType,
+  );
 }
 
 export function isPreviewShown(item: CollectionItem) {
@@ -222,6 +304,7 @@ export function canonicalCollectionId(
 ): number | null {
   if (
     collectionId === "root" ||
+    collectionId === "tenant" ||
     collectionId === null ||
     collectionId === undefined
   ) {
@@ -231,6 +314,16 @@ export function canonicalCollectionId(
   } else {
     return parseInt(collectionId, 10);
   }
+}
+
+export function canonicalCollectionIdOrEntityId(
+  collectionId: string | number | null | undefined,
+): number | string | null {
+  if (isBaseEntityID(collectionId)) {
+    return collectionId;
+  }
+
+  return canonicalCollectionId(collectionId);
 }
 
 export function isValidCollectionId(
@@ -247,3 +340,28 @@ export function isValidCollectionId(
   const id = canonicalCollectionId(collectionId);
   return id === null || typeof id === "number";
 }
+
+export const getCollectionName = (
+  collection: Pick<Collection, "id" | "name">,
+) => {
+  if (isRootCollection(collection)) {
+    return t`Our analytics`;
+  }
+  return collection?.name || t`Untitled collection`;
+};
+
+export const getCollectionPath = (collection: CollectionEssentials) => {
+  const ancestors: CollectionEssentials[] =
+    collection.effective_ancestors || [];
+  const collections = ancestors.concat(collection);
+  return collections;
+};
+
+export const getCollectionPathAsString = (collection: CollectionEssentials) => {
+  const collections = getCollectionPath(collection);
+  return collections
+    .map((coll) => getCollectionName(coll))
+    .join(` ${collectionPathSeparator} `);
+};
+
+export const collectionPathSeparator = "/";

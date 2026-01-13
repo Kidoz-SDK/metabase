@@ -1,15 +1,10 @@
+const { H } = cy;
 import { USERS } from "e2e/support/cypress_data";
 import {
-  ORDERS_QUESTION_ID,
   ORDERS_BY_YEAR_QUESTION_ID,
   ORDERS_COUNT_QUESTION_ID,
+  ORDERS_QUESTION_ID,
 } from "e2e/support/cypress_sample_instance_data";
-import {
-  restore,
-  setupSMTP,
-  visitQuestion,
-  getFullName,
-} from "e2e/support/helpers";
 
 const { normal, admin } = USERS;
 
@@ -17,22 +12,22 @@ describe("scenarios > alert > alert permissions", { tags: "@external" }, () => {
   // Intentional use of before (not beforeEach) hook because the setup is quite long.
   // Make sure that all tests are always able to run independently!
   before(() => {
-    restore();
+    H.restore();
     cy.signInAsAdmin();
 
-    setupSMTP();
+    H.setupSMTP();
 
     // Create alert as admin
-    visitQuestion(ORDERS_QUESTION_ID);
-    createBasicAlert({ firstAlert: true });
+    H.visitQuestion(ORDERS_QUESTION_ID);
+    createBasicAlert();
 
     // Create alert as admin that user can see
-    visitQuestion(ORDERS_COUNT_QUESTION_ID);
+    H.visitQuestion(ORDERS_COUNT_QUESTION_ID);
     createBasicAlert({ includeNormal: true });
 
     // Create alert as normal user
     cy.signInAsNormalUser();
-    visitQuestion(ORDERS_BY_YEAR_QUESTION_ID);
+    H.visitQuestion(ORDERS_BY_YEAR_QUESTION_ID);
     createBasicAlert();
   });
 
@@ -40,30 +35,34 @@ describe("scenarios > alert > alert permissions", { tags: "@external" }, () => {
     beforeEach(cy.signInAsAdmin);
 
     it("should let you see all created alerts", () => {
-      cy.request("/api/alert").then(response => {
-        expect(response.body).to.have.length(3);
+      cy.request("/api/notification").then((response) => {
+        const questionAlerts = response.body.filter(
+          (notification) => notification.payload_type === "notification/card",
+        );
+        expect(questionAlerts).to.have.length(3);
       });
     });
 
     it("should let you edit an alert", () => {
-      cy.intercept("PUT", "/api/alert/*").as("updatedAlert");
+      cy.intercept("PUT", "/api/notification/*").as("updatedAlert");
 
       // Change alert
-      visitQuestion(ORDERS_QUESTION_ID);
-      cy.icon("bell").click();
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Edit").click();
+      H.visitQuestion(ORDERS_QUESTION_ID);
 
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Daily").click();
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Weekly").click();
+      cy.findByLabelText("Move, trash, and more…").click();
+      H.popover().findByText("Edit alerts").click();
 
-      cy.button("Save changes").click();
+      H.modal()
+        .findByText(/Created by you/)
+        .click();
+
+      H.modal().findByTestId("select-frequency").click();
+      H.popover().findByText("weekly").click();
+      H.modal().button("Save changes").click();
 
       // Check that changes stuck
       cy.wait("@updatedAlert").then(({ response: { body } }) => {
-        expect(body.channels[0].schedule_type).to.equal("weekly");
+        expect(body.subscriptions[0].cron_schedule).to.equal("0 0 8 ? * 2 *");
       });
     });
   });
@@ -72,66 +71,97 @@ describe("scenarios > alert > alert permissions", { tags: "@external" }, () => {
     beforeEach(cy.signInAsNormalUser);
 
     it("should not let you see other people's alerts", () => {
-      visitQuestion(ORDERS_QUESTION_ID);
-      cy.icon("bell").click();
+      H.visitQuestion(ORDERS_QUESTION_ID);
+      cy.findByLabelText("Move, trash, and more…").click();
 
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Unsubscribe").should("not.exist");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Set up an alert");
+      H.popover().findByText("Edit alerts").should("not.exist");
+      H.popover().findByText("Create an alert").should("be.visible");
     });
 
     it("should let you see other alerts where you are a recipient", () => {
-      visitQuestion(ORDERS_COUNT_QUESTION_ID);
-      cy.icon("bell").click();
+      H.visitQuestion(ORDERS_COUNT_QUESTION_ID);
+      cy.findByLabelText("Move, trash, and more…").click();
+      H.popover().findByText("Edit alerts").click();
 
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText(`You're receiving ${getFullName(admin)}'s alerts`);
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Set up your own alert");
+      H.modal().within(() => {
+        cy.findByText(`Created by ${H.getFullName(admin)}`, {
+          exact: false,
+        }).should("be.visible");
+        cy.button("New alert").should("be.visible");
+      });
     });
 
     it("should let you see your own alerts", () => {
-      visitQuestion(ORDERS_BY_YEAR_QUESTION_ID);
-      cy.icon("bell").click();
+      H.visitQuestion(ORDERS_BY_YEAR_QUESTION_ID);
+      cy.findByLabelText("Move, trash, and more…").click();
+      H.popover().findByText("Edit alerts").click();
 
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("You set up an alert");
+      H.modal().findByText(/Created by you/);
     });
 
-    it("should let you unsubscribe from both your own and others' alerts", () => {
-      // Unsubscribe from your own alert
-      visitQuestion(ORDERS_BY_YEAR_QUESTION_ID);
-      cy.icon("bell").click();
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Unsubscribe").click();
+    it("should let you unsubscribe from others' alerts", () => {
+      H.visitQuestion(ORDERS_COUNT_QUESTION_ID);
+      cy.findByLabelText("Move, trash, and more…").click();
+      H.popover().findByText("Edit alerts").click();
 
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Okay, you're unsubscribed");
+      H.modal().within(() => {
+        cy.findByText(`Created by ${H.getFullName(admin)}`, {
+          exact: false,
+        }).realHover();
+        cy.icon("unsubscribe").click();
+      });
 
-      // Unsubscribe from others' alerts
-      visitQuestion(ORDERS_COUNT_QUESTION_ID);
-      cy.icon("bell").click();
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Unsubscribe").click();
+      H.modal().within(() => {
+        cy.findByText("Confirm you want to unsubscribe");
+        cy.button("Unsubscribe").click();
+      });
 
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Okay, you're unsubscribed");
+      H.notificationList().findByText("Successfully unsubscribed.");
+    });
+
+    it("should let you edit your own alerts", () => {
+      cy.intercept("PUT", "/api/notification/*").as("updatedAlert");
+
+      H.visitQuestion(ORDERS_BY_YEAR_QUESTION_ID);
+      cy.findByLabelText("Move, trash, and more…").click();
+      H.popover().findByText("Edit alerts").click();
+
+      H.modal()
+        .findByText(/Created by you/)
+        .click();
+
+      H.modal().within(() => {
+        cy.findByText("Edit alert").should("be.visible");
+        cy.button("Done").should("be.enabled");
+
+        cy.findByTestId("select-frequency").click();
+      });
+      H.popover().findByText("weekly").click();
+
+      H.modal().button("Save changes").click();
+
+      // Check that changes stuck
+      cy.wait("@updatedAlert").then(({ response: { body } }) => {
+        expect(body.subscriptions[0].cron_schedule).to.equal("0 0 8 ? * 2 *");
+      });
+
+      H.modal().findByText("Check on Monday at 8:00 AM");
     });
   });
 });
 
-function createBasicAlert({ firstAlert, includeNormal } = {}) {
-  cy.get(".Icon-bell").click();
-
-  if (firstAlert) {
-    cy.findByText("Set up an alert").click();
-  }
+function createBasicAlert({ includeNormal } = {}) {
+  cy.findByLabelText("Move, trash, and more…").click();
+  H.popover().findByText("Create an alert").click();
 
   if (includeNormal) {
-    cy.findByText("Email alerts to:").parent().children().last().click();
-    cy.findByText(getFullName(normal)).click();
+    cy.findByText("Email")
+      .closest('[data-testid="channel-block"]')
+      .findByTestId("token-field")
+      .click();
+    cy.findByText(H.getFullName(normal)).click();
   }
+
   cy.findByText("Done").click();
-  cy.findByText("Let's set up your alert").should("not.exist");
+  cy.findByText("New alert").should("not.exist");
 }

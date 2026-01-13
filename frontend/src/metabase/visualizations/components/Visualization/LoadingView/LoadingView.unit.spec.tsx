@@ -1,4 +1,4 @@
-import { screen, renderWithProviders } from "__support__/ui";
+import { renderWithProviders, screen } from "__support__/ui";
 
 import LoadingView from "./LoadingView";
 
@@ -34,6 +34,17 @@ describe("LoadingView", () => {
     expect(screen.getByText("10 seconds")).toBeInTheDocument();
     expect(
       screen.getByText(/but is currently taking longer./),
+    ).toBeInTheDocument();
+  });
+
+  it("should show the usually slow message even when the expected duration is 0 (metabase#57869)", () => {
+    setup({
+      expectedDuration: 0,
+      isSlow: "usually-slow",
+    });
+
+    expect(
+      screen.getByText(/This usually takes an average of/),
     ).toBeInTheDocument();
   });
 });

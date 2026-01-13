@@ -1,8 +1,13 @@
-import { connect } from "react-redux";
+import { useLayoutEffect } from "react";
 
+import { usePageTitle } from "metabase/hooks/use-page-title";
+import { isWithinIframe } from "metabase/lib/dom";
+import { connect, useSelector } from "metabase/lib/redux";
 import { PublicError } from "metabase/public/components/PublicError";
 import { PublicNotFound } from "metabase/public/components/PublicNotFound";
 import { getErrorPage } from "metabase/selectors/app";
+import { getApplicationName } from "metabase/selectors/whitelabel";
+import { PublicStatusListing } from "metabase/status/components/PublicStatusListing";
 import type { AppErrorDescriptor, State } from "metabase-types/store";
 
 interface OwnProps {
@@ -22,10 +27,25 @@ function mapStateToProps(state: State) {
 }
 
 function PublicApp({ errorPage, children }: Props) {
+  const applicationName = useSelector(getApplicationName);
+  usePageTitle(applicationName, { titleIndex: 0 });
+
+  useLayoutEffect(() => {
+    if (isWithinIframe()) {
+      document.body.style.backgroundColor = "transparent";
+    }
+  }, []);
+
   if (errorPage) {
     return errorPage.status === 404 ? <PublicNotFound /> : <PublicError />;
   }
-  return children;
+
+  return (
+    <>
+      {children}
+      <PublicStatusListing />
+    </>
+  );
 }
 
 // eslint-disable-next-line import/no-default-export -- deprecated usage

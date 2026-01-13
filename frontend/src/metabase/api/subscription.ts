@@ -1,7 +1,8 @@
 import type {
-  ListSubscriptionsRequest,
-  DashboardSubscription,
+  ChannelApiResponse,
   CreateSubscriptionRequest,
+  DashboardSubscription,
+  ListSubscriptionsRequest,
   UpdateSubscriptionRequest,
 } from "metabase-types/api";
 
@@ -10,17 +11,18 @@ import {
   idTag,
   invalidateTags,
   listTag,
+  provideSubscriptionChannelListTags,
   provideSubscriptionListTags,
   provideSubscriptionTags,
 } from "./tags";
 
 export const subscriptionApi = Api.injectEndpoints({
-  endpoints: builder => ({
+  endpoints: (builder) => ({
     listSubscriptions: builder.query<
       DashboardSubscription[],
       ListSubscriptionsRequest
     >({
-      query: params => ({
+      query: (params) => ({
         method: "GET",
         url: "/api/pulse",
         params,
@@ -29,18 +31,18 @@ export const subscriptionApi = Api.injectEndpoints({
         provideSubscriptionListTags(subscriptions),
     }),
     getSubscription: builder.query<DashboardSubscription, number>({
-      query: id => ({
+      query: (id) => ({
         method: "GET",
         url: `/api/pulse/${id}`,
       }),
-      providesTags: subscription =>
+      providesTags: (subscription) =>
         subscription ? provideSubscriptionTags(subscription) : [],
     }),
     createSubscription: builder.mutation<
       DashboardSubscription,
       CreateSubscriptionRequest
     >({
-      query: body => ({
+      query: (body) => ({
         method: "POST",
         url: "/api/pulse",
         body,
@@ -64,7 +66,7 @@ export const subscriptionApi = Api.injectEndpoints({
         ]),
     }),
     unsubscribe: builder.mutation<void, number>({
-      query: id => ({
+      query: (id) => ({
         method: "DELETE",
         url: `/api/pulse/${id}/subscription`,
       }),
@@ -73,6 +75,13 @@ export const subscriptionApi = Api.injectEndpoints({
           listTag("subscription"),
           idTag("subscription", id),
         ]),
+    }),
+    getChannelInfo: builder.query<ChannelApiResponse, void>({
+      query: () => ({
+        method: "GET",
+        url: `/api/pulse/form_input`,
+      }),
+      providesTags: () => provideSubscriptionChannelListTags(),
     }),
   }),
 });
@@ -83,4 +92,5 @@ export const {
   useCreateSubscriptionMutation,
   useUpdateSubscriptionMutation,
   useUnsubscribeMutation,
+  useGetChannelInfoQuery,
 } = subscriptionApi;

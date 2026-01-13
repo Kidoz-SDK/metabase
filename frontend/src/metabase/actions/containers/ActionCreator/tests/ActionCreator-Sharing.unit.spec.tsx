@@ -1,13 +1,19 @@
 import userEvent from "@testing-library/user-event";
+import fetchMock from "fetch-mock";
 
 import { screen, waitFor } from "__support__/ui";
+import { getNextId } from "__support__/utils";
+import type {
+  WritebackImplicitQueryAction,
+  WritebackQueryAction,
+} from "metabase-types/api";
 import {
   createMockImplicitQueryAction,
   createMockQueryAction,
 } from "metabase-types/api/mocks";
 
 import type { SetupOpts } from "./common";
-import { setup as baseSetup, SITE_URL } from "./common";
+import { SITE_URL, setup as baseSetup } from "./common";
 
 async function setup({
   action = createMockImplicitQueryAction(),
@@ -17,10 +23,24 @@ async function setup({
   return { action };
 }
 
+function getQueryAction(params?: Partial<WritebackQueryAction>) {
+  return createMockQueryAction({
+    id: getNextId(),
+    ...params,
+  });
+}
+
+function getImplicitAction(params?: Partial<WritebackImplicitQueryAction>) {
+  return createMockImplicitQueryAction({
+    id: getNextId(),
+    ...params,
+  });
+}
+
 describe("ActionCreator > Sharing", () => {
   describe.each([
-    ["query", createMockQueryAction],
-    ["implicit", createMockImplicitQueryAction],
+    ["query", getQueryAction],
+    ["implicit", getImplicitAction],
   ])(`%s actions`, (_, getAction) => {
     describe("admin users and has public sharing enabled", () => {
       const mockUuid = "mock-uuid";
@@ -46,9 +66,13 @@ describe("ActionCreator > Sharing", () => {
           isPublicSharingEnabled: true,
         });
 
-        screen.getByRole("button", { name: "Action settings" }).click();
+        await userEvent.click(
+          screen.getByRole("button", { name: "Action settings" }),
+        );
 
-        expect(screen.getByText("Action settings")).toBeInTheDocument();
+        const headerTitle = await screen.findByTestId("sidebar-header-title");
+        expect(headerTitle).toBeInTheDocument();
+        expect(headerTitle).toHaveTextContent("Action settings");
         const makePublicToggle = screen.getByRole("switch", {
           name: "Make public",
         });
@@ -57,7 +81,13 @@ describe("ActionCreator > Sharing", () => {
           screen.queryByRole("textbox", { name: "Public action form URL" }),
         ).not.toBeInTheDocument();
 
-        screen.getByRole("switch", { name: "Make public" }).click();
+        fetchMock.modifyRoute(`action-${privateAction.id}-get`, {
+          response: () => ({ ...privateAction, public_uuid: mockUuid }),
+        });
+
+        await userEvent.click(
+          screen.getByRole("switch", { name: "Make public" }),
+        );
 
         await waitFor(() => {
           expect(makePublicToggle).toBeChecked();
@@ -75,9 +105,13 @@ describe("ActionCreator > Sharing", () => {
           isAdmin: true,
           isPublicSharingEnabled: true,
         });
-        screen.getByRole("button", { name: "Action settings" }).click();
+        await userEvent.click(
+          screen.getByRole("button", { name: "Action settings" }),
+        );
 
-        expect(screen.getByText("Action settings")).toBeInTheDocument();
+        const headerTitle = await screen.findByTestId("sidebar-header-title");
+        expect(headerTitle).toBeInTheDocument();
+        expect(headerTitle).toHaveTextContent("Action settings");
         const makePublicToggle = screen.getByRole("switch", {
           name: "Make public",
         });
@@ -87,11 +121,15 @@ describe("ActionCreator > Sharing", () => {
           screen.getByRole("textbox", { name: "Public action form URL" }),
         ).toHaveValue(expectedPublicLinkUrl);
 
-        makePublicToggle.click();
+        await userEvent.click(makePublicToggle);
         expect(
           screen.getByRole("heading", { name: "Disable this public link?" }),
         ).toBeInTheDocument();
-        screen.getByRole("button", { name: "Yes" }).click();
+
+        fetchMock.modifyRoute(`action-${publicAction.id}-get`, {
+          response: () => ({ ...publicAction, public_uuid: null }),
+        });
+        await userEvent.click(screen.getByRole("button", { name: "Yes" }));
 
         await waitFor(() => {
           expect(makePublicToggle).not.toBeChecked();

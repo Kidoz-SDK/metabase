@@ -1,8 +1,4 @@
 import {
-  setDashCardAttributes,
-  setMultipleDashCardAttributes,
-} from "metabase/dashboard/actions";
-import {
   closeAutoWireParameterToast,
   showAddedCardAutoWireParametersToast,
   showAutoWireParametersToast,
@@ -10,79 +6,114 @@ import {
 import {
   getAllDashboardCardsWithUnmappedParameters,
   getAutoWiredMappingsForDashcards,
+  getMatchingParameterOption,
   getParameterMappings,
 } from "metabase/dashboard/actions/auto-wire-parameters/utils";
 import { getExistingDashCards } from "metabase/dashboard/actions/utils";
-import { getDashCardById, getQuestions } from "metabase/dashboard/selectors";
-import { isQuestionDashCard } from "metabase/dashboard/utils";
-import { getParameterMappingOptions } from "metabase/parameters/utils/mapping-options";
-import { getMetadata } from "metabase/selectors/metadata";
-import Question from "metabase-lib/v1/Question";
-import { compareMappingOptionTargets } from "metabase-lib/v1/parameters/utils/targets";
+import {
+  getDashCardById,
+  getDashboard,
+  getDashboardHeaderParameters,
+  getParameters,
+  getQuestions,
+  getSelectedTabId,
+  getTabs,
+} from "metabase/dashboard/selectors";
+import {
+  findDashCardForInlineParameter,
+  isQuestionDashCard,
+} from "metabase/dashboard/utils";
+import {
+  getMappingOptionByTarget,
+  getParameterMappingOptions,
+} from "metabase/parameters/utils/mapping-options";
 import type {
-  QuestionDashboardCard,
   DashCardId,
+  DashboardParameterMapping,
+  DashboardTabId,
   ParameterId,
   ParameterTarget,
+  QuestionDashboardCard,
 } from "metabase-types/api";
 import type { Dispatch, GetState, StoreDashcard } from "metabase-types/store";
 
-export function autoWireDashcardsWithMatchingParameters(
+export function showAutoWireToast(
   parameter_id: ParameterId,
   dashcard: QuestionDashboardCard,
   target: ParameterTarget,
+  selectedTabId: DashboardTabId,
 ) {
   return function (dispatch: Dispatch, getState: GetState) {
-    const metadata = getMetadata(getState());
-    const dashboard_state = getState().dashboard;
+    const dashboardState = getState().dashboard;
     const questions = getQuestions(getState());
+    const parameter = getParameters(getState()).find(
+      ({ id }) => id === parameter_id,
+    );
 
-    if (!dashboard_state.dashboardId) {
+    if (!dashboardState.dashboardId || !parameter) {
       return;
     }
 
     const dashcardsToAutoApply = getAllDashboardCardsWithUnmappedParameters({
-      dashboardState: dashboard_state,
-      dashboardId: dashboard_state.dashboardId,
+      dashboards: dashboardState.dashboards,
+      dashcards: dashboardState.dashcards,
+      dashboardId: dashboardState.dashboardId,
       parameterId: parameter_id,
+      selectedTabId,
+      // exclude current dashcard as it's being updated in another action
       excludeDashcardIds: [dashcard.id],
     });
 
+    const dashcards = Object.values(dashboardState.dashcards);
+
     const dashcardAttributes = getAutoWiredMappingsForDashcards(
-      dashcard,
+      parameter,
       dashcardsToAutoApply,
-      parameter_id,
       target,
-      metadata,
       questions,
+      dashcards,
     );
 
-    if (dashcardAttributes.length === 0) {
+    const shouldShowToast = dashcardAttributes.length > 0;
+
+    if (!shouldShowToast) {
       return;
     }
 
-    dispatch(
-      setMultipleDashCardAttributes({
-        dashcards: dashcardAttributes,
-      }),
-    );
-
-    const originalDashcardAttributes = dashcardsToAutoApply.map(dashcard => ({
+    const originalDashcardAttributes = dashcardsToAutoApply.map((dashcard) => ({
       id: dashcard.id,
       attributes: {
         parameter_mappings: dashcard.parameter_mappings,
       },
     }));
 
+    const mappingOption = getMatchingParameterOption(
+      parameter,
+      dashcard,
+      target,
+      questions,
+      dashcards,
+    );
+
+    const tabs = getTabs(getState());
+
+    if (!mappingOption) {
+      return;
+    }
+
     dispatch(
       showAutoWireParametersToast({
-        dashcardAttributes: originalDashcardAttributes,
+        dashcardAttributes,
+        originalDashcardAttributes,
+        columnName: formatMappingOption(mappingOption),
+        hasMultipleTabs: tabs.length > 1,
+        parameterId: parameter_id,
       }),
     );
   };
 }
 
-export function autoWireParametersToNewCard({
+export function showAutoWireToastNewCard({
   dashcard_id,
 }: {
   dashcard_id: DashCardId;
@@ -90,7 +121,6 @@ export function autoWireParametersToNewCard({
   return function (dispatch: Dispatch, getState: GetState) {
     dispatch(closeAutoWireParameterToast());
 
-    const metadata = getMetadata(getState());
     const dashboardState = getState().dashboard;
     const dashboardId = dashboardState.dashboardId;
 
@@ -98,21 +128,23 @@ export function autoWireParametersToNewCard({
       return;
     }
 
+    const dashboard = getDashboard(getState());
+    if (!dashboard || !dashboard.parameters) {
+      return;
+    }
+
     const questions = getQuestions(getState());
+    const selectedTabId = getSelectedTabId(getState());
+
+    // Inline dashcard parameters should not be used for auto-wiring
+    const parameters = getDashboardHeaderParameters(getState());
 
     const dashcards = getExistingDashCards(
       dashboardState.dashboards,
       dashboardState.dashcards,
       dashboardId,
+      selectedTabId,
     );
-
-    const dashcardWithQuestions: Array<[StoreDashcard, Question]> =
-      dashcards.map(dashcard => [
-        dashcard,
-        isQuestionDashCard(dashcard)
-          ? questions[dashcard.card.id] ?? new Question(dashcard.card, metadata)
-          : new Question(dashcard.card, metadata),
-      ]);
 
     const targetDashcard: StoreDashcard = getDashCardById(
       getState(),
@@ -123,68 +155,86 @@ export function autoWireParametersToNewCard({
       return;
     }
 
-    const dashcardMappingOptions = getParameterMappingOptions(
-      questions[targetDashcard.card.id] ??
-        new Question(targetDashcard.card, metadata),
-      null,
-      targetDashcard.card,
-      targetDashcard,
-    );
+    const targetQuestion = questions[targetDashcard.card.id];
 
-    const targetQuestion =
-      questions[targetDashcard.card.id] ??
-      new Question(targetDashcard.card, metadata);
-
-    const parametersToAutoApply = [];
+    const parametersMappingsToApply: DashboardParameterMapping[] = [];
     const processedParameterIds = new Set();
 
-    for (const opt of dashcardMappingOptions) {
-      for (const [dashcard, question] of dashcardWithQuestions) {
-        const param = dashcard.parameter_mappings?.find(mapping =>
-          compareMappingOptionTargets(
-            mapping.target,
-            opt.target,
-            question,
-            targetQuestion,
-          ),
+    for (const parameter of parameters) {
+      const parameterDashcard = findDashCardForInlineParameter(
+        parameter.id,
+        Object.values(dashcards),
+      );
+
+      const dashcardMappingOptions = getParameterMappingOptions(
+        targetQuestion,
+        parameter,
+        targetDashcard.card,
+        targetDashcard,
+        parameterDashcard,
+      );
+
+      for (const dashcard of dashcards) {
+        const mappings = (dashcard.parameter_mappings ?? []).filter(
+          (mapping) => mapping.parameter_id === parameter.id,
         );
 
-        if (
-          targetDashcard.card_id &&
-          param &&
-          !processedParameterIds.has(param.parameter_id)
-        ) {
-          parametersToAutoApply.push(
-            ...getParameterMappings(
-              targetDashcard,
-              param.parameter_id,
-              targetDashcard.card_id,
-              opt.target,
-            ),
+        for (const mapping of mappings) {
+          const option = getMappingOptionByTarget(
+            dashcardMappingOptions,
+            mapping.target,
+            targetQuestion,
+            parameter,
           );
-          processedParameterIds.add(param.parameter_id);
+
+          if (
+            option &&
+            targetDashcard.card_id &&
+            !processedParameterIds.has(parameter.id)
+          ) {
+            parametersMappingsToApply.push(
+              ...getParameterMappings(
+                targetDashcard,
+                parameter.id,
+                targetDashcard.card_id,
+                option.target,
+              ),
+            );
+            processedParameterIds.add(parameter.id);
+          }
         }
       }
     }
 
-    if (parametersToAutoApply.length === 0) {
+    if (parametersMappingsToApply.length === 0) {
       return;
     }
 
-    dispatch(
-      setDashCardAttributes({
-        id: dashcard_id,
-        attributes: {
-          parameter_mappings: parametersToAutoApply,
-        },
-      }),
+    const parametersToMap = dashboard.parameters.filter((p) =>
+      processedParameterIds.has(p.id),
     );
 
     dispatch(
       showAddedCardAutoWireParametersToast({
         targetDashcard,
         dashcard_id,
+        parametersMappingsToApply,
+        parametersToMap,
       }),
     );
   };
+}
+
+function formatMappingOption({
+  name,
+  sectionName,
+}: {
+  name: string;
+  sectionName?: string;
+}) {
+  if (sectionName == null) {
+    // for native question variables or field literals we just display the name
+    return name;
+  }
+  return `${sectionName}.${name}`;
 }

@@ -1,7 +1,4 @@
 import PropTypes from "prop-types";
-import _ from "underscore";
-
-import ExplicitSize from "metabase/components/ExplicitSize";
 
 import Legend from "./Legend";
 import LegendActions from "./LegendActions";
@@ -30,12 +27,11 @@ const propTypes = {
   children: PropTypes.node,
   onHoverChange: PropTypes.func,
   onSelectSeries: PropTypes.func,
-  onRemoveSeries: PropTypes.func,
+  onToggleSeriesVisibility: PropTypes.func,
   isReversed: PropTypes.bool,
-  canRemoveSeries: PropTypes.func,
 };
 
-const LegendLayout = ({
+export const LegendLayout = ({
   className,
   items,
   hovered,
@@ -48,9 +44,8 @@ const LegendLayout = ({
   children,
   onHoverChange,
   onSelectSeries,
-  onRemoveSeries,
+  onToggleSeriesVisibility,
   isReversed,
-  canRemoveSeries,
 }) => {
   const hasDimensions = width != null && height != null;
   const itemHeight = !isFullscreen ? MIN_ITEM_HEIGHT : MIN_ITEM_HEIGHT_LARGE;
@@ -60,43 +55,44 @@ const LegendLayout = ({
   const minYLabels = items.length > maxYItems ? maxYLabels : items.length;
 
   const isNarrow = width < MIN_LEGEND_WIDTH;
+
   const isVertical = maxXItems < items.length;
+  const isHorizontal = !isVertical;
+
   const isVisible = hasLegend && !(isVertical && isNarrow);
   const visibleLength = isVertical ? minYLabels : items.length;
 
+  const legend = (
+    <LegendContainer isVertical={isVertical} isQueryBuilder={isQueryBuilder}>
+      <Legend
+        items={items}
+        hovered={hovered}
+        visibleLength={visibleLength}
+        isVertical={isVertical}
+        onHoverChange={onHoverChange}
+        onSelectSeries={onSelectSeries}
+        onToggleSeriesVisibility={onToggleSeriesVisibility}
+        isQueryBuilder={isQueryBuilder}
+        isReversed={isReversed}
+      />
+      {!isVertical && actionButtons && (
+        <LegendActions>{actionButtons}</LegendActions>
+      )}
+    </LegendContainer>
+  );
+
   return (
     <LegendLayoutRoot className={className} isVertical={isVertical}>
-      {isVisible && (
-        <LegendContainer
-          isVertical={isVertical}
-          isQueryBuilder={isQueryBuilder}
-        >
-          <Legend
-            items={items}
-            hovered={hovered}
-            visibleLength={visibleLength}
-            isVertical={isVertical}
-            onHoverChange={onHoverChange}
-            onSelectSeries={onSelectSeries}
-            onRemoveSeries={onRemoveSeries}
-            isReversed={isReversed}
-            canRemoveSeries={canRemoveSeries}
-          />
-          {!isVertical && actionButtons && (
-            <LegendActions>{actionButtons}</LegendActions>
-          )}
-        </LegendContainer>
-      )}
+      {isVisible && isHorizontal && legend}
       <MainContainer>
         {isVertical && actionButtons && (
           <LegendActions>{actionButtons}</LegendActions>
         )}
         {hasDimensions && <ChartContainer>{children}</ChartContainer>}
       </MainContainer>
+      {isVisible && isVertical && legend}
     </LegendLayoutRoot>
   );
 };
 
 LegendLayout.propTypes = propTypes;
-
-export default _.compose(ExplicitSize())(LegendLayout);

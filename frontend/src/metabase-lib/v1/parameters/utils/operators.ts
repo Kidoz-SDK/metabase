@@ -4,20 +4,22 @@ import {
 } from "metabase-lib/v1/operators/utils";
 import { PARAMETER_OPERATOR_TYPES } from "metabase-lib/v1/parameters/constants";
 import {
-  getParameterType,
   getParameterSubType,
+  getParameterType,
 } from "metabase-lib/v1/parameters/utils/parameter-type";
-import { NUMBER, STRING, PRIMARY_KEY } from "metabase-lib/v1/types/constants";
+import { NUMBER, PRIMARY_KEY, STRING } from "metabase-lib/v1/types/constants";
 import type { Parameter, ParameterMappingOptions } from "metabase-types/api";
 
-import { getIsMultiSelect } from "../../../../metabase/parameters/utils/dashboards";
+import { getIsMultiSelect } from "./parameter-values";
 
 type OperatorType = "date" | "number" | "string";
 export type ParameterSectionId =
-  | "number"
-  | "string"
   | "date"
+  | "temporal-unit"
   | "location"
+  | "string"
+  | "number"
+  | "boolean"
   | "id";
 
 export function getOperatorDisplayName(
@@ -73,7 +75,7 @@ export function buildTypedOperatorOptions(
   sectionId: ParameterSectionId,
   sectionName: string,
 ): ParameterMappingOptions[] {
-  return PARAMETER_OPERATOR_TYPES[operatorType].map(operatorOption => {
+  return PARAMETER_OPERATOR_TYPES[operatorType].map((operatorOption) => {
     return {
       ...operatorOption,
       sectionId,
@@ -90,19 +92,13 @@ export function getNumberParameterArity(parameter: Parameter) {
   switch (parameter.type) {
     case "number/=":
     case "number/!=":
+      if (!getIsMultiSelect(parameter)) {
+        return 1;
+      }
+
       return "n";
     case "number/between":
       return 2;
-    default:
-      return 1;
-  }
-}
-
-export function getStringParameterArity(parameter: Parameter) {
-  switch (parameter.type) {
-    case "string/=":
-    case "string/!=":
-      return "n";
     default:
       return 1;
   }

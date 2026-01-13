@@ -1,12 +1,15 @@
 (ns metabase.lib.drill-thru.automatic-insights
+  (:refer-clojure :exclude [not-empty])
   (:require
    [metabase.lib.drill-thru.common :as lib.drill-thru.common]
    [metabase.lib.drill-thru.underlying-records :as lib.drill-thru.underlying-records]
    [metabase.lib.metadata :as lib.metadata]
    [metabase.lib.schema :as lib.schema]
    [metabase.lib.schema.drill-thru :as lib.schema.drill-thru]
+   [metabase.lib.underlying :as lib.underlying]
    [metabase.lib.util :as lib.util]
-   [metabase.util.malli :as mu]))
+   [metabase.util.malli :as mu]
+   [metabase.util.performance :refer [not-empty]]))
 
 (mu/defn automatic-insights-drill :- [:maybe ::lib.schema.drill-thru/drill-thru]
   "Automatic insights appears:
@@ -21,10 +24,13 @@
    stage-number                                 :- :int
    {:keys [column column-ref dimensions value]} :- ::lib.schema.drill-thru/context]
   (when (and (lib.drill-thru.common/mbql-stage? query stage-number)
+             (lib.underlying/has-aggregation-or-breakout? query)
              ;; Column with no value is not allowed - that's a column header click. Other combinations are allowed.
              (or (not column) (some? value))
              (lib.metadata/setting query :enable-xrays)
-             (not-empty dimensions))
+             (not-empty dimensions)
+             ;; Disabled because xrays do not work with multi-stage queries (metabase#52129).
+             (not (lib.underlying/strictly-underlying-aggregation? query column)))
     {:lib/type   :metabase.lib.drill-thru/drill-thru
      :type       :drill-thru/automatic-insights
      :column-ref column-ref

@@ -1,7 +1,8 @@
+import Color from "color";
 import _ from "underscore";
 
 import { ACCENT_COUNT, color } from "./palette";
-import type { AccentColorOptions, ColorPalette } from "./types";
+import type { AccentColorOptions, ColorName, ColorPalette } from "./types";
 
 export const getAccentColors = (
   {
@@ -9,32 +10,61 @@ export const getAccentColors = (
     light = true,
     dark = true,
     harmony = false,
+    gray = true,
   }: AccentColorOptions = {},
   palette?: ColorPalette,
-) => {
-  const ranges = [];
-  main && ranges.push(getMainAccentColors(palette));
-  light && ranges.push(getLightAccentColors(palette));
-  dark && ranges.push(getDarkAccentColors(palette));
+): string[] => {
+  const ranges: string[][] = [];
+  main && ranges.push(getMainAccentColors(palette, gray));
+  light && ranges.push(getLightAccentColors(palette, gray));
+  dark && ranges.push(getDarkAccentColors(palette, gray));
 
   return harmony ? _.unzip(ranges).flat() : ranges.flat();
 };
 
-export const getMainAccentColors = (palette?: ColorPalette) => {
-  return _.times(ACCENT_COUNT, i => color(`accent${i}`, palette));
+const getBaseAccentsNames = (withGray = false) => {
+  const accents: ColorName[] = _.times(
+    ACCENT_COUNT,
+    (i) => `accent${i}` as ColorName,
+  );
+  if (withGray) {
+    accents.push("accent-gray");
+  }
+
+  return accents;
 };
 
-export const getLightAccentColors = (palette?: ColorPalette) => {
-  return _.times(ACCENT_COUNT, i => color(`accent${i}-light`, palette));
+export const getMainAccentColors = (
+  palette?: ColorPalette,
+  withGray = false,
+): string[] => {
+  // Ensure that colors are defined in hex, not HSLA
+  return getBaseAccentsNames(withGray).map((accent) =>
+    Color(color(accent, palette)).hex(),
+  );
 };
 
-export const getDarkAccentColors = (palette?: ColorPalette) => {
-  return _.times(ACCENT_COUNT, i => color(`accent${i}-dark`, palette));
+export const getLightAccentColors = (
+  palette?: ColorPalette,
+  withGray = false,
+): string[] => {
+  return getBaseAccentsNames(withGray).map((accent) =>
+    Color(color(`${accent}-light` as ColorName, palette)).hex(),
+  );
 };
 
-export const getStatusColorRanges = () => {
+export const getDarkAccentColors = (
+  palette?: ColorPalette,
+  withGray = false,
+) => {
+  return getBaseAccentsNames(withGray).map((accent) =>
+    Color(color(`${accent}-dark` as ColorName, palette)).hex(),
+  );
+};
+
+export const getStatusColorRanges = (): string[][] => {
   return [
-    [color("error"), color("white"), color("success")],
+    [color("error"), "transparent", color("success")],
     [color("error"), color("warning"), color("success")],
   ];
 };

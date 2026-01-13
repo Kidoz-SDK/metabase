@@ -1,12 +1,15 @@
+import { useMemo } from "react";
 import { t } from "ttag";
-import _ from "underscore";
 
-import { ParameterValuePicker } from "metabase/parameters/components/ParameterValuePicker";
 import { RequiredParamToggle } from "metabase/parameters/components/RequiredParamToggle";
 import { Flex, Text } from "metabase/ui";
 import type { Parameter, TemplateTag } from "metabase-types/api";
 
-import { ContainerLabel, ErrorSpan } from "./TagEditorParam.styled";
+import {
+  ContainerLabel,
+  DefaultParameterValueWidget,
+  ErrorSpan,
+} from "./TagEditorParam";
 
 export function DefaultRequiredValueControl({
   tag,
@@ -22,21 +25,31 @@ export function DefaultRequiredValueControl({
   onChangeRequired: (value: boolean) => void;
 }) {
   const isMissing = tag.required && !tag.default;
+  const parameterWithoutDefault = useMemo(
+    () => ({ ...parameter, default: null }),
+    [parameter],
+  );
 
   return (
     <div>
-      <ContainerLabel>
-        {t`Default filter widget value`}
-        {isMissing && <ErrorSpan>({t`required`})</ErrorSpan>}
+      <ContainerLabel id={`default-value-label-${tag.id}`}>
+        {getLabel(tag)}
+        {isMissing && <ErrorSpan> ({t`required`})</ErrorSpan>}
       </ContainerLabel>
 
       <Flex gap="xs" direction="column">
-        <ParameterValuePicker
-          tag={tag}
-          parameter={parameter}
-          value={tag.default}
-          onValueChange={onChangeDefaultValue}
-        />
+        {parameter && (
+          <div aria-labelledby={`default-value-label-${tag.id}`}>
+            <DefaultParameterValueWidget
+              parameter={parameterWithoutDefault}
+              value={tag.default}
+              setValue={onChangeDefaultValue}
+              isEditing
+              commitImmediately
+              mimicMantine
+            />
+          </div>
+        )}
 
         <RequiredParamToggle
           uniqueId={tag.id}
@@ -65,4 +78,10 @@ export function DefaultRequiredValueControl({
       </Flex>
     </div>
   );
+}
+
+function getLabel(tag: TemplateTag) {
+  return tag.type === "temporal-unit"
+    ? t`Default parameter widget value`
+    : t`Default filter widget value`;
 }

@@ -9,6 +9,8 @@ import { renderWithProviders, screen, waitFor } from "__support__/ui";
 import { getNextId } from "__support__/utils";
 import { ROOT_COLLECTION as ROOT } from "metabase/entities/collections";
 import { checkNotNull } from "metabase/lib/types";
+// TODO: Move this to a more suitable location for sharing.
+import { MockDashboardContext } from "metabase/public/containers/PublicOrEmbeddedDashboard/mock-context";
 import type { Collection, CollectionItem, Dashboard } from "metabase-types/api";
 import {
   createMockCollection,
@@ -16,6 +18,7 @@ import {
   createMockDashboard,
   createMockSearchResult,
   createMockUser,
+  createMockUserPermissions,
 } from "metabase-types/api/mocks";
 import {
   createMockDashboardState,
@@ -24,11 +27,8 @@ import {
 
 import { AddCardSidebar } from "./AddCardSidebar";
 
-const CURRENT_USER = createMockUser({
-  id: 1,
-  personal_collection_id: 100,
-  is_superuser: true,
-});
+const CURRENT_USER_ID = 1;
+const PERSONAL_COLLECTION_ID = 100;
 
 const COLLECTION = createMockCollection({
   id: 1,
@@ -47,16 +47,16 @@ const SUBCOLLECTION = createMockCollection({
 });
 
 const PERSONAL_COLLECTION = createMockCollection({
-  id: CURRENT_USER.personal_collection_id,
+  id: PERSONAL_COLLECTION_ID,
   name: "My personal collection",
-  personal_owner_id: CURRENT_USER.id,
+  personal_owner_id: CURRENT_USER_ID,
   can_write: true,
   is_personal: true,
   location: "/",
 });
 
 const PERSONAL_SUBCOLLECTION = createMockCollection({
-  id: (CURRENT_USER.personal_collection_id as number) + 1,
+  id: PERSONAL_COLLECTION_ID + 1,
   name: "Nested personal collection",
   can_write: true,
   is_personal: true,
@@ -80,6 +80,8 @@ interface SetupOpts {
   collections: Collection[];
   collectionItems?: CollectionItem[];
   dashboard?: Dashboard;
+  canCreateQueries?: boolean;
+  canCreateNativeQueries?: boolean;
 }
 
 async function setup({
@@ -88,6 +90,8 @@ async function setup({
   dashboard = createMockDashboard({
     collection: ROOT_COLLECTION,
   }),
+  canCreateQueries,
+  canCreateNativeQueries,
 }: SetupOpts) {
   setupCollectionsEndpoints({
     collections,
@@ -97,17 +101,32 @@ async function setup({
     collectionItems,
   });
 
-  renderWithProviders(<AddCardSidebar onSelect={jest.fn()} />, {
-    storeInitialState: createMockState({
-      currentUser: CURRENT_USER,
-      dashboard: createMockDashboardState({
-        dashboards: {
-          [dashboard.id]: { ...dashboard, dashcards: [] },
-        },
-        dashboardId: dashboard.id,
+  renderWithProviders(
+    <MockDashboardContext
+      dashboardId={dashboard.id}
+      navigateToNewCardFromDashboard={null}
+    >
+      <AddCardSidebar />
+    </MockDashboardContext>,
+    {
+      storeInitialState: createMockState({
+        currentUser: createMockUser({
+          id: CURRENT_USER_ID,
+          personal_collection_id: PERSONAL_COLLECTION_ID,
+          permissions: createMockUserPermissions({
+            can_create_queries: canCreateQueries,
+            can_create_native_queries: canCreateNativeQueries,
+          }),
+        }),
+        dashboard: createMockDashboardState({
+          dashboards: {
+            [dashboard.id]: { ...dashboard, dashcards: [] },
+          },
+          dashboardId: dashboard.id,
+        }),
       }),
-    }),
-  });
+    },
+  );
 
   await waitFor(() => {
     expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
@@ -170,7 +189,7 @@ describe("AddCardSideBar", () => {
 
       assertBreadcrumbs([ROOT_COLLECTION]);
 
-      collectionItems.forEach(collectionItem => {
+      collectionItems.forEach((collectionItem) => {
         expect(
           screen.getByRole("menuitem", {
             name: collectionItem.name,
@@ -196,19 +215,17 @@ describe("AddCardSideBar", () => {
         name: "question in public collection",
         model: "card",
       });
-      fetchMock.get(
-        {
-          url: "path:/api/search",
-          query: {
-            ...baseQuery,
-            q: typedText,
-            filter_items_in_personal_collection: "exclude",
-          },
+      fetchMock.get({
+        url: "path:/api/search",
+        query: {
+          ...baseQuery,
+          q: typedText,
+          filter_items_in_personal_collection: "exclude",
         },
-        {
+        response: {
           data: [questionInPublicCollection],
         },
-      );
+      });
 
       expect(
         await screen.findByText(questionInPublicCollection.name),
@@ -242,7 +259,7 @@ describe("AddCardSideBar", () => {
 
       assertBreadcrumbs([ROOT_COLLECTION, COLLECTION, SUBCOLLECTION]);
 
-      collectionItems.forEach(collectionItem => {
+      collectionItems.forEach((collectionItem) => {
         expect(
           screen.getByRole("menuitem", {
             name: collectionItem.name,
@@ -268,19 +285,17 @@ describe("AddCardSideBar", () => {
         name: "question in public collection",
         model: "card",
       });
-      fetchMock.get(
-        {
-          url: "path:/api/search",
-          query: {
-            ...baseQuery,
-            q: typedText,
-            filter_items_in_personal_collection: "exclude",
-          },
+      fetchMock.get({
+        url: "path:/api/search",
+        query: {
+          ...baseQuery,
+          q: typedText,
+          filter_items_in_personal_collection: "exclude",
         },
-        {
+        response: {
           data: [questionInPublicCollection],
         },
-      );
+      });
 
       expect(
         await screen.findByText(questionInPublicCollection.name),
@@ -333,7 +348,7 @@ describe("AddCardSideBar", () => {
         PERSONAL_SUBCOLLECTION,
       ]);
 
-      collectionItems.forEach(collectionItem => {
+      collectionItems.forEach((collectionItem) => {
         expect(
           screen.getByRole("menuitem", {
             name: collectionItem.name,
@@ -365,18 +380,16 @@ describe("AddCardSideBar", () => {
         name: "question in personal collection",
         model: "card",
       });
-      fetchMock.get(
-        {
-          url: "path:/api/search",
-          query: {
-            ...baseQuery,
-            q: typedText,
-          },
+      fetchMock.get({
+        url: "path:/api/search",
+        query: {
+          ...baseQuery,
+          q: typedText,
         },
-        {
+        response: {
           data: [questionInPublicCollection, questionInPersonalCollection],
         },
-      );
+      });
 
       expect(
         await screen.findByText(questionInPublicCollection.name),
@@ -387,7 +400,7 @@ describe("AddCardSideBar", () => {
 
       // There's no way to math a URL that a query param is not present
       // with fetch-mock, so we have to assert it manually.
-      const call = fetchMock.lastCall("path:/api/search");
+      const call = fetchMock.callHistory.lastCall("path:/api/search");
       const urlObject = new URL(checkNotNull(call?.request?.url));
       expect(urlObject.pathname).toEqual("/api/search");
       expect(
@@ -395,10 +408,43 @@ describe("AddCardSideBar", () => {
       ).toEqual(null);
     });
   });
+
+  describe("new buttons", () => {
+    it("displays the 'New Question' button if the user has data access", async () => {
+      await setup({
+        collections: COLLECTIONS,
+        canCreateQueries: true,
+      });
+      expect(await screen.findByText("New Question")).toBeInTheDocument();
+      expect(screen.queryByText("New SQL query")).not.toBeInTheDocument();
+    });
+
+    it("displays the 'New Question' and 'New SQL query' button if the user has native write access", async () => {
+      await setup({
+        collections: COLLECTIONS,
+        canCreateQueries: true,
+        canCreateNativeQueries: true,
+      });
+      expect(await screen.findByTestId("new-button-bar")).toBeInTheDocument();
+      expect(await screen.findByText("New Question")).toBeInTheDocument();
+      expect(await screen.findByText("New SQL query")).toBeInTheDocument();
+    });
+
+    it("does not display any buttons if the user has no access to either", async () => {
+      await setup({
+        collections: COLLECTIONS,
+        canCreateQueries: false,
+        canCreateNativeQueries: false,
+      });
+      expect(await screen.findByPlaceholderText(/Search/)).toBeInTheDocument();
+      expect(screen.queryByText("New Question")).not.toBeInTheDocument();
+      expect(screen.queryByText("New SQL query")).not.toBeInTheDocument();
+    });
+  });
 });
 
 function assertBreadcrumbs(collections: Collection[]) {
-  collections.forEach(collection => {
+  collections.forEach((collection) => {
     expect(screen.getByText(collection.name)).toBeInTheDocument();
   });
 }

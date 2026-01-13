@@ -1,45 +1,52 @@
 /* NOTE: DO NOT ADD COLORS WITHOUT EXTREMELY GOOD REASON AND DESIGN REVIEW
- * NOTE: KEEP SYNCRONIZED WITH COLORS.JS
+ * NOTE: KEEP SYNCHRONIZED WITH:
+ * frontend/src/metabase/ui/utils/colors.ts
+ * frontend/src/metabase/lib/colors/palette.ts
+ * frontend/src/metabase/lib/colors/colors.ts
+ * frontend/src/metabase/styled-components/containers/GlobalStyles/GlobalStyles.tsx
+ * frontend/src/metabase/styled-components/theme/css-variables.ts
  */
-:root {
-  --color-white: #fff;
-  --color-success: #84bb4c;
-  --mb-color-summarize: #88bf4d;
-  --color-error: #ed6e6e;
-  --mb-color-text-dark: #4c5773;
-  --mb-color-text-medium: #696e7b;
-  --mb-color-text-light: #949aab;
-  --color-text-white: #fff;
-  --mb-color-bg-black: #2e353b;
-  --color-bg-dark: #93a1ab;
-  --color-bg-medium: #edf2f5;
-  --color-bg-light: #f9fbfc;
-  --mb-color-bg-white: #fff;
-  --mb-color-shadow: rgba(0, 0, 0, 0.13);
-  --mb-color-border: #eeecec;
-}
+
+/* This file contains two types of colors
+ *
+ * 1. Semantic colors
+ * 2. Base colors
+ *
+ * Semantic colors are the colors that are used in the application. They are derived
+ * from the base colors.
+ *
+ * Base colors are the colors that should never change and never be used outside this file,
+ * or in any components or CSS properties. They should only be used to define the semantic
+ * colors in this file.
+*/
 
 .textDefault {
   color: var(--mb-color-text-dark);
 }
 
-.textBrand {
+.textBrand,
+.textBrandHover:hover {
   color: var(--mb-color-brand);
 }
 
+/** Non-whitelabeled Metabase brand color */
+.textMetabaseBrand {
+  color: var(--mb-color-metabase-brand);
+}
+
 .textSuccess {
-  color: var(--color-success);
+  color: var(--mb-color-success);
 }
 
 /* error */
 
 .textError,
 .textErrorHover {
-  color: var(--color-error);
+  color: var(--mb-color-error);
 }
 
 .bgErrorHover:hover {
-  background-color: var(--color-error);
+  background-color: var(--mb-color-error);
 }
 
 .bgErrorInput {
@@ -68,19 +75,37 @@
   color: var(--mb-color-text-dark);
 }
 
-.bgLight,
-.bgLightHover:hover {
-  background-color: var(--color-bg-light);
+.textPrimary {
+  color: var(--mb-color-text-primary);
 }
 
-.bgMedium {
-  background-color: var(--color-bg-medium);
+.textSecondary {
+  color: var(--mb-color-text-secondary);
+}
+
+.textTertiary {
+  color: var(--mb-color-text-tertiary);
+}
+
+.bgBrandLighter,
+.bgBrandLighterHover:hover {
+  background-color: var(--mb-color-brand-lighter);
+}
+
+.bgLight,
+.bgLightHover:hover {
+  background-color: var(--mb-color-bg-light);
+}
+
+.bgMedium,
+.bgMediumHover:hover {
+  background-color: var(--mb-color-bg-medium);
 }
 
 /* white  - move to bottom for specificity since its often used on hovers, etc */
 .textWhite,
 .textWhiteHover:hover {
-  color: var(--color-text-white);
+  color: var(--mb-color-text-white);
 }
 
 .bgWhite {
@@ -88,17 +113,9 @@
 }
 
 .bgLightBlue {
-  background-color: var(--color-bg-light);
+  background-color: var(--mb-color-bg-light);
 }
 
-.DashboardNight .bgLight {
-  background-color: var(--mb-color-bg-black);
-}
-
-.DashboardNight .bgMedium {
-  background-color: #596269;
-}
-
-.DashboardNight .textDark {
-  color: var(--color-bg-light);
+.textTooltipSecondary {
+  color: var(--mb-color-tooltip-text-secondary);
 }

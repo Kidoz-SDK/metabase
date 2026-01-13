@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import { Box, Text } from "metabase/ui";
 import type { RecentItem } from "metabase-types/api";
 
-import { ResultItem, ChunkyList } from "../ResultItem";
+import { ChunkyList, ResultItem } from "../ResultItem";
 
 import { getRecentGroups, recentItemToResultItem } from "./utils";
 
@@ -20,7 +20,7 @@ export function GroupedRecentsList({
 
   return (
     <Box style={{ overflowY: "auto" }} p="xl">
-      {recentGroups.map(group => (
+      {recentGroups.map((group) => (
         <RecentSection
           key={group.title}
           title={group.title}

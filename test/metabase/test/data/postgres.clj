@@ -1,7 +1,15 @@
 (ns metabase.test.data.postgres
   "Postgres driver test extensions."
   (:require
+   [clojure.java.jdbc :as jdbc]
+   [clojure.string :as str]
+   [clojure.test :refer :all]
+   [medley.core :as m]
+   [metabase.driver :as driver]
+   [metabase.driver.sql-jdbc.connection :as sql-jdbc.conn]
    [metabase.driver.sql.query-processor :as sql.qp]
+   [metabase.test :as mt]
+   [metabase.test.data.dataset-definitions]
    [metabase.test.data.interface :as tx]
    [metabase.test.data.sql :as sql.tx]
    [metabase.test.data.sql-jdbc :as sql-jdbc.tx]
@@ -78,24 +86,48 @@
    (kill-connections-to-db-sql database-name)
    (apply (get-method ddl/drop-db-ddl-statements :sql-jdbc/test-extensions) driver dbdef options)))
 
-(defn cast-json-columns
-  "For each `:type/JSON` column, parse them with cheshire so they enter as json and not text."
-  [tabledef]
-  (if (some (comp #{:type/JSON} :base-type) (:field-definitions tabledef))
-    (let [parse-fns (map #(if (= % :type/JSON)
-                            (fn [json]
-                              [::sql.qp/compiled (h2x/cast "json" json)])
-                            identity)
-                         (map :base-type (:field-definitions tabledef)))]
-      (update tabledef :rows (fn [rows]
-                               (map (fn [row]
-                                      (map (fn [parser value] (parser value))
-                                           parse-fns row))
-                                    rows))))
-    tabledef))
+(defmethod load-data/chunk-size :postgres
+  [_driver _dbdef _tabledef]
+  ;; load data all at once
+  nil)
 
-(defmethod load-data/load-data! :postgres [driver dbdef tabledef]
-  (load-data/load-data-all-at-once! driver dbdef (cast-json-columns tabledef)))
+(defn- cast-json-columns-xform
+  "[[load-data/row-xform]] for Postgres: for each `:type/JSON` column, parse them with cheshire so they enter as json
+  and not text."
+  [tabledef]
+  (when-let [parse-fns (not-empty
+                        (into {}
+                              (keep (fn [fielddef]
+                                      (when (isa? (:base-type fielddef) :type/JSON)
+                                        [(keyword (:field-name fielddef))
+                                         (fn [json]
+                                           [::sql.qp/compiled (h2x/cast "json" json)])])))
+                              (:field-definitions tabledef)))]
+    (map (fn [row]
+           (reduce
+            (fn [row [field-name f]]
+              (update row field-name f))
+            row
+            parse-fns)))))
+
+(defmethod load-data/row-xform :postgres
+  ;; For each `:type/JSON` column, parse them with cheshire so they enter as json and not text.
+  [_driver _dbdef tabledef]
+  (or (cast-json-columns-xform tabledef)
+      identity))
+
+(deftest ^:parallel postgres-row-xform-test
+  (testing "Make sure the row xform and cast-json-columns-xform above are getting applied as expected"
+    (mt/test-driver :postgres
+      (let [dbdef    (tx/get-dataset-definition metabase.test.data.dataset-definitions/json)
+            tabledef (m/find-first
+                      #(= (:table-name %) "json")
+                      (:table-definitions dbdef))]
+        (is (=? [[{:json_bit (mt/malli=? [:tuple [:= :metabase.driver.sql.query-processor/compiled] :any])}]]
+                (into []
+                      (map (fn [chunk]
+                             (into [] (take 1) chunk)))
+                      (#'load-data/reducible-chunks :postgres dbdef tabledef))))))))
 
 (defmethod sql.tx/standalone-column-comment-sql :postgres [& args]
   (apply sql.tx/standard-standalone-column-comment-sql args))
@@ -104,3 +136,58 @@
   (apply sql.tx/standard-standalone-table-comment-sql args))
 
 (defmethod sql.tx/session-schema :postgres [_driver] "public")
+
+(defmethod tx/drop-if-exists-and-create-db! :postgres
+  [driver db-name & [just-drop]]
+  (let [spec (sql-jdbc.conn/connection-details->spec driver (mt/dbdef->connection-details driver :server nil))]
+    ;; kill any open connections
+    (jdbc/query spec ["SELECT pg_terminate_backend(pg_stat_activity.pid)
+                       FROM pg_stat_activity
+                       WHERE pg_stat_activity.datname = ?;" db-name])
+    (jdbc/execute! spec [(format "DROP DATABASE IF EXISTS \"%s\"" db-name)]
+                   {:transaction? false})
+    (when (not= just-drop :just-drop)
+      (jdbc/execute! spec [(format "CREATE DATABASE \"%s\";" db-name)]
+                     {:transaction? false}))))
+
+(defmethod tx/drop-roles! :postgres
+  [driver details roles _user-name]
+  (let [spec (sql-jdbc.conn/connection-details->spec driver details)]
+    (doseq [[role-name table-perms] roles]
+      (let [role-name (sql.tx/qualify-and-quote driver role-name)]
+        (doseq [[table-name _perms] table-perms]
+          (jdbc/execute! spec
+                         [(format "ALTER TABLE %s DISABLE ROW LEVEL SECURITY" table-name)]
+                         {:transaction? false}))
+        (doseq [statement [(format "DROP OWNED BY %s;" role-name)
+                           (format "DROP ROLE IF EXISTS %s;" role-name)]]
+          (jdbc/execute! spec [statement] {:transaction? false}))))))
+
+(defn grant-table-perms-to-roles!
+  [driver details roles]
+  (let [spec (sql-jdbc.conn/connection-details->spec driver details)]
+    (doseq [[role-name table-perms] roles]
+      (let [role-name (sql.tx/qualify-and-quote driver role-name)]
+        (doseq [[table-name perms] table-perms]
+          (let [rls-perms (get perms :rls [true])
+                policy-cond (first (binding [driver/*compile-with-inline-parameters* true]
+                                     (sql.qp/format-honeysql driver rls-perms)))]
+            (doseq [statement [(format "ALTER TABLE %s ENABLE ROW LEVEL SECURITY" table-name)
+                               (format "CREATE POLICY role_policy_%s ON %s FOR SELECT TO %s USING %s"
+                                       (mt/random-name) table-name role-name policy-cond)]]
+              (jdbc/execute! spec [statement] {:transaction? false})))
+          (let [columns (:columns perms)
+                select-cols (str/join ", " (map #(sql.tx/qualify-and-quote driver %) columns))
+                grant-stmt (if (not= select-cols "")
+                             (format "GRANT SELECT (%s) ON %s TO %s" select-cols table-name role-name)
+                             (format "GRANT SELECT ON %s TO %s" table-name role-name))]
+            (jdbc/execute! spec [grant-stmt] {:transaction? false})))))))
+
+(defmethod tx/create-and-grant-roles! :postgres
+  [driver details roles user-name _default-role]
+  (sql-jdbc.tx/drop-if-exists-and-create-roles! driver details roles)
+  (grant-table-perms-to-roles! driver details roles)
+  (sql-jdbc.tx/grant-roles-to-user! driver details roles user-name))
+
+(defmethod sql.tx/generated-column-sql :postgres [_ expr]
+  (format "GENERATED ALWAYS AS (%s) STORED" expr))

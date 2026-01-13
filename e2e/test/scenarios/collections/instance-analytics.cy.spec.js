@@ -1,25 +1,15 @@
+const { H } = cy;
 import {
   ORDERS_DASHBOARD_ID,
   ORDERS_QUESTION_ID,
 } from "e2e/support/cypress_sample_instance_data";
-import {
-  restore,
-  setTokenFeatures,
-  popover,
-  describeEE,
-  modal,
-  visitDashboard,
-  visitModel,
-  visitQuestion,
-  describeOSS,
-} from "e2e/support/helpers";
 
-const ANALYTICS_COLLECTION_NAME = "Metabase analytics";
+const ANALYTICS_COLLECTION_NAME = "Usage analytics";
 const CUSTOM_REPORTS_COLLECTION_NAME = "Custom reports";
 const PEOPLE_MODEL_NAME = "People";
 const METRICS_DASHBOARD_NAME = "Metabase metrics";
 
-describeEE("scenarios > Metabase Analytics Collection (AuditV2) ", () => {
+describe("scenarios > Metabase Analytics Collection (AuditV2) ", () => {
   describe("admin", () => {
     beforeEach(() => {
       cy.intercept("GET", "/api/field/*/values").as("fieldValues");
@@ -27,9 +17,26 @@ describeEE("scenarios > Metabase Analytics Collection (AuditV2) ", () => {
       cy.intercept("POST", "api/card").as("saveCard");
       cy.intercept("POST", "api/dashboard/*/copy").as("copyDashboard");
 
-      restore();
+      H.restore();
       cy.signInAsAdmin();
-      setTokenFeatures("all");
+      H.activateToken("pro-self-hosted");
+    });
+
+    it("should not show the sidebar preview when working with instance analyics (metabase#49904)", () => {
+      cy.signInAsAdmin();
+      H.visitQuestion(ORDERS_QUESTION_ID);
+      cy.findByRole("button", { name: /Editor/ }).click();
+      cy.findByLabelText("View SQL").click();
+      cy.findByTestId("native-query-preview-sidebar").should("be.visible");
+
+      H.openNavigationSidebar();
+      cy.findByRole("link", { name: /Usage analytics/i }).click();
+      cy.findByRole("link", { name: /Metabase metrics/i }).click();
+      cy.findByRole("link", { name: /Question views last week/i }).click();
+
+      cy.findByRole("button", { name: /Editor/ }).click();
+      cy.findByLabelText("View SQL").should("not.exist");
+      cy.findByTestId("native-query-preview-sidebar").should("not.exist");
     });
 
     it("allows admins to see the instance analytics collection content", () => {
@@ -41,7 +48,7 @@ describeEE("scenarios > Metabase Analytics Collection (AuditV2) ", () => {
 
       cy.wait("@datasetQuery");
 
-      cy.findByTestId("TableInteractive-root").within(() => {
+      H.tableInteractive().within(() => {
         cy.findByTextEnsureVisible("admin@metabase.test");
         cy.findByTextEnsureVisible("Robert Tableton");
         cy.findByTextEnsureVisible("Read Only Tableton");
@@ -53,27 +60,25 @@ describeEE("scenarios > Metabase Analytics Collection (AuditV2) ", () => {
       { requestTimeout: 15000 },
       () => {
         cy.log("saving edited question");
-        getItemId(ANALYTICS_COLLECTION_NAME, PEOPLE_MODEL_NAME).then(id => {
-          visitModel(id);
+        getItemId(ANALYTICS_COLLECTION_NAME, PEOPLE_MODEL_NAME).then((id) => {
+          H.visitModel(id);
         });
 
-        cy.findByTestId("TableInteractive-root").within(() => {
-          cy.findByText("Last Name").click();
-        });
+        H.tableHeaderClick("Last Name");
 
-        popover().findByText("Filter by this column").click();
+        H.popover().findByText("Filter by this column").click();
         cy.wait("@fieldValues");
-        popover().findByText("Tableton").click();
-        popover().button("Add filter").click();
+        H.popover().findByText("Tableton").click();
+        H.popover().button("Add filter").click();
 
         cy.wait("@datasetQuery");
 
-        cy.findByTestId("question-row-count").findByText("Showing 6 rows");
+        cy.findByTestId("question-row-count").findByText("Showing 7 rows");
 
         cy.findByTestId("qb-header").findByText("Save").click();
 
-        cy.findByTestId("save-question-modal").within(modal => {
-          cy.findByTestId("collection-picker-button").findByText(
+        cy.findByTestId("save-question-modal").within((modal) => {
+          cy.findByTestId("dashboard-and-collection-picker-button").findByText(
             "Custom reports",
           );
           cy.findByText("Save").click();
@@ -83,19 +88,17 @@ describeEE("scenarios > Metabase Analytics Collection (AuditV2) ", () => {
           expect(response.statusCode).to.eq(200);
         });
 
-        modal().button("Not now").click();
-
         cy.log("saving copied question");
 
-        getItemId(ANALYTICS_COLLECTION_NAME, PEOPLE_MODEL_NAME).then(id => {
-          visitModel(id);
+        getItemId(ANALYTICS_COLLECTION_NAME, PEOPLE_MODEL_NAME).then((id) => {
+          H.visitModel(id);
         });
 
         cy.findByTestId("qb-header").icon("ellipsis").click();
 
-        popover().findByText("Duplicate").click();
+        H.popover().findByText("Duplicate").click();
 
-        modal().within(() => {
+        H.modal().within(() => {
           cy.findByTextEnsureVisible("Custom reports");
           cy.button("Duplicate").click();
         });
@@ -104,20 +107,19 @@ describeEE("scenarios > Metabase Analytics Collection (AuditV2) ", () => {
           expect(response.statusCode).to.eq(200);
         });
 
-        modal()
+        H.modal()
           .button(/Duplicate/i)
           .should("not.exist");
-        modal().button("Not now").click();
 
         cy.log("saving copied dashboard");
 
-        getItemId(ANALYTICS_COLLECTION_NAME, "Person overview").then(id => {
-          visitDashboard(id);
+        getItemId(ANALYTICS_COLLECTION_NAME, "Person overview").then((id) => {
+          H.visitDashboard(id);
         });
 
         cy.findByTestId("dashboard-header").findByText("Make a copy").click();
 
-        modal().within(() => {
+        H.modal().within(() => {
           cy.findByTextEnsureVisible("Custom reports");
           cy.button("Duplicate").click();
         });
@@ -142,7 +144,7 @@ describeEE("scenarios > Metabase Analytics Collection (AuditV2) ", () => {
 
       visitCollection(ANALYTICS_COLLECTION_NAME);
 
-      cy.findAllByTestId("collection-entry").each(el => {
+      cy.findAllByTestId("collection-entry").each((el) => {
         if (el.text() === CUSTOM_REPORTS_COLLECTION_NAME) {
           cy.wrap(el).within(() => {
             cy.icon("ellipsis").click();
@@ -151,7 +153,7 @@ describeEE("scenarios > Metabase Analytics Collection (AuditV2) ", () => {
         }
       });
 
-      popover().within(() => {
+      H.popover().within(() => {
         cy.findByText("Bookmark").should("be.visible");
         cy.findByText("Move to trash").should("not.exist");
         cy.findByText("Move").should("not.exist");
@@ -166,7 +168,7 @@ describeEE("scenarios > Metabase Analytics Collection (AuditV2) ", () => {
 
       visitCollection("Our analytics");
 
-      cy.findAllByTestId("collection-entry").each(el => {
+      cy.findAllByTestId("collection-entry").each((el) => {
         if (el.text() === ANALYTICS_COLLECTION_NAME) {
           cy.wrap(el).within(() => {
             cy.icon("ellipsis").click();
@@ -175,7 +177,7 @@ describeEE("scenarios > Metabase Analytics Collection (AuditV2) ", () => {
         }
       });
 
-      popover().within(() => {
+      H.popover().within(() => {
         cy.findByText("Bookmark").should("be.visible");
         cy.findByText("Move to trash").should("not.exist");
         cy.findByText("Move").should("not.exist");
@@ -184,9 +186,11 @@ describeEE("scenarios > Metabase Analytics Collection (AuditV2) ", () => {
 
     it("should not allow editing analytics content (metabase#36228)", () => {
       // dashboard
-      getItemId(ANALYTICS_COLLECTION_NAME, METRICS_DASHBOARD_NAME).then(id => {
-        visitDashboard(id);
-      });
+      getItemId(ANALYTICS_COLLECTION_NAME, METRICS_DASHBOARD_NAME).then(
+        (id) => {
+          H.visitDashboard(id);
+        },
+      );
 
       cy.findByTestId("dashboard-header").within(() => {
         cy.findByText("Make a copy");
@@ -194,16 +198,50 @@ describeEE("scenarios > Metabase Analytics Collection (AuditV2) ", () => {
       });
 
       // model
-      getItemId(ANALYTICS_COLLECTION_NAME, PEOPLE_MODEL_NAME).then(id => {
-        visitModel(id);
+      getItemId(ANALYTICS_COLLECTION_NAME, PEOPLE_MODEL_NAME).then((id) => {
+        H.visitModel(id);
       });
 
       cy.findByTestId("qb-header").icon("ellipsis").click();
 
-      popover().within(() => {
+      H.popover().within(() => {
         cy.findByText("Duplicate").should("be.visible");
         cy.findByText("Edit query definition").should("not.exist");
       });
+    });
+
+    it("should not leak instance analytics database into SQL query builder (metabase#44856)", () => {
+      getItemId(ANALYTICS_COLLECTION_NAME, PEOPLE_MODEL_NAME).then((id) => {
+        H.visitModel(id);
+      });
+
+      H.newButton("SQL query").click();
+
+      // sample DB should be the only one
+      cy.findByTestId("gui-builder-data")
+        .icon("cheverondown")
+        .should("not.exist");
+    });
+
+    it("should not leak instance analytics database into permissions editor (metabase#44856)", () => {
+      getItemId(ANALYTICS_COLLECTION_NAME, PEOPLE_MODEL_NAME).then((id) => {
+        H.visitModel(id);
+      });
+
+      // it's important that we do this manually, as this will only reproduce if theres no page load
+      cy.findByTestId("app-bar").icon("gear").click();
+      H.popover().findByText("Admin settings").click();
+      cy.findByLabelText("Navigation bar").findByText("Permissions").click();
+      H.sidebar().findByText("Administrators").click();
+      cy.findByTestId("permission-table")
+        .findByText(/internal metabase database/i)
+        .should("not.exist");
+
+      H.sidebar().findByText("Databases").click();
+
+      H.sidebar()
+        .findByText(/internal metabase database/i)
+        .should("not.exist");
     });
   });
 
@@ -214,9 +252,9 @@ describeEE("scenarios > Metabase Analytics Collection (AuditV2) ", () => {
       cy.intercept("POST", "api/card").as("saveCard");
       cy.intercept("POST", "api/dashboard/*/copy").as("copyDashboard");
 
-      restore();
+      H.restore();
       cy.signInAsAdmin();
-      setTokenFeatures("all");
+      H.activateToken("pro-self-hosted");
     });
 
     it("should not allow editing analytics content (metabase#36228)", () => {
@@ -260,22 +298,21 @@ describeEE("scenarios > Metabase Analytics Collection (AuditV2) ", () => {
 });
 
 describe("question and dashboard links", () => {
-  describeEE("ee", () => {
+  describe("ee", () => {
     beforeEach(() => {
-      restore();
+      H.restore();
       cy.signInAsAdmin();
-      setTokenFeatures("all");
+      H.activateToken("pro-self-hosted");
     });
 
-    it("should show a analytics link for questions", () => {
-      visitQuestion(ORDERS_QUESTION_ID);
+    it("should show an analytics link for questions", () => {
+      H.visitQuestion(ORDERS_QUESTION_ID);
 
       cy.intercept("GET", "/api/collection/**").as("collection");
 
-      cy.findByTestId("qb-header-action-panel")
-        .button(/\.\.\./)
+      H.openQuestionInfoSidesheet()
+        .findByRole("link", { name: /Insights/ })
         .click();
-      popover().findByText("Usage insights").click();
 
       cy.wait("@collection");
 
@@ -298,11 +335,13 @@ describe("question and dashboard links", () => {
         });
     });
 
-    it("should show a analytics link for dashboards", () => {
-      visitDashboard(ORDERS_DASHBOARD_ID);
+    it("should show an analytics link for dashboards", () => {
+      H.visitDashboard(ORDERS_DASHBOARD_ID);
       cy.intercept("GET", "/api/collection/**").as("collection");
-      cy.button("dashboard-menu-button").click();
-      popover().findByText("Usage insights").click();
+
+      H.openDashboardInfoSidebar()
+        .findByRole("link", { name: /Insights/ })
+        .click();
 
       cy.wait("@collection");
 
@@ -327,36 +366,37 @@ describe("question and dashboard links", () => {
 
     it("should not show option for users with no access to Metabase Analytics", () => {
       cy.signInAsNormalUser();
-      visitQuestion(ORDERS_QUESTION_ID);
+      H.visitQuestion(ORDERS_QUESTION_ID);
 
-      cy.findByTestId("qb-header-action-panel")
-        .button(/\.\.\./)
-        .click();
-      popover().findByText("Usage insights").should("not.exist");
+      H.openQuestionInfoSidesheet()
+        .findByRole("link", { name: /Insights/i })
+        .should("not.exist");
 
-      visitDashboard(ORDERS_DASHBOARD_ID);
-
-      cy.button("dashboard-menu-button").click();
-      popover().findByText("Usage insights").should("not.exist");
+      H.visitDashboard(ORDERS_DASHBOARD_ID);
+      H.openDashboardInfoSidebar()
+        .findByRole("link", { name: /Insights/i })
+        .should("not.exist");
     });
   });
-  describeOSS("oss", { tags: "@OSS" }, () => {
+
+  describe("oss", { tags: "@OSS" }, () => {
     beforeEach(() => {
-      restore();
+      H.restore();
       cy.signInAsAdmin();
     });
+
     it("should never appear in OSS", () => {
-      visitQuestion(ORDERS_QUESTION_ID);
+      H.visitQuestion(ORDERS_QUESTION_ID);
 
-      cy.findByTestId("qb-header-action-panel")
-        .button(/\.\.\./)
-        .click();
-      popover().findByText("Usage insights").should("not.exist");
+      H.openQuestionInfoSidesheet()
+        .findByRole("link", { name: /Insights/i })
+        .should("not.exist");
 
-      visitDashboard(ORDERS_DASHBOARD_ID);
+      H.visitDashboard(ORDERS_DASHBOARD_ID);
 
-      cy.button("dashboard-menu-button").click();
-      popover().findByText("Usage insights").should("not.exist");
+      H.openDashboardInfoSidebar()
+        .findByRole("link", { name: /Insights/i })
+        .should("not.exist");
     });
   });
 });
@@ -370,13 +410,13 @@ function getCollectionId(collectionName) {
 }
 
 function visitCollection(collectionName) {
-  getCollectionId(collectionName).then(id => {
+  getCollectionId(collectionName).then((id) => {
     cy.visit(`/collection/${id}`);
   });
 }
 
 function getItemId(collectionName, itemName) {
-  return getCollectionId(collectionName).then(id => {
+  return getCollectionId(collectionName).then((id) => {
     cy.request("GET", `/api/collection/${id}/items`).then(({ body }) => {
       const item = body.data.find(({ name }) => name === itemName);
       return item.id;

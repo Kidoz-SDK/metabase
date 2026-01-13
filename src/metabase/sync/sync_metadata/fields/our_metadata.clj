@@ -5,36 +5,42 @@
   comparing the differences in the two sets of Metadata."
   (:require
    [medley.core :as m]
-   [metabase.models.table :as table]
    [metabase.sync.interface :as i]
    [metabase.sync.sync-metadata.fields.common :as common]
    [metabase.util :as u]
    [metabase.util.malli :as mu]
+   [metabase.warehouse-schema.models.table :as table]
    [toucan2.core :as t2]))
 
 ;;; +----------------------------------------------------------------------------------------------------------------+
 ;;; |                                         FETCHING OUR CURRENT METADATA                                          |
 ;;; +----------------------------------------------------------------------------------------------------------------+
 
-(mu/defn ^:private fields->parent-id->fields :- [:map-of common/ParentID [:set common/TableMetadataFieldWithID]]
+(mu/defn- fields->parent-id->fields :- [:map-of common/ParentID [:set common/TableMetadataFieldWithID]]
   [fields :- [:maybe [:sequential i/FieldInstance]]]
   (->> (for [field fields]
-         {:parent-id                 (:parent_id field)
-          :id                        (:id field)
-          :name                      (:name field)
-          :database-type             (:database_type field)
-          :effective-type            (:effective_type field)
-          :coercion-strategy         (:coercion_strategy field)
-          :base-type                 (:base_type field)
-          :semantic-type             (:semantic_type field)
-          :pk?                       (isa? (:semantic_type field) :type/PK)
-          :field-comment             (:description field)
-          :json-unfolding            (:json_unfolding field)
-          :database-is-auto-increment (:database_is_auto_increment field)
-          :position                  (:position field)
-          :database-position         (:database_position field)
-          :database-partitioned      (:database_partitioned field)
-          :database-required         (:database_required field)})
+         (merge
+          {:parent-id                  (:parent_id field)
+           :id                         (:id field)
+           :name                       (:name field)
+           :database-type              (:database_type field)
+           :effective-type             (:effective_type field)
+           :coercion-strategy          (:coercion_strategy field)
+           :base-type                  (:base_type field)
+           :semantic-type              (:semantic_type field)
+           :field-comment              (:description field)
+           :json-unfolding             (:json_unfolding field)
+           :database-is-auto-increment (:database_is_auto_increment field)
+           :position                   (:position field)
+           :database-position          (:database_position field)
+           :database-partitioned       (:database_partitioned field)
+           :database-required          (:database_required field)
+           :visibility-type            (:visibility_type field)}
+          (u/remove-nils
+           {:pk?                   (:database_is_pk field)
+            :database-is-generated (:database_is_generated field)
+            :database-is-nullable  (:database_is_nullable field)
+            :database-default      (:database_default field)})))
        ;; make a map of parent-id -> set of child Fields
        (group-by :parent-id)
        ;; remove the parent ID because the Metadata from `describe-table` won't have it. Save the results as a set
@@ -42,7 +48,7 @@
                      (set (for [field fields]
                             (dissoc field :parent-id)))))))
 
-(mu/defn ^:private add-nested-fields :- common/TableMetadataFieldWithID
+(mu/defn- add-nested-fields :- common/TableMetadataFieldWithID
   "Recursively add entries for any nested-fields to `field`."
   [metabase-field    :- common/TableMetadataFieldWithID
    parent-id->fields :- [:map-of common/ParentID [:set common/TableMetadataFieldWithID]]]
@@ -64,11 +70,13 @@
      (set (for [metabase-field (get parent-id->fields top-level-parent-id)]
             (add-nested-fields metabase-field parent-id->fields))))))
 
-(mu/defn ^:private table->fields :- [:maybe [:sequential i/FieldInstance]]
+(mu/defn- table->fields :- [:maybe [:sequential i/FieldInstance]]
   "Fetch active Fields from the Metabase application database for a given `table`."
   [table :- i/TableInstance]
   (t2/select [:model/Field :name :database_type :base_type :effective_type :coercion_strategy :semantic_type
-              :parent_id :id :description :database_position :nfc_path :database_is_auto_increment :database_required
+              :parent_id :id :description :database_position :nfc_path
+              :database_is_auto_increment :database_required
+              :database_default :database_is_generated :database_is_nullable :database_is_pk
               :database_partitioned :json_unfolding :position]
              :table_id  (u/the-id table)
              :active    true

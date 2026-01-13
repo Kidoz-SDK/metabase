@@ -37,29 +37,6 @@ Since: v35.0
 
 Maximum number of async Jetty threads. If not set, then [MB_JETTY_MAXTHREADS](#mb_jetty_maxthreads) will be used, otherwise it will use the default.
 
-### `MB_ATTACHMENT_TABLE_ROW_LIMIT`
-
-Type: integer<br>
-Default: `20`<br>
-
-Limits the number of rows Metabase will display in tables sent with dashboard subscriptions and alerts. Range: 1-100. To limit the total number of rows included in the file attachment for an email dashboard subscription, use [MB_UNAGGREGATED_QUERY_ROW_LIMIT](#mb_unaggregated_query_row_limit).
-
-### `MB_AUDIT_MAX_RETENTION_DAYS`
-
-Only available on Metabase [Pro](https://www.metabase.com/product/pro) and [Enterprise](https://www.metabase.com/product/enterprise) plans.<br>
-Type: integer<br>
-Default: 720 (Metabase keeps all rows)<br>
-
-Sets the maximum number of days Metabase preserves rows for the following application database tables:
-
-- `query_execution`
-- `audit_log`
-- `view_log`
-
-Twice a day, Metabase will delete rows older than this threshold.
-
-The minimum value is `30` days (Metabase will treat entered values of `1` to `29` the same as `30`). If set to `0`, Metabase will keep all rows.
-
 ### `MB_COLORIZE_LOGS`
 
 Type: boolean<br>
@@ -73,13 +50,6 @@ Type: string<br>
 Default: `config.yml`
 
 This feature requires the `config-text-file` feature flag on your token.
-
-### `MB_CUSTOM_GEOJSON_ENABLED`
-
-Type: boolean<br>
-Default: `true`
-
-Whether or not the use of custom GeoJSON is enabled.
 
 ### `MB_DB_AUTOMIGRATE`
 
@@ -170,6 +140,15 @@ Default: `null`
 
 Used during development of third-party drivers. Set the value to have that plugin manifest get loaded during startup. Specify multiple plugin manifests by comma-separating them.
 
+### `MB_DISABLE_SCHEDULER`
+
+Type: boolean<br>
+Default: `false`
+
+When `true`, Metabase will turn off Metabase’s scheduled jobs, which include syncs, fingerprinting, and scanning, as well as dashboard subscriptions, alerts, and model caching.
+
+Can be useful for testing, or when setting up a [git-based workflow](https://www.metabase.com/learn/metabase-basics/administration/administration-and-operation/git-based-workflow).
+
 ### `MB_DISABLE_SESSION_THROTTLE`
 
 Type: boolean<br>
@@ -193,13 +172,6 @@ Default: `null`
 
 When `true`, this will enable `/api/testing` endpoint. **Warning:** This should never be enabled in production system.
 
-### `MB_ENABLE_XRAYS`
-
-Type: boolean<br>
-Default: `true`
-
-Allow users to explore data using X-rays.
-
 ### `MB_ENCRYPTION_SECRET_KEY`
 
 Type: string<br>
@@ -209,17 +181,15 @@ When set, this will encrypt database credentials stored in the application datab
 
 Also see documentation page [Encrypting database details at rest](../databases/encrypting-details-at-rest.md).
 
-### `MB_JDBC_DATA_WAREHOUSE_UNRETURNED_CONNECTION_TIMEOUT_SECONDS`
+### `MB_JDBC_DATA_WAREHOUSE_DEBUG_UNRETURNED_CONNECTION_STACK_TRACES`
 
-Type: integer<br>
-Default: `1200`<br>
-Since: v47.4
+Type: boolean<br>
+Default: `false`<br>
+Since: v51.3
 
-Metabase's query processor will normally kill connections when their queries time out, but in practice some connections can be severed and go undetected by Metabase, staying alive even after a query returns or times out. This environment variable tells Metabase how long to wait before killing connections if no response is received from the connection.
+If `true`, log a stack trace for any connections killed due to exceeding the timeout specified in [MB_DB_QUERY_TIMEOUT_MINUTES](#mb_db_query_timeout_minutes).
 
-This variable affects connections that are severed and undetected by Metabase (that is, in situations where Metabase never receives a connection closed signal and is treating an inactive connection as active). You may want to adjust this variable's value if your connection is unreliable or is a dynamic connections behind a SSH tunnel where the connection to the SSH tunnel host may stay active even after the connection from the SSH tunnel host to your database is severed.
-
-Unless set otherwise, the default production value for `metabase.query-processor.query-timeout-ms` is used which is 1,200,000 ms (i.e. 1,200 seconds or 20 minutes).
+In order to see the stack traces in the logs, you'll also need to update the com.mchange log level to "INFO" or higher via a custom log4j configuration. For configuring log levels, see [Metabase log configuration](./log-configuration.md).
 
 ### `MB_JETTY_ASYNC_RESPONSE_TIMEOUT`
 
@@ -256,13 +226,6 @@ Type: integer<br>
 Default: `200000`
 
 Maximum idle time for a connection, in milliseconds.
-
-### `MB_JETTY_MAXQUEUED`
-
-Type: integer<br>
-Default: _"FIX ME"_
-
-Maximum number of requests to be queued when all threads are busy.
 
 ### `MB_JETTY_MAXTHREADS`
 
@@ -350,20 +313,12 @@ Default: `null`
 
 Password for Java TrustStore file.
 
-### `MB_LANDING_PAGE`
-
-Only available on Metabase [Pro](https://www.metabase.com/product/pro) and [Enterprise](https://www.metabase.com/product/enterprise) plans.<br>
-Type: string<br>
-Default: `""`
-
-Default page to show people when they log in.
-
-### `MB_LOAD_ANALYTICS_CONTENT`
+### `MB_LOAD_SAMPLE_CONTENT`
 
 Type: Boolean<br>
 Default: True
 
-If you want to exclude the [Metabase analytics](../usage-and-performance-tools/usage-analytics.md) collection, you can set `MB_LOAD_ANALYTICS_CONTENT=false`. Setting this environment variable to false can also come in handy when migrating environments, as it can simplify the migration process.
+Whether to include the Sample Database in your Metabase. To exclude the Sample Database, set `MB_LOAD_SAMPLE_CONTENT=false`.
 
 ### `MB_NO_SURVEYS`
 
@@ -416,82 +371,12 @@ Path of the "plugins" directory, which is used to store the Metabase database dr
 
 The location is where custom third-party drivers should be added. Then Metabase will load the driver on startup, which can be verified in the log.
 
-### `MB_PREMIUM_EMBEDDING_TOKEN`
-
-Type: string<br>
-Default: `null`
-
-The license token used for Pro and Enterprise to enable premium features on the Enterprise edition. It is also used for the deprecated "Premium Embedding" functionality on the OSS edition.
-
 ### `MB_QP_CACHE_BACKEND`
 
 Type: string<br>
 Default: `"db"`
 
 Current cache backend. Dynamically rebindable primarily for test purposes.
-
-### `MB_QUERY_CACHING_MIN_TTL`
-
-Type: integer<br>
-Default: `60`
-
-Metabase will cache all saved questions with an average query execution time longer than this many seconds.
-
-### `MB_QUERY_CACHING_TTL_RATIO`
-
-Type: integer<br>
-Default: `10`
-
-To determine how long each saved question's cached result should stick around, we take the query's average execution time and multiply that by whatever you input here. So if a query takes on average 2 minutes to run, and you input 10 for your multiplier, its cache entry will persist for 20 minutes.
-
-### `MB_SEARCH_TYPEAHEAD_ENABLED`
-
-Type: boolean<br>
-Default: `true`<br>
-Since: v39.0
-
-Show auto-suggestions when using the global search in the top navigation bar.
-
-### `MB_SEND_EMAIL_ON_FIRST_LOGIN_FROM_NEW_DEVICE`
-
-Type: boolean<br>
-Default: `true`<br>
-Since: v39.0
-
-Send email notification to user, when they login from a new device. Set to `false` to stop sending "We've noticed a new login on your Metabase account" emails for all users.
-
-Also, this variable controls the geocoding service that Metabase uses to know the location from where your users logged in. Setting this variable to false also disables this reverse geocoding functionality.
-
-### `MB_SEND_NEW_SSO_USER_ADMIN_EMAIL`
-
-Only available on Metabase [Pro](https://www.metabase.com/product/pro) and [Enterprise](https://www.metabase.com/product/enterprise) plans.<br>
-Type: boolean<br>
-Default: `true`
-
-Send email notifications to users in Admin group, when a new SSO users is created on Metabase.
-
-### `MB_SESSION_COOKIE_SAMESITE`
-
-Only available on Metabase [Pro](https://www.metabase.com/product/pro) and [Enterprise](https://www.metabase.com/product/enterprise) plans.<br>
-Type: string (`"none"`, `"lax"`, `"strict"`)<br>
-Default: `"lax"`
-
-See [Embedding Metabase in a different domain](../embedding/interactive-embedding.md#embedding-metabase-in-a-different-domain).
-
-Related to [MB_EMBEDDING_APP_ORIGIN](#mb_embedding_app_origin). Read more about [interactive Embedding](../embedding/interactive-embedding.md).
-
-Learn more about SameSite cookies: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie/SameSite
-
-### `MB_SESSION_COOKIES`
-
-Type: boolean<br>
-Default: `null`
-
-When set to `true`, the user login session will expire when the browser is closed. The user login session will always expire after the amount of time defined in [MAX_SESSION_AGE](#max_session_age) (by default 2 weeks).
-
-This overrides the "Remember me" checkbox when logging in.
-
-Also see the [Changing session expiration](../people-and-groups/changing-session-expiration.md) documentation page.
 
 ### `MB_SETUP_TOKEN`
 
@@ -516,13 +401,6 @@ Default: `"true"`<br>
 Since: v48.4
 
 Setting `MB_JETTY_SKIP_SNI=true` (the default setting) turns off the Server Name Indication (SNI) checks in the Jetty web server. Normally you would leave this enabled. If, however, you're terminating the Transport Layer Security (TLS) connection on Metabase itself, and you're getting an error like `HTTP ERROR 400 Invalid SNI`, consider either setting `MB_JETTY_SKIP_SNI=false`, or use another SSL certificate that exactly matches the domain name of the server.
-
-### `MB_SOURCE_ADDRESS_HEADER`
-
-Type: string<br>
-Default: `X-Forwarded-For`
-
-Identify the source of HTTP requests by this header's value, instead of its remote address. Related to [MB_DISABLE_SESSION_THROTTLE](#mb_disable_session_throttle).
 
 ### `MB_SSL_CERTIFICATE_PUBLIC_KEY`
 

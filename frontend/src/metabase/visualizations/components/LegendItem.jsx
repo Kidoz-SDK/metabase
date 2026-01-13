@@ -1,17 +1,16 @@
 /* eslint-disable react/prop-types */
 import cx from "classnames";
 import PropTypes from "prop-types";
-import { Component } from "react";
+import { Component, createRef } from "react";
 
-import { Ellipsified } from "metabase/core/components/Ellipsified";
-import Tooltip from "metabase/core/components/Tooltip";
+import { Ellipsified } from "metabase/common/components/Ellipsified";
 import CS from "metabase/css/core/index.css";
 import DashboardS from "metabase/css/dashboard.module.css";
-import EmbedFrameS from "metabase/public/components/EmbedFrame/EmbedFrame.module.css";
-import { Icon } from "metabase/ui";
+import { Icon, Tooltip } from "metabase/ui";
 
 import LegendS from "./Legend.module.css";
 import { IconContainer } from "./LegendItem.styled";
+import { LegendItemDot } from "./legend/LegendItemDot";
 
 const propTypes = {
   icon: PropTypes.object,
@@ -21,23 +20,33 @@ export default class LegendItem extends Component {
   constructor(props, context) {
     super(props, context);
     this.state = {};
+
+    /** @type {React.RefObject<HTMLSpanElement>} */
+    this.rootRef = createRef();
   }
 
   static defaultProps = {
     showDot: true,
     showTitle: true,
+    isVisible: true,
     isMuted: false,
     showTooltip: true,
     showDotTooltip: true,
   };
+
+  getRootElement() {
+    return this.rootRef.current;
+  }
 
   render() {
     const {
       title,
       color,
       icon,
+      dotSize,
       showDot,
       showTitle,
+      isVisible,
       isMuted,
       showTooltip,
       showDotTooltip,
@@ -47,10 +56,12 @@ export default class LegendItem extends Component {
       description,
       onClick,
       infoClassName,
+      onToggleSeriesVisibility,
     } = this.props;
 
     return (
       <span
+        ref={this.rootRef}
         data-testid="legend-item"
         className={cx(
           className,
@@ -58,8 +69,7 @@ export default class LegendItem extends Component {
           { [LegendS.LegendItemMuted]: isMuted },
           CS.noDecoration,
           DashboardS.fullscreenNormalText,
-          DashboardS.fullscreenNightText,
-          EmbedFrameS.fullscreenNightText,
+          DashboardS.DashboardChartLegend,
           CS.flex,
           CS.alignCenter,
           {
@@ -70,6 +80,7 @@ export default class LegendItem extends Component {
         style={{
           overflowX: "hidden",
           flex: "0 1 auto",
+          paddingLeft: showDot ? "4px" : "0",
         }}
         onMouseEnter={onMouseEnter}
         onMouseLeave={onMouseLeave}
@@ -81,21 +92,24 @@ export default class LegendItem extends Component {
           </IconContainer>
         )}
         {showDot && (
-          <Tooltip tooltip={title} isEnabled={showTooltip && showDotTooltip}>
-            <div
-              className={cx(CS.flexNoShrink, CS.inlineBlock, CS.circular)}
-              style={{
-                width: 13,
-                height: 13,
-                margin: 4,
-                marginRight: 8,
-                backgroundColor: color,
-              }}
+          <Tooltip
+            label={title}
+            disabled={!showTooltip || !showDotTooltip}
+            arrowPosition="center"
+          >
+            <LegendItemDot
+              color={color}
+              dotSize={dotSize}
+              isVisible={isVisible}
+              onClick={onToggleSeriesVisibility}
             />
           </Tooltip>
         )}
         {showTitle && (
-          <div className={cx(CS.flex, CS.alignCenter, CS.overflowHidden)}>
+          <div
+            className={cx(CS.flex, CS.alignCenter, CS.overflowHidden)}
+            style={showDot && { marginLeft: "4px" }}
+          >
             <Ellipsified showTooltip={showTooltip}>{title}</Ellipsified>
             {description && (
               <div

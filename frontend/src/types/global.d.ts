@@ -2,6 +2,7 @@ interface Window {
   MetabaseBootstrap: any;
   MetabaseRoot?: string;
   MetabaseNonce?: string;
+  MetabaseUserColorScheme?: string;
 }
 
 // This allows importing static SVGs from TypeScript files
@@ -13,9 +14,9 @@ declare module "*.svg" {
 
 // This allows importing CSS from TypeScript files
 declare module "*.css" {
-  const content: any;
+  const classes: { [key: string]: string };
   // eslint-disable-next-line import/no-default-export -- deprecated usage
-  export default content;
+  export default classes;
 }
 
 type Nullable<T> = T | null;

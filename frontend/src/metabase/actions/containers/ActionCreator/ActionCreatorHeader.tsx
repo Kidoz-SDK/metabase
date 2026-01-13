@@ -4,11 +4,11 @@ import { t } from "ttag";
 import type { WritebackActionType } from "metabase-types/api";
 
 import {
-  Container,
-  LeftHeader,
-  EditableText,
-  CompactSelect,
   ActionButtons,
+  CompactSelect,
+  Container,
+  EditableText,
+  LeftHeader,
 } from "./ActionCreatorHeader.styled";
 
 type Props = {
@@ -21,7 +21,15 @@ type Props = {
   actionButtons: React.ReactElement[];
 };
 
-const OPTS = [{ value: "query", name: t`Query`, disabled: true }];
+const OPTS = [
+  {
+    value: "query",
+    get name() {
+      return t`Query`;
+    },
+    disabled: true,
+  },
+];
 
 const ActionCreatorHeader = ({
   name = t`New Action`,

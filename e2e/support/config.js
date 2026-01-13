@@ -1,85 +1,81 @@
+import fs from "node:fs";
+import path from "node:path";
+
+import cypressOnFix from "cypress-on-fix";
+import installLogsPrinter from "cypress-terminal-report/src/installLogsPrinter";
+
+import { BACKEND_HOST, BACKEND_PORT } from "../runner/constants/backend-port";
+
+import * as ciTasks from "./ci_tasks";
+import { collectFailingTests } from "./collectFailedTests";
+import {
+  copyDirectory,
+  readDirectory,
+  removeDirectory,
+  verifyDownloadTasks,
+} from "./commands/downloads/downloadUtils";
+import webpackConfig from "./component-webpack.config";
 import * as dbTasks from "./db_tasks";
+import { signJwt } from "./helpers/e2e-jwt-tasks";
 
 const createBundler = require("@bahmutov/cypress-esbuild-preprocessor"); // This function is called when a project is opened or re-opened (e.g. due to the project's config changing)
 const {
   NodeModulesPolyfillPlugin,
 } = require("@esbuild-plugins/node-modules-polyfill");
-const replay = require("@replayio/cypress");
-
-const {
-  removeDirectory,
-  verifyDownloadTasks,
-} = require("./commands/downloads/downloadUtils");
+const cypressSplit = require("cypress-split");
 
 const isEnterprise = process.env["MB_EDITION"] === "ee";
+const isCI = !!process.env.CI;
 
-const hasSnowplowMicro = process.env["MB_SNOWPLOW_AVAILABLE"];
 const snowplowMicroUrl = process.env["MB_SNOWPLOW_URL"];
 
-const isQaDatabase = process.env["QA_DB_ENABLED"];
-
-const sourceVersion = process.env["CROSS_VERSION_SOURCE"];
-const targetVersion = process.env["CROSS_VERSION_TARGET"];
-
-const runWithReplay = process.env["CYPRESS_REPLAYIO_ENABLED"];
-/**
- * CI coerces the value of this env var to a string (even if it's `false` or `0`!
- * Just omit it from any workflow that doesn't need to upload test recordings,
- * like we do in the `e2e-stress-test-flake-fix` workflow.
- */
-const uploadReplayRecordings = !!process.env["CYPRESS_REPLAYIO_ENABLE_UPLOAD"];
-
-const feHealthcheckEnabled = process.env["CYPRESS_FE_HEALTHCHECK"] === "true";
-
-const convertStringToInt = string =>
-  string.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+// docs say that tsconfig paths should handle aliases, but they don't
+const assetsResolverPlugin = {
+  name: "assetsResolver",
+  setup(build) {
+    // Redirect all paths starting with "assets/" to "resources/"
+    build.onResolve({ filter: /^assets\// }, (args) => {
+      return {
+        path: path.join(
+          __dirname,
+          "../../resources/frontend_client/app",
+          args.path,
+        ),
+      };
+    });
+  },
+};
 
 const defaultConfig = {
   // This is the functionality of the old cypress-plugins.js file
-  setupNodeEvents(on, config) {
+  setupNodeEvents(cypressOn, config) {
     // `on` is used to hook into various events Cypress emits
     // `config` is the resolved Cypress config
-    /********************************************************************
-     **                        PREPROCESSOR                            **
-     ********************************************************************/
 
-    if (runWithReplay) {
-      on = replay.wrapOn(on);
-      replay.default(on, config, {
-        upload: uploadReplayRecordings,
-        apiKey: process.env.REPLAY_API_KEY,
-        filter: r => {
-          const hasCrashed = r.status === "crashed";
-          const hasFailed = r.metadata.test?.result === "failed";
-          const isFlaky =
-            r.metadata.test?.result === "passed" &&
-            r.metadata.test.tests.some(r => r.result === "failed");
-          const randomlyUploadAll =
-            r.metadata.source.branch === "master" &&
-            convertStringToInt(r.metadata.test.run.id) % 10 === 1;
+    // Use cypress-on-fix to enable multiple handlers
+    const on = cypressOnFix(cypressOn);
 
-          console.log("upload replay ::", {
-            hasCrashed,
-            hasFailed,
-            isFlaky,
-            randomlyUploadAll,
-            branch: r.metadata.source.branch,
-            result: r.metadata.test?.result,
-            status: r.status,
-            runId: r.metadata.test.run.id,
-          });
-          return hasCrashed || hasFailed || isFlaky || randomlyUploadAll;
-        },
+    // CLI grep can't handle commas in the name
+    // needed when we want to run only specific tests
+    config.env.grep ??= process.env.GREP;
+
+    // cypress-terminal-report
+    if (isCI) {
+      installLogsPrinter(on, {
+        printLogsToConsole: "never",
       });
     }
 
+    /********************************************************************
+     **                        PREPROCESSOR                            **
+     ********************************************************************/
     on(
       "file:preprocessor",
       createBundler({
         loader: {
           ".svg": "text",
         },
-        plugins: [NodeModulesPolyfillPlugin()],
+        plugins: [NodeModulesPolyfillPlugin(), assetsResolverPlugin],
         sourcemap: "inline",
       }),
     );
@@ -115,40 +111,50 @@ const defaultConfig = {
         return null; // tasks must have a return value
       },
       ...dbTasks,
+      ...ciTasks,
       ...verifyDownloadTasks,
+      readDirectory,
+      copyDirectory,
       removeDirectory,
+      signJwt,
     });
 
     /********************************************************************
      **                          CONFIG                                **
      ********************************************************************/
 
-    if (!isQaDatabase) {
-      config.excludeSpecPattern = "e2e/snapshot-creators/qa-db.cy.snap.js";
-    }
-
     // `grepIntegrationFolder` needs to point to the root!
     // See: https://github.com/cypress-io/cypress/issues/24452#issuecomment-1295377775
     config.env.grepIntegrationFolder = "../../";
     config.env.grepFilterSpecs = true;
+    config.env.grepOmitFiltered = true;
 
     config.env.IS_ENTERPRISE = isEnterprise;
-    config.env.HAS_SNOWPLOW_MICRO = hasSnowplowMicro;
     config.env.SNOWPLOW_MICRO_URL = snowplowMicroUrl;
-    config.env.SOURCE_VERSION = sourceVersion;
-    config.env.TARGET_VERSION = targetVersion;
-    // Set on local, development-mode runs only
-    config.env.feHealthcheck = {
-      enabled: feHealthcheckEnabled,
-      url: feHealthcheckEnabled
-        ? "http://localhost:8080/webpack-dev-server/"
-        : undefined,
-    };
 
     require("@cypress/grep/src/plugin")(config);
 
+    if (isCI) {
+      cypressSplit(on, config);
+      collectFailingTests(on, config);
+    }
+
+    // this is an official workaround to keep recordings of the failed specs only
+    // https://docs.cypress.io/guides/guides/screenshots-and-videos#Delete-videos-for-specs-without-failing-or-retried-tests
+    on("after:spec", (spec, results) => {
+      if (results && results.video) {
+        // Do we have test failures?
+        if (results && results.video && results.stats.failures === 0) {
+          // delete the video if the spec passed
+          fs.unlinkSync(results.video);
+        }
+      }
+    });
+
     return config;
   },
+  baseUrl: `http://${BACKEND_HOST}:${BACKEND_PORT}`,
+  defaultBrowser: process.env.CYPRESS_BROWSER ?? "chrome",
   supportFile: "e2e/support/cypress.js",
   chromeWebSecurity: false,
   modifyObstructiveCode: false,
@@ -156,13 +162,15 @@ const defaultConfig = {
   //   1. testFiles and
   //   2. integrationFolder
   specPattern: "e2e/test/**/*.cy.spec.{js,ts}",
+  viewportHeight: 800,
+  viewportWidth: 1280,
+  // enable video recording in run mode
+  video: true,
+  videoCompression: true,
 };
 
 const mainConfig = {
   ...defaultConfig,
-  projectId: "ywjy9z",
-  viewportHeight: 800,
-  viewportWidth: 1280,
   numTestsKeptInMemory: process.env["CI"] ? 1 : 50,
   reporter: "cypress-multi-reporters",
   reporterOptions: {
@@ -194,32 +202,29 @@ const mainConfig = {
   },
 };
 
-const snapshotsConfig = {
+const embeddingSdkComponentTestConfig = {
   ...defaultConfig,
-  specPattern: "e2e/snapshot-creators/**/*.cy.snap.js",
-};
+  baseUrl: undefined, // baseUrl should not be set for component tests,
+  defaultCommandTimeout: 10000,
+  requestTimeout: 10000,
+  video: false,
+  specPattern: "e2e/test-component/scenarios/embedding-sdk/**/*.cy.spec.tsx",
+  indexHtmlFile: "e2e/support/component-index.html",
+  supportFile: "e2e/support/component-cypress.js",
 
-const crossVersionSourceConfig = {
-  ...defaultConfig,
-  baseUrl: "http://localhost:3000",
-  specPattern: "e2e/test/scenarios/cross-version/source/**/*.cy.spec.{js,ts}",
-};
+  reporter: mainConfig.reporter,
+  reporterOptions: mainConfig.reporterOptions,
+  retries: mainConfig.retries,
 
-const crossVersionTargetConfig = {
-  ...defaultConfig,
-  baseUrl: "http://localhost:3001",
-  specPattern: "e2e/test/scenarios/cross-version/target/**/*.cy.spec.{js,ts}",
-};
-
-const stressTestConfig = {
-  ...defaultConfig,
-  retries: 0,
+  devServer: {
+    framework: "react",
+    bundler: "webpack",
+    webpackConfig: webpackConfig,
+  },
 };
 
 module.exports = {
+  defaultConfig,
   mainConfig,
-  snapshotsConfig,
-  stressTestConfig,
-  crossVersionSourceConfig,
-  crossVersionTargetConfig,
+  embeddingSdkComponentTestConfig,
 };

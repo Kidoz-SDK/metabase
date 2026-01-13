@@ -1,7 +1,7 @@
 (ns metabase.util.format
   #?(:clj  (:require
             [colorize.core :as colorize]
-            [metabase.config :as config])
+            [metabase.config.core :as config])
      :cljs (:require
             [goog.string :as gstring])))
 
@@ -53,12 +53,15 @@
       (format-with-unit n suffix))))
 
 #?(:clj
-   (def ^:private colorize?
-     ;; As of 0.35.0 we support the NO_COLOR env var. See https://no-color.org/ (But who hates color logs?)
+   (def colorize?
+     "Whether we should print in colors or not.
+
+  As of 0.35.0 we support the NO_COLOR env var. See https://no-color.org/ (But who hates color logs?)"
      (if (config/config-str :no-color)
        false
        (config/config-bool :mb-colorize-logs))))
 
+#_{:clj-kondo/ignore [:def-fn]}
 (def ^{:arglists '(^String [color-symb x])} colorize
   "Colorize string `x` using `color`, a symbol or keyword, but only if `MB_COLORIZE_LOGS` is enabled (the default).
   `color` can be `green`, `red`, `yellow`, `blue`, `cyan`, `magenta`, etc. See the entire list of avaliable
@@ -82,3 +85,46 @@
 
   (^String [color format-str & args]
    (colorize color (apply #?(:clj format :cljs gstring/format) format-str args))))
+
+(defn format-plural
+  "Format a string with a pluralized suffix. If `n` is 1, the suffix will be singular, otherwise plural.
+  If `plural` is omitted, by default plural is singular + \"s\"
+
+    (format-plural 2 \"handler\")
+    ;; -> \"handlers\"
+    (format-plural 1 \"handler\" \"handlers\")
+    ;; -> \"handler\""
+  (^String [n singular]
+   (format-plural n singular nil))
+  (^String [n singular plural]
+   (if (= (abs n) 1)
+     singular
+     (if plural
+       plural
+       (str singular \s)))))
+
+(defn qualified-name
+  "Return `k` as a string, qualified by its namespace, if any (unlike `name`). Handles `nil` values gracefully as well
+  (also unlike `name`).
+
+     (u/qualified-name :type/FK) -> \"type/FK\""
+  [k]
+  (cond
+    (nil? k)
+    nil
+
+    ;; optimization in Clojure: calling [[symbol]] on a keyword returns the underlying symbol, and [[str]] on a symbol
+    ;; is cached internally (see `clojure.lang.Symbol/toString()`). So we can avoid constructing a new string here.
+    ;; Not sure whether this is cached in ClojureScript as well.
+    (keyword? k)
+    (str (symbol k))
+
+    (symbol? k)
+    (str k)
+
+    :else
+    (if-let [namespac (when #?(:clj  (instance? clojure.lang.Named k)
+                               :cljs (satisfies? INamed k))
+                        (namespace k))]
+      (str namespac "/" (name k))
+      (name k))))

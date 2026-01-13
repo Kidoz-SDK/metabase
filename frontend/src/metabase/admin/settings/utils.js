@@ -1,15 +1,8 @@
 import { t } from "ttag";
 
-import MetabaseSettings from "metabase/lib/settings";
+import { useDocsUrl } from "metabase/common/hooks";
 
-// in order to prevent collection of identifying information only fields
-// that are explicitly marked as collectable or booleans should show the true value
-export const prepareAnalyticsValue = setting =>
-  setting.allowValueCollection || setting.type === "boolean"
-    ? setting.value
-    : "success";
-
-export const settingToFormField = setting => ({
+export const settingToFormField = (setting) => ({
   name: setting.key,
   label: setting.display_name,
   description: setting.description,
@@ -20,11 +13,22 @@ export const settingToFormField = setting => ({
   autoFocus: setting.autoFocus,
 });
 
-export const settingToFormFieldId = setting => `setting-${setting.key}`;
+export const settingToFormFieldId = (setting) => `setting-${setting.key}`;
 
-export const getEnvVarDocsUrl = envName => {
-  return MetabaseSettings.docsUrl(
-    "configuring-metabase/environment-variables",
-    envName?.toLowerCase(),
-  );
+export const useGetEnvVarDocsUrl = (envName) => {
+  return useDocsUrl("configuring-metabase/environment-variables", {
+    anchor: envName?.toLowerCase(),
+  });
+};
+
+export const getExtraFormFieldProps = (setting) => {
+  if (setting?.is_env_setting) {
+    return {
+      description: t`Using ${setting.env_name}`,
+      readOnly: true,
+    };
+  }
+  return {
+    description: setting?.description ?? "",
+  };
 };

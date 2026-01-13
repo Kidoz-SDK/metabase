@@ -1,5 +1,4 @@
 import { combineReducers, configureStore } from "@reduxjs/toolkit";
-import promise from "redux-promise";
 
 import * as entities from "metabase/redux/entities";
 import requestsReducer from "metabase/redux/requests";
@@ -15,10 +14,10 @@ export function getStore(reducers = {}, initialState = {}, middleware = []) {
   return configureStore({
     reducer,
     preloadedState: initialState,
-    middleware: getDefaultMiddleware =>
+    middleware: (getDefaultMiddleware) =>
       getDefaultMiddleware({
         immutableCheck: false,
         serializableCheck: false,
-      }).concat([promise, ...middleware]),
+      }).concat(middleware),
   });
 }

@@ -1,6 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent } from "@testing-library/react";
 
 import { testDataset } from "__support__/testDataset";
+import { render, screen } from "__support__/ui";
 import { DetailsTable } from "metabase/visualizations/components/ObjectDetail/ObjectDetailsTable";
 import { TYPE } from "metabase-lib/v1/types/constants";
 import {
@@ -96,7 +97,7 @@ describe("ObjectDetailsTable", () => {
   it("renders an object details table", () => {
     render(
       <DetailsTable
-        data={testDataset as any}
+        columns={testDataset.cols}
         zoomedRow={testDataset.rows[1]}
         onVisualizationClick={() => null}
         visualizationIsClickable={() => false}
@@ -106,15 +107,37 @@ describe("ObjectDetailsTable", () => {
       />,
     );
 
-    expect(screen.getByText("Small Marble Shoes")).toBeInTheDocument();
+    expect(
+      screen.getAllByTestId("object-details-table-cell")[5],
+    ).toHaveTextContent("Small Marble Shoes");
     expect(screen.getByText("Doohickey")).toBeInTheDocument();
+  });
+
+  it("should not open a drill popup", () => {
+    const onVisualizationClickSpy = jest.fn();
+    render(
+      <DetailsTable
+        columns={testDataset.cols}
+        zoomedRow={testDataset.rows[1]}
+        onVisualizationClick={() => null}
+        visualizationIsClickable={onVisualizationClickSpy}
+        settings={{
+          column: () => null,
+        }}
+      />,
+    );
+
+    expect(screen.getByText("View more")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("View more"));
+
+    expect(onVisualizationClickSpy).not.toHaveBeenCalled();
   });
 
   describe("image rendering", () => {
     it("should render an image if the column is an image url", () => {
       render(
         <DetailsTable
-          data={objectDetailImageCard.data}
+          columns={objectDetailImageCard.data.cols}
           zoomedRow={objectDetailImageCard.data.rows[1]}
           onVisualizationClick={() => null}
           visualizationIsClickable={() => false}
@@ -132,7 +155,7 @@ describe("ObjectDetailsTable", () => {
     it("should render an image if the column is an avatar image url", () => {
       render(
         <DetailsTable
-          data={objectDetailImageCard.data}
+          columns={objectDetailImageCard.data.cols}
           zoomedRow={objectDetailImageCard.data.rows[1]}
           onVisualizationClick={() => null}
           visualizationIsClickable={() => false}
@@ -152,7 +175,7 @@ describe("ObjectDetailsTable", () => {
     it("should properly display JSON semantic type data as JSON", () => {
       render(
         <DetailsTable
-          data={objectDetailCard.data}
+          columns={objectDetailCard.data.cols}
           zoomedRow={objectDetailCard.data.rows[0]}
           onVisualizationClick={() => null}
           visualizationIsClickable={() => false}
@@ -167,7 +190,7 @@ describe("ObjectDetailsTable", () => {
     it("should not crash rendering invalid JSON", () => {
       render(
         <DetailsTable
-          data={invalidObjectDetailCard.data}
+          columns={invalidObjectDetailCard.data.cols}
           zoomedRow={invalidObjectDetailCard.data.rows[0]}
           onVisualizationClick={() => null}
           visualizationIsClickable={() => false}

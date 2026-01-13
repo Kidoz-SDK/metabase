@@ -1,34 +1,40 @@
+const { H } = cy;
 import {
-  ORDERS_QUESTION_ID,
   ORDERS_DASHBOARD_ID,
+  ORDERS_QUESTION_ID,
 } from "e2e/support/cypress_sample_instance_data";
-import {
-  restore,
-  popover,
-  visitDashboard,
-  visitQuestion,
-  setTokenFeatures,
-  openStaticEmbeddingModal,
-  modal,
-} from "e2e/support/helpers";
 
-import { getEmbeddingJsCode, IFRAME_CODE } from "./shared/embedding-snippets";
+import { IFRAME_CODE, getEmbeddingJsCode } from "./shared/embedding-snippets";
 
-const features = ["none", "all"];
+const tokens = ["starter", "pro-self-hosted"];
 
-features.forEach(feature => {
-  describe("scenarios > embedding > code snippets", () => {
+function codeBlock() {
+  return cy.get(".cm-content");
+}
+
+function highlightedTexts() {
+  return cy.findAllByTestId("highlighted-text");
+}
+
+tokens.forEach((token) => {
+  describe(`[plans=${token}] scenarios > embedding > code snippets`, () => {
     beforeEach(() => {
-      restore();
+      H.restore();
       cy.signInAsAdmin();
-      setTokenFeatures(feature);
+      H.activateToken(token);
     });
 
     it("dashboard should have the correct embed snippet", () => {
-      visitDashboard(ORDERS_DASHBOARD_ID);
-      openStaticEmbeddingModal({ acceptTerms: false });
+      const defaultDownloadsValue =
+        token === "pro-self-hosted" ? true : undefined;
+      H.visitDashboard(ORDERS_DASHBOARD_ID);
+      H.openLegacyStaticEmbeddingModal({
+        resource: "dashboard",
+        resourceId: ORDERS_DASHBOARD_ID,
+        acceptTerms: false,
+      });
 
-      modal().within(() => {
+      H.modal().within(() => {
         cy.findByText(
           "To embed this dashboard in your application you’ll just need to publish it, and paste these code snippets in the proper places in your app.",
         );
@@ -37,49 +43,7 @@ features.forEach(feature => {
           "Insert this code snippet in your server code to generate the signed embedding URL",
         );
 
-        cy.get(".ace_content")
-          .first()
-          .invoke("text")
-          .should(
-            "match",
-            getEmbeddingJsCode({ type: "dashboard", id: ORDERS_DASHBOARD_ID }),
-          );
-
-        cy.findAllByTestId("embed-backend-select-button")
-          .should("contain", "Node.js")
-          .click();
-      });
-
-      popover()
-        .should("contain", "Node.js")
-        .and("contain", "Ruby")
-        .and("contain", "Python")
-        .and("contain", "Clojure");
-
-      cy.get(".ace_content").last().should("have.text", IFRAME_CODE);
-
-      modal()
-        .findAllByTestId("embed-frontend-select-button")
-        .should("contain", "Pug / Jade")
-        .click();
-
-      popover()
-        .should("contain", "Mustache")
-        .and("contain", "Pug / Jade")
-        .and("contain", "ERB")
-        .and("contain", "JSX");
-
-      modal().within(() => {
-        cy.findByRole("tab", { name: "Appearance" }).click();
-
-        // No download button for dashboards even for pro/enterprise users metabase#23477
-        cy.findByLabelText(
-          "Enable users to download data from this embed",
-        ).should("not.exist");
-
-        // set transparent background metabase#23477
-        cy.findByText("Transparent").click();
-        cy.get(".ace_content")
+        codeBlock()
           .first()
           .invoke("text")
           .should(
@@ -87,17 +51,93 @@ features.forEach(feature => {
             getEmbeddingJsCode({
               type: "dashboard",
               id: ORDERS_DASHBOARD_ID,
-              theme: "transparent",
+              downloads: defaultDownloadsValue,
             }),
           );
+
+        cy.findAllByTestId("embed-backend-select-button")
+          .should("contain", "Node.js")
+          .click();
+      });
+
+      H.popover()
+        .should("contain", "Node.js")
+        .and("contain", "Ruby")
+        .and("contain", "Python")
+        .and("contain", "Clojure");
+
+      // eslint-disable-next-line no-unsafe-element-filtering
+      codeBlock().last().should("have.text", IFRAME_CODE);
+
+      H.modal()
+        .findAllByTestId("embed-frontend-select-button")
+        .should("contain", "Pug / Jade")
+        .click();
+
+      H.popover()
+        .should("contain", "Mustache")
+        .and("contain", "Pug / Jade")
+        .and("contain", "ERB")
+        .and("contain", "JSX");
+
+      H.modal().within(() => {
+        cy.findByRole("tab", { name: "Look and Feel" }).click();
+
+        // set transparent background metabase#23477
+        cy.findByText("Dashboard background").click();
+        codeBlock()
+          .first()
+          .invoke("text")
+          .should(
+            "match",
+            getEmbeddingJsCode({
+              type: "dashboard",
+              id: ORDERS_DASHBOARD_ID,
+              background: false,
+              downloads: defaultDownloadsValue,
+            }),
+          );
+
+        if (token === "pro-self-hosted") {
+          // Disable both download options
+          cy.findByText("Export to PDF").click();
+          cy.findByText("Results (csv, xlsx, json, png)").click();
+
+          codeBlock()
+            .first()
+            .invoke("text")
+            .should(
+              "match",
+              getEmbeddingJsCode({
+                type: "dashboard",
+                id: ORDERS_DASHBOARD_ID,
+                background: false,
+                downloads: false,
+              }),
+            );
+
+          // Verify that switching tabs keeps the highlighted texts
+          highlightedTexts().should("have.length", 1);
+
+          cy.findByRole("tab", { name: "Parameters" }).click();
+          cy.findByRole("tab", { name: "Look and Feel" }).click();
+
+          highlightedTexts().should("have.length", 1);
+        }
       });
     });
 
     it("question should have the correct embed snippet", () => {
-      visitQuestion(ORDERS_QUESTION_ID);
-      openStaticEmbeddingModal({ acceptTerms: false });
+      const defaultDownloadsValue =
+        token === "pro-self-hosted" ? true : undefined;
+      H.visitQuestion(ORDERS_QUESTION_ID);
+      H.openLegacyStaticEmbeddingModal({
+        resource: "question",
+        resourceId: ORDERS_QUESTION_ID,
+        acceptTerms: false,
+      });
 
-      modal().within(() => {
+      H.modal().within(() => {
         cy.findByText(
           "To embed this question in your application you’ll just need to publish it, and paste these code snippets in the proper places in your app.",
         );
@@ -105,19 +145,7 @@ features.forEach(feature => {
           "Insert this code snippet in your server code to generate the signed embedding URL",
         );
 
-        cy.get(".ace_content")
-          .first()
-          .invoke("text")
-          .should(
-            "match",
-            getEmbeddingJsCode({ type: "question", id: ORDERS_QUESTION_ID }),
-          );
-
-        cy.findByRole("tab", { name: "Appearance" }).click();
-
-        // set transparent background metabase#23477
-        cy.findByText("Transparent").click();
-        cy.get(".ace_content")
+        codeBlock()
           .first()
           .invoke("text")
           .should(
@@ -125,17 +153,17 @@ features.forEach(feature => {
             getEmbeddingJsCode({
               type: "question",
               id: ORDERS_QUESTION_ID,
-              theme: "transparent",
+              downloads: defaultDownloadsValue,
             }),
           );
 
-        // hide download button for pro/enterprise users metabase#23477
-        if (feature === "all") {
-          cy.findByText(
-            "Enable users to download data from this embed",
-          ).click();
+        cy.findByRole("tab", { name: "Look and Feel" }).click();
 
-          cy.get(".ace_content")
+        // hide download button for pro/enterprise users metabase#23477
+        if (token === "pro-self-hosted") {
+          cy.findByText("Download (csv, xlsx, json, png)").click();
+
+          codeBlock()
             .first()
             .invoke("text")
             .should(
@@ -143,8 +171,7 @@ features.forEach(feature => {
               getEmbeddingJsCode({
                 type: "question",
                 id: ORDERS_QUESTION_ID,
-                theme: "transparent",
-                hideDownloadButton: true,
+                downloads: false,
               }),
             );
         }
@@ -154,11 +181,21 @@ features.forEach(feature => {
           .click();
       });
 
-      popover()
+      H.popover()
         .should("contain", "Node.js")
         .and("contain", "Ruby")
         .and("contain", "Python")
         .and("contain", "Clojure");
+
+      if (token === "pro-self-hosted") {
+        // Verify that switching tabs keeps the highlighted texts
+        highlightedTexts().should("have.length", 1);
+
+        cy.findByRole("tab", { name: "Parameters" }).click();
+        cy.findByRole("tab", { name: "Look and Feel" }).click();
+
+        highlightedTexts().should("have.length", 1);
+      }
     });
   });
 });

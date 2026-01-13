@@ -7,6 +7,7 @@ import {
   getSourceConfigForType,
   getSourceType,
 } from "metabase-lib/v1/parameters/utils/parameter-source";
+import { isNumberParameter } from "metabase-lib/v1/parameters/utils/parameter-type";
 import type { ValuesSourceConfig, ValuesSourceType } from "metabase-types/api";
 
 import { ValuesSourceCardModal } from "./ValuesSourceCardModal";
@@ -62,19 +63,26 @@ const ValuesSourceModal = ({
       sourceConfig={sourceConfig}
       onChangeSourceConfig={setSourceConfig}
       onSubmit={handlePickerClose}
-      onClose={onClose}
+      onClose={handlePickerClose}
     />
   );
 };
 
 /**
  * after using this function to initialize sourceType, we know that:
- * (intial sourceType === null) => hasFields(parameter)
+ * (initial sourceType === null) => hasFields(parameter)
  */
 const getInitialSourceType = (parameter: UiParameter) => {
   const sourceType = getSourceType(parameter);
 
-  return sourceType === null && !hasFields(parameter) ? "card" : sourceType;
+  if (sourceType === null && !hasFields(parameter)) {
+    if (isNumberParameter(parameter)) {
+      return "static-list";
+    }
+    return "card";
+  }
+
+  return sourceType;
 };
 
 // eslint-disable-next-line import/no-default-export -- deprecated usage

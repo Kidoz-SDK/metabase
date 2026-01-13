@@ -1,14 +1,9 @@
+const { H } = cy;
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import {
   ORDERS_BY_YEAR_QUESTION_ID,
   ORDERS_QUESTION_ID,
 } from "e2e/support/cypress_sample_instance_data";
-import {
-  restore,
-  setupSMTP,
-  visitQuestion,
-  leftSidebar,
-} from "e2e/support/helpers";
 
 const { PEOPLE, PEOPLE_ID } = SAMPLE_DATABASE;
 
@@ -46,26 +41,36 @@ const rawTestCases = [
 
 describe("scenarios > alert > types", { tags: "@external" }, () => {
   beforeEach(() => {
-    cy.intercept("POST", "/api/alert").as("savedAlert");
+    cy.intercept("POST", "/api/notification").as("updateAlert");
+    cy.intercept("GET", "/api/channel").as("channel");
 
-    restore();
+    H.restore();
     cy.signInAsAdmin();
 
-    setupSMTP();
+    H.setupSMTP();
   });
 
   describe("rows based alerts", () => {
     rawTestCases.forEach(({ questionType, questionId }) => {
       it(`should be supported for ${questionType}`, () => {
-        visitQuestion(questionId);
+        H.visitQuestion(questionId);
 
-        openAlertModal();
+        cy.findByLabelText("Move, trash, and more…").click();
+        H.popover().findByText("Create an alert").click();
+        cy.wait("@channel");
 
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("Done").click();
+        H.modal().within(() => {
+          cy.findByText("New alert").should("be.visible");
 
-        cy.wait("@savedAlert").then(({ response: { body } }) => {
-          expect(body.alert_condition).to.equal("rows");
+          cy.findByTestId("alert-goal-select")
+            .should("not.be.enabled")
+            .should("have.text", "When this question has results");
+
+          cy.findByText("Done").click();
+        });
+
+        cy.wait("@updateAlert").then(({ response: { body } }) => {
+          expect(body.payload?.send_condition).to.equal("has_result");
         });
       });
     });
@@ -73,80 +78,65 @@ describe("scenarios > alert > types", { tags: "@external" }, () => {
 
   describe("goal based alerts", () => {
     it("should work for timeseries questions with a set goal", () => {
-      // Set goal on timeseries question
-      visitQuestion(timeSeriesQuestionId);
-
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Visualization").click();
-      leftSidebar().within(() => {
-        cy.icon("line").realHover();
-        cy.icon("gear").click();
+      cy.request("PUT", `/api/card/${timeSeriesQuestionId}`, {
+        visualization_settings: {
+          "graph.show_goal": true,
+          "graph.goal_value": 7000,
+          "graph.dimensions": ["CREATED_AT"],
+          "graph.metrics": ["count"],
+        },
       });
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Line options");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Display").click();
 
-      setGoal("7000");
+      cy.log("Set the goal on timeseries question");
+      H.visitQuestion(timeSeriesQuestionId);
+      cy.findByTestId("chart-container").should("contain", "Goal");
 
-      // Save question
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Save").click();
-      cy.findByTestId("save-question-modal").within(modal => {
-        cy.findByText("Save").click();
+      cy.findByLabelText("Move, trash, and more…").click();
+      H.popover().findByText("Create an alert").click();
+      cy.wait("@channel");
+
+      H.modal().findByTestId("alert-goal-select").should("be.enabled").click();
+
+      H.popover().within(() => {
+        cy.findByText("When results go above the goal").should("be.visible");
+        cy.findByText("When results go below the goal").should("be.visible");
+        cy.findByText("When results go above the goal").click();
       });
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Save question").should("not.exist");
 
-      openAlertModal();
+      H.modal().within(() => {
+        cy.findByText("Delete this Alert after it's triggered").click();
 
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Reaches the goal line").click();
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("The first time").click();
+        cy.button("Done").click();
+      });
 
-      cy.button("Done").click();
-
-      // Check the API response
-      cy.wait("@savedAlert").then(({ response: { body } }) => {
-        expect(body.alert_condition).to.equal("goal");
-        expect(body.alert_above_goal).to.equal(true);
-        expect(body.alert_first_only).to.equal(true);
+      cy.log("Check the API response");
+      cy.wait("@updateAlert").then(({ response: { body } }) => {
+        expect(body.payload?.send_condition).to.equal("goal_above");
+        expect(body.payload?.send_once).to.equal(true);
       });
     });
 
     it("should not be possible to create goal based alert for a multi-series question", () => {
-      cy.createQuestion(multiSeriesQuestionWithGoal, { visitQuestion: true });
+      H.createQuestion(multiSeriesQuestionWithGoal, { visitQuestion: true });
 
-      openAlertModal();
+      cy.findByLabelText("Move, trash, and more…").click();
+      H.popover().findByText("Create an alert").click();
+      cy.wait("@channel");
 
-      // *** The warning below is not showing when we try to make an alert (Issue #???)
-      // cy.contains(
-      //   "Goal-based alerts aren't yet supported for charts with more than one line",
-      // );
+      H.modal().within(() => {
+        cy.findByText("New alert").should("be.visible");
 
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Done").click();
+        cy.findByTestId("alert-goal-select")
+          .should("not.be.enabled")
+          .should("have.text", "When this question has results");
+
+        cy.findByText("Done").click();
+      });
 
       // The alert condition should fall back to rows
-      cy.wait("@savedAlert").then(({ response: { body } }) => {
-        expect(body.alert_condition).to.equal("rows");
-        expect(body.alert_above_goal).to.equal(null);
+      cy.wait("@updateAlert").then(({ response: { body } }) => {
+        expect(body.payload?.send_condition).to.equal("has_result");
       });
     });
   });
 });
-
-function openAlertModal() {
-  cy.icon("bell").click();
-  cy.findByText("Set up an alert").click();
-}
-
-function setGoal(goal) {
-  // Enable the toggle
-  cy.findByText("Goal line").next().click();
-
-  cy.findByDisplayValue("0").clear().type(goal);
-
-  cy.button("Done").click();
-}

@@ -1,34 +1,48 @@
 /* eslint-disable react/prop-types */
+import cx from "classnames";
 import { t } from "ttag";
 
-import { color } from "metabase/lib/colors";
+import { useRegisterShortcut } from "metabase/palette/hooks/useRegisterShortcut";
+import { Button, Icon } from "metabase/ui";
 import * as Lib from "metabase-lib";
 
-import { HeaderButton } from "../ViewHeader.styled";
+import ViewTitleHeaderS from "../ViewTitleHeader.module.css";
 
 export function QuestionSummarizeWidget({
   isShowingSummarySidebar,
   onEditSummary,
   onCloseSummary,
-  ...props
+  className,
 }) {
+  const handleClick = () => {
+    if (isShowingSummarySidebar) {
+      onCloseSummary();
+    } else {
+      onEditSummary();
+    }
+  };
+
+  useRegisterShortcut(
+    [
+      {
+        id: "query-builder-toggle-summarize-sidebar",
+        perform: handleClick,
+      },
+    ],
+    [isShowingSummarySidebar],
+  );
+
   return (
-    <HeaderButton
-      large
-      color={color("summarize")}
-      labelBreakpoint="sm"
-      onClick={async () => {
-        if (isShowingSummarySidebar) {
-          onCloseSummary();
-        } else {
-          onEditSummary();
-        }
-      }}
-      active={isShowingSummarySidebar}
-      {...props}
+    <Button
+      color="summarize"
+      variant={isShowingSummarySidebar ? "filled" : "default"}
+      leftSection={<Icon name="sum" />}
+      onClick={handleClick}
+      data-active={isShowingSummarySidebar}
+      className={cx(className, ViewTitleHeaderS.SummarizeButton)}
     >
       {t`Summarize`}
-    </HeaderButton>
+    </Button>
   );
 }
 

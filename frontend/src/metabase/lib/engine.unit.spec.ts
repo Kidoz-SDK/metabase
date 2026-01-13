@@ -1,25 +1,10 @@
 import {
-  getEngineNativeAceMode,
+  formatNativeQuery,
   getEngineNativeType,
   getNativeQueryLanguage,
-  formatNativeQuery,
   isDeprecatedEngine,
 } from "metabase/lib/engine";
 import type { Engine } from "metabase-types/api";
-
-describe("getEngineNativeAceMode", () => {
-  it("should be SQL when engine is undefined", () => {
-    expect(getEngineNativeAceMode()).toBe("ace/mode/sql");
-  });
-
-  it("should be SQL mode for H2", () => {
-    expect(getEngineNativeAceMode("h2")).toBe("ace/mode/sql");
-  });
-
-  it("should be JSON for MongoDB", () => {
-    expect(getEngineNativeAceMode("mongo")).toBe("ace/mode/json");
-  });
-});
 
 describe("getEngineNativeType", () => {
   it("should be sql when engine is undefined", () => {
@@ -52,71 +37,36 @@ describe("getNativeQueryLanguage", () => {
 });
 
 describe("formatNativeQuery", () => {
-  it("should return `undefined` when neither query nor engine are provided", () => {
-    expect(formatNativeQuery()).toBeUndefined();
-  });
-
-  it("should return `undefined` when the query exists, but engine is `undefined`", () => {
-    expect(formatNativeQuery("")).toBeUndefined();
-    expect(formatNativeQuery("select 1")).toBeUndefined();
-
-    expect(formatNativeQuery({})).toBeUndefined();
-    expect(formatNativeQuery([])).toBeUndefined();
-    expect(formatNativeQuery([{}, { a: 1 }])).toBeUndefined();
-  });
-
-  it("should return `undefined` when the query exists, but engine is an empty string", () => {
-    expect(formatNativeQuery("", "")).toBeUndefined();
-    expect(formatNativeQuery("select 1", "")).toBeUndefined();
-
-    expect(formatNativeQuery({}, "")).toBeUndefined();
-    expect(formatNativeQuery([], "")).toBeUndefined();
-    expect(formatNativeQuery([{}, { a: 1 }], "")).toBeUndefined();
-  });
-
-  it("should return `undefined` when engine is passed as the only argument", () => {
-    // Because parameters are positional, passing an engine as the only argument
-    // will be treated as a query, and the engine will be `undefined`.
-    expect(formatNativeQuery("mongo")).toBeUndefined();
-    expect(formatNativeQuery("postgres")).toBeUndefined();
-
-    expect(formatNativeQuery("mongo", "")).toBeUndefined();
-    expect(formatNativeQuery("postgres", "")).toBeUndefined();
-  });
-
-  it("should return `undefined` when the query and the engine don't match", () => {
-    expect(formatNativeQuery("select 1", "mongo")).toBeUndefined();
-    expect(formatNativeQuery("foo bar baz", "mongo")).toBeUndefined();
-    expect(formatNativeQuery("", "mongo")).toBeUndefined();
-
-    expect(formatNativeQuery({}, "postgres")).toBeUndefined();
-    expect(formatNativeQuery([], "postgres")).toBeUndefined();
-    expect(formatNativeQuery([{}], "postgres")).toBeUndefined();
-    expect(formatNativeQuery({ a: 1 }, "postgres")).toBeUndefined();
-    expect(formatNativeQuery([{ a: 1 }], "postgres")).toBeUndefined();
-  });
-
   it("should return formatted SQL", () => {
-    expect(formatNativeQuery("select 1", "postgres")).toEqual("select 1");
-    expect(
-      formatNativeQuery("SELECT * FROM PUBLIC.ORDERS", "postgres"),
-    ).toEqual("SELECT *\nFROM PUBLIC.ORDERS");
+    expect(formatNativeQuery("select 1")).toEqual("select 1");
+    expect(formatNativeQuery("SELECT * FROM PUBLIC.ORDERS")).toEqual(
+      "SELECT * FROM PUBLIC.ORDERS",
+    );
   });
 
   it("should return any valid string if the engine type is sql", () => {
-    expect(formatNativeQuery("foo", "postgres")).toEqual("foo");
-    expect(formatNativeQuery("FOO BAR baz", "postgres")).toEqual("FOO BAR baz");
-    expect(formatNativeQuery("FOO: BAR, baz.", "postgres")).toEqual(
-      "FOO: BAR, baz.",
+    expect(formatNativeQuery("foo")).toEqual("foo");
+    expect(formatNativeQuery("FOO BAR baz")).toEqual("FOO BAR baz");
+    expect(formatNativeQuery("FOO: BAR, baz.")).toEqual("FOO: BAR, baz.");
+    expect(formatNativeQuery("-- foo")).toEqual("-- foo");
+  });
+
+  it("should not format SQL keywords inside comment lines", () => {
+    expect(
+      formatNativeQuery(
+        "-- SELECT * FROM products WHERE category = 'Widget'\nSELECT * FROM products WHERE category = 'Widget'",
+      ),
+    ).toEqual(
+      "-- SELECT * FROM products WHERE category = 'Widget'\nSELECT * FROM products WHERE category = 'Widget'",
     );
-    expect(formatNativeQuery("-- foo", "postgres")).toEqual("-- foo");
   });
 
   it("should return formatted JSON", () => {
-    expect(formatNativeQuery({}, "mongo")).toEqual("{}");
-    expect(formatNativeQuery([], "mongo")).toEqual("[]");
-    expect(formatNativeQuery(["foo"], "mongo")).toEqual('[\n  "foo"\n]');
-    expect(formatNativeQuery({ a: 1 }, "mongo")).toEqual('{\n  "a": 1\n}');
+    expect(formatNativeQuery({})).toEqual("{}");
+    expect(formatNativeQuery([])).toEqual("[]");
+    expect(formatNativeQuery(["foo"])).toEqual('[\n  "foo"\n]');
+    expect(formatNativeQuery({ a: 1 })).toEqual('{\n  "a": 1\n}');
+    expect(formatNativeQuery('["foo"]')).toEqual('["foo"]');
   });
 });
 
@@ -126,16 +76,19 @@ describe("isDeprecatedEngine", () => {
       "driver-name": "Foo",
       source: { type: "official", contact: null },
       "superseded-by": "deprecated",
+      "extra-info": null,
     },
     bar: {
       "driver-name": "Bar",
       source: { type: "official", contact: null },
       "superseded-by": "baz",
+      "extra-info": null,
     },
     baz: {
       "driver-name": "Baz",
       source: { type: "official", contact: null },
       "superseded-by": null,
+      "extra-info": null,
     },
   };
 

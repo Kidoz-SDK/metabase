@@ -7,9 +7,9 @@ import {
   getSubmitButtonColor,
   getSubmitButtonLabel,
 } from "metabase/actions/utils";
-import Button from "metabase/core/components/Button";
-import FormErrorMessage from "metabase/core/components/FormErrorMessage";
-import FormSubmitButton from "metabase/core/components/FormSubmitButton";
+import Button from "metabase/common/components/Button";
+import FormErrorMessage from "metabase/common/components/FormErrorMessage";
+import FormSubmitButton from "metabase/common/components/FormSubmitButton";
 import { Form, FormProvider } from "metabase/forms";
 import type {
   ActionFormInitialValues,
@@ -25,7 +25,6 @@ import { ActionFormButtonContainer } from "./ActionForm.styled";
 interface ActionFormProps {
   action: WritebackAction;
   initialValues?: ActionFormInitialValues;
-  prefetchesInitialValues?: boolean;
 
   // Parameters that shouldn't be displayed in the form
   // Can be used to "lock" certain parameter values.
@@ -44,7 +43,6 @@ interface ActionFormProps {
 function ActionForm({
   action,
   initialValues: rawInitialValues = {},
-  prefetchesInitialValues,
   hiddenFields = [],
   onSubmit,
   onClose,
@@ -53,11 +51,10 @@ function ActionForm({
     useActionForm({
       action,
       initialValues: rawInitialValues,
-      prefetchesInitialValues,
     });
 
   const editableFields = useMemo(
-    () => form.fields.filter(field => !hiddenFields.includes(field.name)),
+    () => form.fields.filter((field) => !hiddenFields.includes(field.name)),
     [form, hiddenFields],
   );
 
@@ -85,7 +82,7 @@ function ActionForm({
       enableReinitialize
     >
       <Form role="form" data-testid="action-form">
-        {editableFields.map(field => (
+        {editableFields.map((field) => (
           <ActionFormFieldWidget key={field.name} formField={field} />
         ))}
 

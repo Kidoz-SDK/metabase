@@ -1,4 +1,4 @@
-(ns ^:mb/once metabase.util.i18n-test
+(ns metabase.util.i18n-test
   (:require
    [clojure.test :refer :all]
    [clojure.walk :as walk]
@@ -11,8 +11,8 @@
                    ["pt_BR", "Portuguese (Brazil)"]))))
 
 (deftest tru-test
-  (mt/with-mock-i18n-bundles {"es" {:messages {"must be {0} characters or less"
-                                               "deben tener {0} caracteres o menos"}}}
+  (mt/with-mock-i18n-bundles! {"es" {:messages {"must be {0} characters or less"
+                                                "deben tener {0} caracteres o menos"}}}
     (doseq [[message f] {"tru"
                          (fn [] (i18n/tru "must be {0} characters or less" 140))
                          "tru with str"
@@ -43,8 +43,8 @@
                        (f)))))))))))
 
 (deftest trs-test
-  (mt/with-mock-i18n-bundles {"es" {:messages {"must be {0} characters or less"
-                                               "deben tener {0} caracteres o menos"}}}
+  (mt/with-mock-i18n-bundles! {"es" {:messages {"must be {0} characters or less"
+                                                "deben tener {0} caracteres o menos"}}}
     (doseq [[message f] {"trs"
                          (fn [] (i18n/trs "must be {0} characters or less" 140))
                          "trs with str"
@@ -70,8 +70,8 @@
                        (f)))))))))))
 
 (deftest trun-test
-  (mt/with-mock-i18n-bundles {"es" {:headers {"Plural-Forms" "nplurals=2; plural=(n != 1);\n"}
-                                    :messages {"{0} table" ["{0} tabla" "{0} tablas"]}}}
+  (mt/with-mock-i18n-bundles! {"es" {:headers {"Plural-Forms" "nplurals=2; plural=(n != 1);\n"}
+                                     :messages {"{0} table" ["{0} tabla" "{0} tablas"]}}}
     (doseq [[message f]
             {"trun"
              (fn [n] (i18n/trun "{0} table" "{0} tables" n))
@@ -100,10 +100,9 @@
             (is (= "2 tablas"
                    (f 2)))))))))
 
-
 (deftest trsn-test
-  (mt/with-mock-i18n-bundles {"es" {:headers {"Plural-Forms" "nplurals=2; plural=(n != 1);\n"}
-                                    :messages {"{0} table" ["{0} tabla" "{0} tablas"]}}}
+  (mt/with-mock-i18n-bundles! {"es" {:headers {"Plural-Forms" "nplurals=2; plural=(n != 1);\n"}
+                                     :messages {"{0} table" ["{0} tabla" "{0} tablas"]}}}
     (doseq [[message f]
             {"trsn - singular"
              (fn [n] (i18n/trsn "{0} table" "{0} tables" n))
@@ -128,7 +127,6 @@
             (is (= "2 tables"
                    (f 2)))))
 
-
         (testing "Should use system locale if set"
           (mt/with-temporary-setting-values [site-locale "es"]
             (is (= "0 tablas"
@@ -141,8 +139,8 @@
                    (f 2)))))))))
 
 (deftest ^:parallel localized-string?-test
-  (is (= true
-         (i18n/localized-string? (i18n/deferred-trs "WOW"))))
+  (is (true?
+       (i18n/localized-string? (i18n/deferred-trs "WOW"))))
   (is (= false
          (i18n/localized-string? "WOW"))))
 
@@ -186,13 +184,13 @@
              (#'i18n/validate-number-of-args "{1}" [0 1]))))))
 
   (testing "The number of args is still validated if the first argument is a `str` form"
-      (is (thrown?
-           clojure.lang.Compiler$CompilerException
-           (walk/macroexpand-all `(i18n/trs (~'str "{0}" "{1}") 0))))
-      (is (thrown-with-msg?
-           AssertionError
-           #"expects 2 args, got 1"
-           (#'i18n/validate-number-of-args '(str "{0}" "{1}") [0]))))
+    (is (thrown?
+         clojure.lang.Compiler$CompilerException
+         (walk/macroexpand-all `(i18n/trs (~'str "{0}" "{1}") 0))))
+    (is (thrown-with-msg?
+         AssertionError
+         #"expects 2 args, got 1"
+         (#'i18n/validate-number-of-args '(str "{0}" "{1}") [0]))))
 
   (testing "`trsn` and `trun` should validate that they are being called with at most one arg\n"
     (is (thrown?

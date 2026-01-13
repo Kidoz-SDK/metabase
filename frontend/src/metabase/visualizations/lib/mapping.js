@@ -1,12 +1,12 @@
-import d3 from "d3";
+import * as d3 from "d3";
 import L from "leaflet/dist/leaflet-src.js";
 
 import { COUNTRY_NAME_TO_CODE, STATE_CODES } from "./mapping_codes";
 
 export function computeMinimalBounds(features) {
   const points = getAllFeaturesPoints(features);
-  const [west, east] = d3.extent(points, d => d[0]);
-  const [north, south] = d3.extent(points, d => d[1]);
+  const [west, east] = d3.extent(points, (d) => d[0]);
+  const [north, south] = d3.extent(points, (d) => d[1]);
 
   return L.latLngBounds(
     L.latLng(south, west), // SW

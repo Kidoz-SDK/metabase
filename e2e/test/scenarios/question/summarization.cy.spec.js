@@ -1,34 +1,20 @@
+const { H } = cy;
+import { dedent } from "ts-dedent";
+
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import { ORDERS_QUESTION_ID } from "e2e/support/cypress_sample_instance_data";
-import {
-  restore,
-  changeBinningForDimension,
-  getDimensionByName,
-  getRemoveDimensionButton,
-  summarize,
-  visitQuestion,
-  popover,
-  openReviewsTable,
-  openOrdersTable,
-  enterCustomColumnDetails,
-  visualize,
-  checkExpressionEditorHelperPopoverPosition,
-  rightSidebar,
-  interceptIfNotPreviouslyDefined,
-  expressionEditorWidget,
-} from "e2e/support/helpers";
 
 const { ORDERS, ORDERS_ID } = SAMPLE_DATABASE;
 
 describe("scenarios > question > summarize sidebar", () => {
   beforeEach(() => {
-    restore();
+    H.restore();
     cy.signInAsAdmin();
 
     cy.intercept("POST", "/api/dataset").as("dataset");
 
-    visitQuestion(ORDERS_QUESTION_ID);
-    summarize();
+    H.visitQuestion(ORDERS_QUESTION_ID);
+    H.summarize();
   });
 
   it("removing all aggregations should show add aggregation button with label", () => {
@@ -38,16 +24,16 @@ describe("scenarios > question > summarize sidebar", () => {
 
     cy.findByTestId("add-aggregation-button").should(
       "have.text",
-      "Add a metric",
+      "Add a function or metric",
     );
   });
 
   it("selected dimensions becomes pinned to the top of the dimensions list", () => {
-    getDimensionByName({ name: "Total" })
+    H.getDimensionByName({ name: "Total" })
       .should("have.attr", "aria-selected", "false")
       .click({ position: "left" });
 
-    getDimensionByName({ name: "Total" }).should(
+    H.getDimensionByName({ name: "Total" }).should(
       "have.attr",
       "aria-selected",
       "true",
@@ -55,7 +41,7 @@ describe("scenarios > question > summarize sidebar", () => {
 
     cy.button("Done").click();
 
-    summarize();
+    H.summarize();
 
     // Removed from the unpinned list
     cy.findByTestId("unpinned-dimensions").within(() => {
@@ -65,14 +51,14 @@ describe("scenarios > question > summarize sidebar", () => {
     // Displayed in the pinned list
     cy.findByTestId("pinned-dimensions").within(() => {
       cy.findByText("Orders → Total").should("not.exist");
-      getDimensionByName({ name: "Total" }).should(
+      H.getDimensionByName({ name: "Total" }).should(
         "have.attr",
         "aria-selected",
         "true",
       );
     });
 
-    getRemoveDimensionButton({ name: "Total" }).click();
+    H.getRemoveDimensionButton({ name: "Total" }).click();
 
     // Becomes visible in the unpinned list again
     cy.findByTestId("unpinned-dimensions").within(() => {
@@ -81,48 +67,51 @@ describe("scenarios > question > summarize sidebar", () => {
   });
 
   it("selected dimensions from another table includes the table alias when becomes pinned to the top", () => {
-    getDimensionByName({ name: "State" }).click();
+    H.getDimensionByName({ name: "State" }).click();
 
     cy.button("Done").click();
 
-    summarize();
+    H.summarize();
 
     cy.findByTestId("pinned-dimensions").within(() => {
-      getDimensionByName({ name: "User → State" }).should(
+      H.getDimensionByName({ name: "User → State" }).should(
         "have.attr",
         "aria-selected",
         "true",
       );
     });
 
-    getRemoveDimensionButton({ name: "User → State" }).click();
+    H.getRemoveDimensionButton({ name: "User → State" }).click();
 
     // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
     cy.findByText("User → State").should("not.exist");
   });
 
   it("selecting a binning adds a dimension", () => {
-    getDimensionByName({ name: "Total" }).click({ position: "left" });
+    H.getDimensionByName({ name: "Total" }).click({ position: "left" });
 
-    changeBinningForDimension({
+    H.changeBinningForDimension({
       name: "Quantity",
       toBinning: "10 bins",
     });
 
-    getDimensionByName({ name: "Total" }).should(
-      "have.attr",
-      "aria-selected",
-      "true",
-    );
-    getDimensionByName({ name: "Quantity" }).should(
-      "have.attr",
-      "aria-selected",
-      "true",
-    );
+    H.getDimensionByName({ name: "Total" })
+      .scrollIntoView()
+      .should("have.attr", "aria-selected", "true")
+      .findByLabelText("Binning strategy")
+      .should("be.visible");
+    H.getDimensionByName({ name: "Quantity" })
+      .should("have.attr", "aria-selected", "true")
+      .findByLabelText("Binning strategy")
+      .should("be.visible");
+    H.getDimensionByName({ name: "Discount" }).within(() => {
+      cy.button("Add dimension").realHover();
+      cy.findByLabelText("Binning strategy").should("be.visible");
+    });
   });
 
   it("should be able to do subsequent aggregation on a custom expression (metabase#14649)", () => {
-    cy.createQuestion(
+    H.createQuestion(
       {
         name: "14649_min",
         query: {
@@ -154,73 +143,70 @@ describe("scenarios > question > summarize sidebar", () => {
   });
 
   it("should allow using `Custom Expression` in orders metrics (metabase#12899)", () => {
-    openOrdersTable({ mode: "notebook" });
-    summarize({ mode: "notebook" });
-    popover().contains("Custom Expression").click();
-    expressionEditorWidget().within(() => {
-      enterCustomColumnDetails({
-        formula: "2 * Max([Total])",
-        name: "twice max total",
-      });
-      cy.findByText("Done").click();
+    H.openOrdersTable({ mode: "notebook" });
+    H.summarize({ mode: "notebook" });
+    H.popover().contains("Custom Expression").click();
+
+    H.enterCustomColumnDetails({
+      formula: "2 * Max([Total])",
+      name: "twice max total",
     });
+
+    H.expressionEditorWidget().button("Done").click();
     cy.findByTestId("aggregate-step")
       .contains("twice max total")
       .should("exist");
 
-    visualize();
+    H.visualize();
 
     // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
     cy.findByText("318.7");
   });
 
   it("should keep manually entered parenthesis intact if they affect the result (metabase#13306)", () => {
-    openOrdersTable({ mode: "notebook" });
-    summarize({ mode: "notebook" });
+    H.openOrdersTable({ mode: "notebook" });
+    H.summarize({ mode: "notebook" });
 
-    popover().contains("Custom Expression").click();
-    expressionEditorWidget().within(() => {
-      enterCustomColumnDetails({
-        formula:
-          "sum([Total]) / (sum([Product → Price]) * average([Quantity]))",
-      });
-      cy.get("@formula").blur();
+    H.popover().contains("Custom Expression").click();
+    H.enterCustomColumnDetails({
+      formula: "sum([Total]) / (sum([Product → Price]) * average([Quantity]))",
+      format: true,
     });
 
-    popover().within(() => {
-      cy.get(".ace_text-layer").should(
-        "have.text",
-        "Sum([Total]) / (Sum([Product → Price]) * Average([Quantity]))",
-      );
-    });
+    H.CustomExpressionEditor.value().should(
+      "equal",
+      dedent`
+        Sum([Total]) /
+          (Sum([Product → Price]) * Average([Quantity]))
+      `.trim(),
+    );
   });
 
   it("distinct inside custom expression should suggest non-numeric types (metabase#13469)", () => {
-    openReviewsTable({ mode: "notebook" });
-    summarize({ mode: "notebook" });
-    popover().contains("Custom Expression").click();
+    H.openReviewsTable({ mode: "notebook" });
+    H.summarize({ mode: "notebook" });
+    H.popover().contains("Custom Expression").click();
 
-    enterCustomColumnDetails({ formula: "Distinct([R" });
+    H.enterCustomColumnDetails({ formula: "Distinct([R", blur: false });
 
     cy.log(
       "**The point of failure for ANY non-numeric value reported in v0.36.4**",
     );
     // the default type for "Reviewer" is "No semantic type"
-    cy.findByTestId("expression-suggestions-list").within(() => {
-      cy.contains("Reviewer");
-    });
+    H.CustomExpressionEditor.completion("Reviewer").should("be.visible");
   });
 
   it("summarizing by distinct datetime should allow granular selection (metabase#13098)", () => {
-    openOrdersTable({ mode: "notebook" });
+    H.openOrdersTable({ mode: "notebook" });
 
-    summarize({ mode: "notebook" });
-    popover().within(() => {
+    H.summarize({ mode: "notebook" });
+    H.popover().within(() => {
       cy.findByText("Number of distinct values of ...").click();
-      cy.findByLabelText("Temporal bucket").click();
+      cy.findByLabelText("Temporal bucket").realHover().click();
     });
 
-    popover()
+    // eslint-disable-next-line no-unsafe-element-filtering
+    H.popover()
       .last()
       .within(() => {
         cy.button("More…").click();
@@ -229,7 +215,7 @@ describe("scenarios > question > summarize sidebar", () => {
   });
 
   it("should handle (removing) multiple metrics when one is sorted (metabase#12625)", () => {
-    cy.createQuestion(
+    H.createQuestion(
       {
         name: "12625",
         query: {
@@ -246,19 +232,25 @@ describe("scenarios > question > summarize sidebar", () => {
       { visitQuestion: true },
     );
 
-    summarize();
+    H.summarize();
 
     cy.findAllByTestId("header-cell").should("have.length", 4);
-    cy.get(".test-TableInteractive-headerCellData--sorted").as("sortedCell");
+    H.tableHeaderColumn("Sum of Subtotal")
+      .closest("[data-testid=header-cell]")
+      .findByLabelText("chevrondown icon");
 
     cy.log('At this point only "Sum of Subtotal" should be sorted');
-    cy.get("@sortedCell").its("length").should("eq", 1);
+    H.tableInteractiveHeader("header-sort-indicator")
+      .findAllByTestId("header-sort-indicator")
+      .should("have.length", 1);
 
     cy.log("Remove the sorted metric");
     removeMetricFromSidebar("Sum of Subtotal");
 
     cy.log('"Sum of Total" should not be sorted, nor any other header cell');
-    cy.get("@sortedCell").should("not.exist");
+    H.tableInteractiveHeader("header-sort-indicator")
+      .findAllByTestId("header-sort-indicator")
+      .should("have.length", 0);
 
     cy.findAllByTestId("header-cell")
       .should("have.length", 3)
@@ -271,43 +263,33 @@ describe("scenarios > question > summarize sidebar", () => {
   });
 
   // flaky test (#19454)
-  it.skip("should show an info popover when hovering over summarize dimension options", () => {
-    openReviewsTable();
+  it(
+    "should show an info popover when hovering over summarize dimension options",
+    { tags: "@skip" },
+    () => {
+      H.openReviewsTable();
 
-    summarize();
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-    cy.findByText("Group by")
-      .parent()
-      .findByText("Title")
-      .trigger("mouseenter");
+      H.summarize();
+      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+      cy.findByText("Group by")
+        .parent()
+        .findByText("Title")
+        .trigger("mouseenter");
 
-    popover().contains("Title");
-    popover().contains("199 distinct values");
-  });
-
-  // TODO: fixme!
-  it.skip("should render custom expression helper near the custom expression field", () => {
-    openReviewsTable({ mode: "notebook" });
-    summarize({ mode: "notebook" });
-
-    popover().within(() => {
-      cy.findByText("Custom Expression").click();
-
-      enterCustomColumnDetails({ formula: "floor" });
-
-      checkExpressionEditorHelperPopoverPosition();
-    });
-  });
+      H.popover().contains("Title");
+      H.popover().contains("199 distinct values");
+    },
+  );
 });
 
 function removeMetricFromSidebar(metricName) {
-  interceptIfNotPreviouslyDefined({
+  H.interceptIfNotPreviouslyDefined({
     method: "POST",
     url: "/api/dataset",
     alias: "dataset",
   });
 
-  rightSidebar().within(() => {
+  H.rightSidebar().within(() => {
     cy.findByLabelText(metricName)
       .find(".Icon-close")
       .should("be.visible")

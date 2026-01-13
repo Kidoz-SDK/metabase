@@ -1,6 +1,6 @@
-// these tests use ChartSettings directly, but logic we're testing lives in ChartNestedSettingSeries
+// these tests use QuestionChartSettings directly, but logic we're testing lives in ChartNestedSettingSeries
 import { renderWithProviders, screen } from "__support__/ui";
-import ChartSettings from "metabase/visualizations/components/ChartSettings";
+import { QuestionChartSettings } from "metabase/visualizations/components/ChartSettings";
 import registerVisualizations from "metabase/visualizations/register";
 
 registerVisualizations();
@@ -80,9 +80,9 @@ function getSeries(metrics) {
   ];
 }
 
-const setup = seriesMetrics => {
+const setup = (seriesMetrics) => {
   return renderWithProviders(
-    <ChartSettings
+    <QuestionChartSettings
       series={getSeries(seriesMetrics)}
       initial={{ section: "Display" }}
     />,

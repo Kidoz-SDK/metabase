@@ -1,3 +1,9 @@
-export { Select } from "@mantine/core";
-export type { SelectProps, SelectItem } from "@mantine/core";
-export { getSelectOverrides } from "./Select.styled";
+export {
+  Select,
+  type SelectOption,
+  type SelectProps,
+  type InputDescriptionProps,
+  type DataAttributes,
+} from "./Select";
+export { selectOverrides } from "./Select.config";
+export * from "./SelectItem";

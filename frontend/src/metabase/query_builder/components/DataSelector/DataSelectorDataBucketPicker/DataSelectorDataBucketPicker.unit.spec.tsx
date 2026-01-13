@@ -1,7 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen } from "__support__/ui";
 
-import type { DataTypeInfoItem } from "metabase/containers/DataPicker";
-import { getDataTypes } from "metabase/containers/DataPicker";
+import type { DataTypeInfoItem } from "../types";
+import { getDataTypes } from "../utils";
 
 import DataSelectorDataBucketPicker from "./DataSelectorDataBucketPicker";
 
@@ -17,8 +17,9 @@ const setup = (dataTypes: DataTypeInfoItem[]) => {
 describe("DataSelectorDataBucketPicker", () => {
   it("should display all buckets", () => {
     const dataTypes = getDataTypes({
-      hasMetrics: false,
       hasModels: true,
+      hasTables: true,
+      hasMetrics: false,
       hasSavedQuestions: true,
       hasNestedQueriesEnabled: true,
     });

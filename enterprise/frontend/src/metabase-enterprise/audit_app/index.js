@@ -1,51 +1,42 @@
 import { t } from "ttag";
 
+import { ForwardRefLink } from "metabase/common/components/Link";
+import { isInternalUser } from "metabase/lib/urls";
 import {
   PLUGIN_ADMIN_USER_MENU_ITEMS,
   PLUGIN_ADMIN_USER_MENU_ROUTES,
-  PLUGIN_DASHBOARD_HEADER,
-  PLUGIN_QUERY_BUILDER_HEADER,
+  PLUGIN_AUDIT,
 } from "metabase/plugins";
+import { Menu } from "metabase/ui";
 import { hasPremiumFeature } from "metabase-enterprise/settings";
 
-import { InstanceAnalyticsButton } from "./components/InstanceAnalyticsButton/InstanceAnalyticsButton";
+import { InsightsLink } from "./components/InsightsLink";
 import { getUserMenuRotes } from "./routes";
+import { isAuditDb } from "./utils";
 
-if (hasPremiumFeature("audit_app")) {
-  PLUGIN_ADMIN_USER_MENU_ITEMS.push(user => [
-    {
-      title: t`Unsubscribe from all subscriptions / alerts`,
-      link: `/admin/people/${user.id}/unsubscribe`,
-    },
-  ]);
-
-  PLUGIN_ADMIN_USER_MENU_ROUTES.push(getUserMenuRotes);
-
-  PLUGIN_DASHBOARD_HEADER.extraButtons = dashboard => {
-    return [
-      {
-        key: "Usage insights",
-        component: (
-          <InstanceAnalyticsButton
-            model="dashboard"
-            linkQueryParams={{ dashboard_id: dashboard.id }}
-          />
-        ),
-      },
+/**
+ * Initialize audit app plugin features that depend on hasPremiumFeature.
+ */
+export function initializePlugin() {
+  if (hasPremiumFeature("audit_app")) {
+    // Add new menu item function
+    const menuItemFunction = (user) => [
+      <Menu.Item
+        component={ForwardRefLink}
+        to={
+          isInternalUser(user)
+            ? `/admin/people/${user.id}/unsubscribe`
+            : `/admin/tenants/people/${user.id}/unsubscribe`
+        }
+        key="unsubscribe"
+      >
+        {t`Unsubscribe from all subscriptions / alerts`}
+      </Menu.Item>,
     ];
-  };
 
-  PLUGIN_QUERY_BUILDER_HEADER.extraButtons = question => {
-    return [
-      {
-        key: "Usage insights",
-        component: (
-          <InstanceAnalyticsButton
-            model="question"
-            linkQueryParams={{ question_id: question.id() }}
-          />
-        ),
-      },
-    ];
-  };
+    PLUGIN_ADMIN_USER_MENU_ITEMS.push(menuItemFunction);
+    PLUGIN_ADMIN_USER_MENU_ROUTES.push(getUserMenuRotes);
+    PLUGIN_AUDIT.isAuditDb = isAuditDb;
+    PLUGIN_AUDIT.InsightsLink = InsightsLink;
+  }
 }

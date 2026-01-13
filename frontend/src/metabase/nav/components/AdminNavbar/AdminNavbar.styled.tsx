@@ -1,39 +1,44 @@
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
 
-import Link from "metabase/core/components/Link";
-import { alpha, color, darken } from "metabase/lib/colors";
+import Link from "metabase/common/components/Link";
+import { alpha, darken } from "metabase/lib/colors";
 import {
   breakpointMaxLarge,
   breakpointMaxMedium,
 } from "metabase/styled-components/theme";
+import { color } from "metabase/ui/utils/colors";
 
 import { ADMIN_NAVBAR_HEIGHT } from "../../constants";
 
 export const AdminNavbarRoot = styled.nav`
+  --mb-color-text-white: var(--mantine-color-white);
+
   padding: 0.5rem 1rem;
-  background: ${color("admin-navbar")};
-  color: ${color("white")};
+  background: ${() => color("admin-navbar")};
+  color: var(--mb-color-text-white);
   font-size: 0.85rem;
   height: ${ADMIN_NAVBAR_HEIGHT};
   display: flex;
   align-items: center;
   justify-content: space-between;
-
   z-index: 4;
   flex-shrink: 0;
 `;
 
 export const AdminNavbarItems = styled.ul`
   display: flex;
-  flex: 1 0 auto;
-  margin-right: auto;
-  margin-left: 2rem;
+  flex-grow: 0;
+  min-width: 0;
+  gap: 4px;
 `;
 
 export const MobileHide = styled.div`
   display: flex;
-  flex: 1 0 auto;
   align-items: center;
+  min-width: 0;
+  flex-grow: 1;
+  padding-inline-start: 2rem;
   ${breakpointMaxMedium} {
     display: none;
   }
@@ -43,12 +48,13 @@ export const AdminMobileNavbar = styled.div`
   ${breakpointMaxMedium} {
     display: block;
   }
+
   display: none;
 `;
 
 export const AdminMobileNavBarItems = styled.ul`
-  position: fixed;
   display: flex;
+  position: fixed;
   flex-direction: column;
   text-align: right;
   padding: 1rem;
@@ -56,24 +62,62 @@ export const AdminMobileNavBarItems = styled.ul`
   border-radius: 0 0 0 0.5rem;
   top: ${ADMIN_NAVBAR_HEIGHT};
   right: 0;
-  background: ${color("admin-navbar")};
+  background: ${() => color("admin-navbar")};
+  max-height: calc(100vh - ${ADMIN_NAVBAR_HEIGHT});
+  overflow-y: auto;
+`;
+
+export const AdminButtons = styled.div`
+  margin-inline-start: auto;
+  display: flex;
+  gap: 0.5rem;
+`;
+
+export const AdminActionButton = styled.button`
+  border: 1px solid ${() => alpha("bg-white", 0.2)};
+  height: 2.625rem;
+  width: 2.625rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border-radius: 5px;
+  font-weight: 700;
+  font-size: 13px;
+  transition: all 200ms;
+  color: var(--mb-color-text-white);
+  white-space: nowrap;
+  text-align: center;
+
+  &:disabled {
+    color: ${() => alpha("bg-white", 0.2)};
+  }
+
+  &:hover {
+    color: var(--mb-color-text-white);
+    background-color: ${() => darken("admin-navbar")};
+    border-color: ${() => darken("admin-navbar")};
+
+    &:disabled {
+      color: ${() => alpha("bg-white", 0.2)};
+    }
+  }
 `;
 
 export const AdminExitLink = styled(Link)`
-  border: 1px solid ${alpha("white", 0.2)};
+  border: 1px solid ${() => alpha("bg-white", 0.2)};
   padding: 12px 18px;
   border-radius: 5px;
   font-weight: 700;
   font-size: 13px;
   transition: all 200ms;
-  color: ${color("white")};
+  color: var(--mb-color-text-white);
   white-space: nowrap;
   text-align: center;
 
   &:hover {
-    color: ${color("white")};
-    background-color: ${darken(color("filter"))};
-    border-color: ${darken(color("filter"))};
+    color: var(--mb-color-text-white);
+    background-color: ${() => darken("admin-navbar")};
+    border-color: ${() => darken("admin-navbar")};
   }
 `;
 

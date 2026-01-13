@@ -2,8 +2,8 @@
   "Utility functions for writing SQL drivers."
   (:require
    [clojure.string :as str]
+   [metabase.driver-api.core :as driver-api]
    [metabase.driver.sql.query-processor :as sql.qp]
-   [metabase.query-processor.error-type :as qp.error-type]
    [metabase.util :as u]
    [metabase.util.honey-sql-2 :as h2x]
    [metabase.util.i18n :refer [tru]]
@@ -36,7 +36,7 @@
 ;;; |                                           Deduplicate Field Aliases                                            |
 ;;; +----------------------------------------------------------------------------------------------------------------+
 
-(mu/defn ^:private increment-identifier-string :- :string
+(mu/defn- increment-identifier-string :- :string
   [last-component :- :string]
   (if-let [[_ existing-suffix] (re-find #"^.*_(\d+$)" last-component)]
     ;; if last-component already has an alias like col_2 then increment it to col_3
@@ -45,7 +45,7 @@
     ;; otherwise just stick a _2 on the end so it's col_2
     (str last-component "_2")))
 
-(mu/defn ^:private increment-identifier
+(mu/defn- increment-identifier
   "Add an appropriate suffix to a keyword `identifier` to make it distinct from previous usages of the same identifier,
   e.g.
 
@@ -89,10 +89,10 @@
     ;; if we're doing `SELECT *` there's no way we can deduplicate anything so we're SOL, return as-is
     select-clause
     ;; otherwise we can actually deduplicate things
-    (loop [already-seen #{}, acc [], [[col alias] & more] (select-clause-alias-everything select-clause)]
+    (loop [already-seen #{}, acc [], [[col alias :as col-alias] & more] (select-clause-alias-everything select-clause)]
       (cond
-        ;; if not more cols are left to deduplicate, we're done
-        (not col)
+        ;; if no more cols are left to deduplicate, we're done
+        (nil? col-alias)
         acc
 
         ;; otherwise if we've already used this alias, replace it with one like `identifier_2` and try agan
@@ -134,13 +134,13 @@
   - if input column doesn't have a timezone both target-timezone and source-timezone are required."
   [has-timezone? target-timezone source-timezone]
   (when (and has-timezone? source-timezone)
-      (throw (ex-info (tru "input column already has a set timezone. Please remove the source parameter in convertTimezone.")
-                      {:type            qp.error-type/invalid-query
-                       :target-timezone target-timezone
-                       :source-timezone source-timezone})))
+    (throw (ex-info (tru "input column already has a set timezone. Please remove the source parameter in convertTimezone.")
+                    {:type            driver-api/qp.error-type.invalid-query
+                     :target-timezone target-timezone
+                     :source-timezone source-timezone})))
   (when (and (not has-timezone?) (not source-timezone))
-    (throw (ex-info (tru "input column doesn't have a set timezone. Please set the source parameter in convertTimezone to convert it.")
-                    {:type            qp.error-type/invalid-query
+    (throw (ex-info (tru "input column doesn''t have a set timezone. Please set the source parameter in convertTimezone to convert it.")
+                    {:type            driver-api/qp.error-type.invalid-query
                      :target-timezone target-timezone
                      :source-timezone source-timezone}))))
 
@@ -155,6 +155,7 @@
 (def dialects
   "Mapping of dialect kw to dialect, used by sql formatter in [[format-sql]], to dialect."
   {:db2         Dialect/Db2
+   :databricks  Dialect/SparkSql
    :mariadb     Dialect/MariaDb
    :mysql       Dialect/MySql
    :n1ql        Dialect/N1ql
@@ -166,7 +167,7 @@
    :tsql        Dialect/TSql})
 
 (def ^:private ^java.util.List additional-operators
-  ["#>>" "!="])
+  ["#>>" "!=" "||"])
 
 (defn- add-operators
   ^SqlFormatter$Formatter [^SqlFormatter$Formatter formatter]

@@ -1,5 +1,6 @@
 import { getObjectValues } from "metabase/lib/objects";
 import { isNotNull } from "metabase/lib/types";
+import type { ShowWarning } from "metabase/visualizations/echarts/types";
 import type {
   ComputedVisualizationSettings,
   RenderingContext,
@@ -13,21 +14,17 @@ import {
   getCardsColumnByDataKeyMap,
   getDatasetExtents,
   getSortedSeriesModels,
+  scaleDataset,
   sortDataset,
 } from "../../model/dataset";
-import {
-  getCardsSeriesModels,
-  getDimensionModel,
-  getSeriesLabelsFormatters,
-} from "../../model/series";
+import { getCardsSeriesModels, getDimensionModel } from "../../model/series";
 import { getAxisTransforms } from "../../model/transforms";
 import { getTrendLines } from "../../model/trend-line";
 import type {
-  ScatterPlotModel,
   ChartDataset,
   Extent,
+  ScatterPlotModel,
   SeriesModel,
-  ShowWarning,
 } from "../../model/types";
 
 import { getScatterPlotDataset } from "./dataset";
@@ -37,7 +34,7 @@ const getBubbleSizeDomain = (
   dataset: ChartDataset,
 ): Extent | null => {
   const bubbleSizeDataKeys = seriesModels
-    .map(seriesModel =>
+    .map((seriesModel) =>
       "bubbleSizeDataKey" in seriesModel &&
       seriesModel.bubbleSizeDataKey != null
         ? seriesModel.bubbleSizeDataKey
@@ -51,7 +48,7 @@ const getBubbleSizeDomain = (
 
   const bubbleSizeMaxValues = getObjectValues(
     getDatasetExtents(bubbleSizeDataKeys, dataset),
-  ).map(extent => extent[1]);
+  ).map((extent) => extent[1]);
   const bubbleSizeDomainMax = Math.max(...bubbleSizeMaxValues);
 
   return [0, bubbleSizeDomainMax];
@@ -60,6 +57,7 @@ const getBubbleSizeDomain = (
 export function getScatterPlotModel(
   rawSeries: RawSeries,
   settings: ComputedVisualizationSettings,
+  hiddenSeries: string[],
   renderingContext: RenderingContext,
   showWarning?: ShowWarning,
 ): ScatterPlotModel {
@@ -71,8 +69,8 @@ export function getScatterPlotModel(
   const unsortedSeriesModels = getCardsSeriesModels(
     rawSeries,
     cardsColumns,
+    hiddenSeries,
     settings,
-    renderingContext,
   );
 
   // We currently ignore sorting and visibility settings on combined cards
@@ -86,13 +84,13 @@ export function getScatterPlotModel(
     settings["graph.x_axis.scale"],
     showWarning,
   );
+  const scaledDataset = scaleDataset(dataset, seriesModels, settings);
 
   const xAxisModel = getXAxisModel(
     dimensionModel,
     rawSeries,
-    dataset,
+    scaledDataset,
     settings,
-    renderingContext,
     showWarning,
   );
   const yAxisScaleTransforms = getAxisTransforms(
@@ -100,32 +98,25 @@ export function getScatterPlotModel(
   );
 
   const transformedDataset = applyVisualizationSettingsDataTransformations(
-    dataset,
+    scaledDataset,
     [],
     xAxisModel,
     seriesModels,
+    [],
     yAxisScaleTransforms,
     settings,
     showWarning,
   );
 
-  const { formatters: seriesLabelsFormatters, compactSeriesDataKeys } =
-    getSeriesLabelsFormatters(
-      seriesModels,
-      transformedDataset,
-      settings,
-      renderingContext,
-    );
-
   const { leftAxisModel, rightAxisModel } = getYAxesModels(
     seriesModels,
+    dataset,
     transformedDataset,
     settings,
     columnByDataKey,
     false,
     [],
-    compactSeriesDataKeys,
-    renderingContext,
+    false,
   );
 
   const trendLinesModel = getTrendLines(
@@ -141,7 +132,7 @@ export function getScatterPlotModel(
 
   return {
     stackModels: [],
-    dataset,
+    dataset: scaledDataset,
     transformedDataset,
     seriesModels,
     yAxisScaleTransforms,
@@ -151,7 +142,7 @@ export function getScatterPlotModel(
     leftAxisModel,
     rightAxisModel,
     trendLinesModel,
-    bubbleSizeDomain: getBubbleSizeDomain(seriesModels, transformedDataset), // TODO move function
-    seriesLabelsFormatters,
+    bubbleSizeDomain: getBubbleSizeDomain(seriesModels, transformedDataset),
+    seriesLabelsFormatters: {},
   };
 }

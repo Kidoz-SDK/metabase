@@ -1,12 +1,19 @@
-import type { EmbedOptions, EmbedState } from "metabase-types/store";
+import { DEFAULT_INTERACTIVE_EMBEDDING_OPTIONS } from "metabase/redux/embed";
+import type {
+  EmbedState,
+  InteractiveEmbeddingOptions,
+} from "metabase-types/store";
 
-const createMockEmbedOptions = (opts?: Partial<EmbedOptions>) => ({
+export const createMockEmbedOptions = (
+  opts?: Partial<InteractiveEmbeddingOptions>,
+) => ({
+  ...DEFAULT_INTERACTIVE_EMBEDDING_OPTIONS,
   ...opts,
 });
 
 export const createMockEmbedState = (
-  opts?: Partial<EmbedOptions>,
+  opts?: Partial<EmbedState>,
 ): EmbedState => ({
-  options: createMockEmbedOptions(opts),
-  isEmbeddingSdk: false,
+  options: createMockEmbedOptions(),
+  ...opts,
 });

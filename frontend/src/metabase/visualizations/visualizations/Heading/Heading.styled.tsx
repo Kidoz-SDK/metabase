@@ -1,56 +1,60 @@
+// eslint-disable-next-line no-restricted-imports
 import { css } from "@emotion/react";
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
 
 import DashboardS from "metabase/css/dashboard.module.css";
-import { color } from "metabase/lib/colors";
 
 interface InputContainerProps {
   isPreviewing: boolean;
   isEmpty: boolean;
 }
 
+// TODO move this to CSS module
 export const InputContainer = styled.div<InputContainerProps>`
   display: flex;
-  flex-direction: column;
   width: 100%;
   height: 100%;
-  justify-content: center;
+  justify-content: space-between;
+  align-items: center;
   overflow: hidden;
   padding-left: 0.75rem;
+  padding-right: 0.75rem;
   pointer-events: auto;
   border-radius: 8px;
+  border: 1px solid transparent;
 
-  &:hover {
-    padding-left: calc(0.75rem - 1px); // adjust for border on hover
+  * {
+    pointer-events: auto;
   }
 
   .${DashboardS.DashCard}:hover &,
   .${DashboardS.DashCard}:focus-within & {
-    border: 1px solid ${color("brand")};
+    border: 1px solid var(--mb-color-brand);
   }
 
   .${DashboardS.DashCard}.resizing & {
-    border: 1px solid ${color("brand")};
+    border-color: var(--mb-color-brand);
   }
 
   ${({ isPreviewing, isEmpty }) =>
     (!isPreviewing || isEmpty) &&
     css`
       padding-left: calc(0.75rem - 1px);
-    `} // adjust for border on preview/no entered content
+    `} /* adjust for border on preview/no entered content */
   ${({ isEmpty }) =>
     isEmpty &&
     css`
-      border: 1px solid ${color("brand")};
-      color: ${color("text-light")};
+      border: 1px solid var(--mb-color-brand);
+      color: var(--mb-color-text-light);
     `}
 `;
 
-export const TextInput = styled.input`
+const TextInput = styled.input`
   border: none;
   background: none;
   max-height: 100%;
-  color: ${color("text-dark")};
+  color: var(--mb-color-text-dark);
   font-size: 1.375rem;
   font-weight: 700;
   height: inherit;
@@ -63,26 +67,21 @@ export const TextInput = styled.input`
   width: 100%;
 `;
 
-export const HeadingContainer = styled.div`
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  justify-content: center;
-  overflow: hidden;
-  padding-left: 0.75rem;
-  width: 100%;
-`;
-
 interface HeadingContentProps {
   isEditing?: boolean;
+  hasFilters?: boolean;
 }
 
+export const HEADING_FONT_SIZE = "1.375rem";
+export const HEADING_FONT_WEIGHT = 700;
+
 export const HeadingContent = styled.h2<HeadingContentProps>`
+  flex: 1;
   max-height: 100%;
-  max-width: 100%;
   overflow-x: hidden;
   overflow-y: auto;
-  font-size: 1.375rem;
+  font-size: ${HEADING_FONT_SIZE};
+  font-weight: ${HEADING_FONT_WEIGHT};
   padding: 0;
   margin: 0.25rem 0;
   pointer-events: all;
@@ -92,4 +91,16 @@ export const HeadingContent = styled.h2<HeadingContentProps>`
     css`
       cursor: text;
     `}
+
+  ${({ hasFilters }) =>
+    hasFilters &&
+    css`
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    `}
+`;
+
+export const HeadingTextInput = styled(TextInput)`
+  flex: 1;
+  text-overflow: ellipsis;
 `;

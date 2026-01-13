@@ -1,3 +1,4 @@
+#_{:clj-kondo/ignore [:metabase/namespace-name]}
 (ns metabase.query-processor
   "Primary entrypoints to running Metabase (MBQL) queries.
 
@@ -8,6 +9,7 @@
   (:require
    [metabase.lib.schema.info :as lib.schema.info]
    [metabase.query-processor.compile :as qp.compile]
+   [metabase.query-processor.debug :as qp.debug]
    [metabase.query-processor.execute :as qp.execute]
    [metabase.query-processor.middleware.catch-exceptions :as qp.catch-exceptions]
    [metabase.query-processor.middleware.enterprise :as qp.middleware.enterprise]
@@ -41,6 +43,7 @@
 ;; ↑↑↑ PRE-PROCESSING ↑↑↑ happens from BOTTOM TO TOP
 
 (defn- process-query** [query rff]
+  (qp.debug/debug> (list `process-query query))
   (let [preprocessed (qp.preprocess/preprocess query)
         compiled     (qp.compile/attach-compiled-query preprocessed)
         rff          (qp.postprocess/post-processing-rff preprocessed rff)]
@@ -71,13 +74,13 @@
   ([query]
    (process-query query nil))
 
-  ([query :- ::qp.schema/query
+  ([query :- ::qp.schema/any-query
     rff   :- [:maybe ::qp.schema/rff]]
    (qp.setup/with-qp-setup [query query]
      (let [rff (or rff qp.reducible/default-rff)]
        (process-query* query rff)))))
 
-(mu/defn userland-query :- ::qp.schema/query
+(mu/defn userland-query :- ::qp.schema/any-query
   "Add middleware options and `:info` to a `query` so it is ran as a 'userland' query, which slightly changes the QP
   behavior:
 
@@ -91,13 +94,13 @@
   ([query]
    (userland-query query nil))
 
-  ([query :- ::qp.schema/query
+  ([query :- ::qp.schema/any-query
     info  :- [:maybe ::lib.schema.info/info]]
    (-> query
        (assoc-in [:middleware :userland-query?] true)
        (update :info merge info))))
 
-(mu/defn userland-query-with-default-constraints :- ::qp.schema/query
+(mu/defn userland-query-with-default-constraints :- ::qp.schema/any-query
   "Add middleware options and `:info` to a `query` so it is ran as a 'userland' query. QP behavior changes are the same
   as those for [[userland-query]], *plus* the default userland constraints (limits) are applied --
   see [[qp.constraints/add-default-userland-constraints]].
@@ -106,7 +109,7 @@
   ([query]
    (userland-query-with-default-constraints query nil))
 
-  ([query :- ::qp.schema/query
+  ([query :- ::qp.schema/any-query
     info  :- [:maybe ::lib.schema.info/info]]
    (-> query
        (userland-query info)

@@ -1,14 +1,14 @@
 import noResultsSource from "assets/img/no_results.svg";
 import type { IllustrationValue } from "metabase/plugins";
 import { getSetting, getSettings } from "metabase/selectors/settings";
+import type {
+  EnterpriseSettings,
+  IllustrationSettingValue,
+} from "metabase-types/api";
 
 import { LOADING_MESSAGE_BY_SETTING } from "../whitelabel/lib/loading-message";
 
-import type {
-  EnterpriseSettings,
-  EnterpriseState,
-  IllustrationSettingValue,
-} from "./types";
+import type { EnterpriseState } from "./types";
 
 const DEFAULT_LOGO_URL = "app/assets/img/logo.svg";
 
@@ -23,8 +23,14 @@ const getCustomLogoUrl = (settingValues: EnterpriseSettings) => {
 export const getLogoUrl = (state: EnterpriseState) =>
   getCustomLogoUrl(getSettings(state));
 
+export const getIsDefaultMetabaseLogo = (state: EnterpriseState) =>
+  getLogoUrl(state) === DEFAULT_LOGO_URL;
+
 export const getLoadingMessage = (state: EnterpriseState) => {
-  return LOADING_MESSAGE_BY_SETTING[getSetting(state, "loading-message")].value;
+  const setting = getSetting(state, "loading-message");
+  // default to empty string to account for a historical bug where the
+  // setting could be set via MB_LOADING_MESSAGE to a value not in our enum
+  return LOADING_MESSAGE_BY_SETTING[setting]?.value ?? (() => "");
 };
 
 // eslint-disable-next-line no-literal-metabase-strings -- This is a Metabase string we want to keep. It's used for comparison.
@@ -127,6 +133,3 @@ export function getNoObjectIllustration(state: EnterpriseState): string | null {
       return getSetting(state, "no-object-illustration-custom") as string;
   }
 }
-
-export const getApplicationColors = (settingValues: EnterpriseSettings) =>
-  settingValues["application-colors"];

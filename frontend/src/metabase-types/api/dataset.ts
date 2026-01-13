@@ -1,15 +1,26 @@
-import type { LocalFieldReference } from "metabase-types/api";
+import type {
+  CacheStrategy,
+  LocalFieldReference,
+  Parameter,
+  ParameterValueOrArray,
+  VisualizerColumnValueSource,
+} from "metabase-types/api";
 
 import type { Card } from "./card";
 import type { DatabaseId } from "./database";
-import type { FieldFingerprint, FieldId, FieldVisibilityType } from "./field";
+import type {
+  Field,
+  FieldFingerprint,
+  FieldId,
+  FieldVisibilityType,
+} from "./field";
 import type { Insight } from "./insight";
 import type { ParameterOptions } from "./parameters";
 import type { DownloadPermission } from "./permissions";
 import type { DatasetQuery, DatetimeUnit, DimensionReference } from "./query";
 import type { TableId } from "./table";
 
-export type RowValue = string | number | null | boolean;
+export type RowValue = string | number | null | boolean | object;
 export type RowValues = RowValue[];
 
 export type BinningMetadata = {
@@ -18,13 +29,34 @@ export type BinningMetadata = {
   num_bins?: number;
 };
 
+export type AggregationType =
+  | "count"
+  | "sum"
+  | "cum-sum"
+  | "cum-count"
+  | "distinct"
+  | "min"
+  | "max"
+  | "avg"
+  | "median"
+  | "stddev";
+
 export interface DatasetColumn {
   id?: FieldId;
   name: string;
   display_name: string;
   description?: string | null;
   source: string;
-  aggregation_index?: number;
+  database_type?: string;
+  active?: boolean;
+  entity_id?: string;
+  fk_field_id?: number;
+  nfc_path?: string[] | null;
+  parent_id?: number | null;
+  position?: number;
+
+  aggregation_type?: AggregationType;
+
   coercion_strategy?: string | null;
   visibility_type?: FieldVisibilityType;
   table_id?: TableId;
@@ -32,6 +64,7 @@ export interface DatasetColumn {
   remapped_to_column?: DatasetColumn;
   unit?: DatetimeUnit;
   field_ref?: DimensionReference;
+  // Deprecated. Columns from old saved questions might have expression_name, but new columns do not.
   expression_name?: any;
   base_type?: string;
   semantic_type?: string | null;
@@ -47,7 +80,7 @@ export interface DatasetColumn {
 }
 
 export interface ResultsMetadata {
-  columns: DatasetColumn[];
+  columns: Field[];
 }
 
 export interface DatasetData {
@@ -62,10 +95,21 @@ export interface DatasetData {
   native_form: {
     query: string;
   };
+  is_sandboxed?: boolean;
+  "pivot-export-options"?: {
+    "show-row-totals"?: boolean;
+    "show-column-totals"?: boolean;
+  };
 }
 
 export type JsonQuery = DatasetQuery & {
-  parameters?: unknown[];
+  parameters?: Parameter[];
+  "cache-strategy"?: CacheStrategy & {
+    /** An ISO 8601 date */
+    "invalidated-at"?: string;
+    /** In milliseconds */
+    "avg-execution-ms"?: number;
+  };
 };
 
 export interface Dataset {
@@ -74,14 +118,31 @@ export interface Dataset {
   row_count: number;
   running_time: number;
   json_query?: JsonQuery;
-  error_type?: string;
-  error?: {
-    status: number; // HTTP status code
-    data?: string;
-  };
+  error?: DatasetError;
+  error_type?: DatasetErrorType;
+  error_is_curated?: boolean;
   context?: string;
   status?: string;
+  /** In milliseconds */
+  average_execution_time?: number;
+  /** A date in ISO 8601 format */
+  cached?: string;
+  /** A date in ISO 8601 format */
+  started_at?: string;
 }
+
+export type DatasetError =
+  | string
+  | {
+      status: number; // HTTP status code
+      data?: string;
+    };
+
+export type DatasetErrorType =
+  | "invalid-query"
+  | "missing-required-parameter"
+  | "missing-required-permissions"
+  | string;
 
 export interface EmbedDatasetData {
   rows: RowValues[];
@@ -101,26 +162,41 @@ interface SuccessEmbedDataset {
 }
 
 export interface ErrorEmbedDataset {
-  error_type: string;
+  error_type: DatasetErrorType;
   error: string;
   status: string;
 }
 
-/**
- * This is the type of the `POST /api/dataset/native` response.
- * We're mostly ignoring the `params` on the FE. It's added to the type only for completeness.
- */
-export interface NativeQueryForm {
-  params: unknown;
+export interface NativeDatasetResponse {
   query: string;
+  // some engines, e.g. mongo, require a "collection", which is the name of the source table
+  collection?: string;
+  // not used, added to the type only for completeness
+  params: unknown;
 }
 
 export type SingleSeries = {
   card: Card;
-} & Pick<Dataset, "data" | "error">;
+  /**
+   * A record that maps visualizer series keys (in the form of COLUMN_1,
+   * COLUMN_2, etc.) to their original values (count, avg, etc.).
+   */
+  columnValuesMapping?: Record<string, VisualizerColumnValueSource[]>;
+} & Pick<Dataset, "error" | "started_at" | "data" | "json_query">;
+
+export type SingleSeriesWithTranslation = SingleSeries & {
+  data: Dataset["data"] & {
+    /**
+     * The original, untranslated rows for this series (if any).
+     * Undefined if no translation occured.
+     */
+    untranslatedRows?: RowValues[];
+  };
+};
 
 export type RawSeries = SingleSeries[];
 export type TransformedSeries = RawSeries & { _raw: Series };
+export type MaybeTranslatedSeries = SingleSeriesWithTranslation[];
 export type Series = RawSeries | TransformedSeries;
 
 export type TemplateTagId = string;
@@ -130,6 +206,8 @@ export type TemplateTagType =
   | "text"
   | "number"
   | "date"
+  | "boolean"
+  | "temporal-unit"
   | "dimension"
   | "snippet";
 
@@ -138,11 +216,8 @@ export interface TemplateTag {
   name: TemplateTagName;
   "display-name": string;
   type: TemplateTagType;
-  dimension?: LocalFieldReference;
-  "widget-type"?: string;
   required?: boolean;
   default?: string | null;
-  options?: ParameterOptions;
 
   // Card template specific
   "card-id"?: number;
@@ -150,6 +225,37 @@ export interface TemplateTag {
   // Snippet specific
   "snippet-id"?: number;
   "snippet-name"?: string;
+
+  // Field filter and time grouping specific
+  dimension?: LocalFieldReference;
+  alias?: string;
+
+  // Field filter specific
+  "widget-type"?: string;
+  options?: ParameterOptions;
 }
 
 export type TemplateTags = Record<TemplateTagName, TemplateTag>;
+
+export type TemporalUnit =
+  | "minute"
+  | "hour"
+  | "day"
+  | "week"
+  | "quarter"
+  | "month"
+  | "year"
+  | "minute-of-hour"
+  | "hour-of-day"
+  | "day-of-week"
+  | "day-of-month"
+  | "day-of-year"
+  | "week-of-year"
+  | "month-of-year"
+  | "quarter-of-year";
+
+export type GetRemappedParameterValueRequest = {
+  parameter: Parameter;
+  field_ids: FieldId[];
+  value: ParameterValueOrArray;
+};

@@ -3,8 +3,9 @@
   (:require
    [clojure.string :as str]
    [mb.hawk.init]
-   [metabase.config :as config]
-   [metabase.plugins.classloader :as classloader]
+   [metabase.classloader.core :as classloader]
+   [metabase.config.core :as config]
+   [metabase.notification.core :as notification]
    [metabase.util :as u]
    [metabase.util.log :as log]))
 
@@ -22,7 +23,7 @@
                                      (str/join "\n" [border body border])
                                      "\n")))))
 
-(def ^:private init-timeout-ms (u/seconds->ms 60))
+(def ^:private init-timeout-ms (u/seconds->ms 90))
 
 (def ^:private ^:dynamic *initializing*
   "Collection of components that are being currently initialized by the current thread."
@@ -113,7 +114,16 @@
   (classloader/require 'metabase.test.initialize.test-users-personal-collections)
   ((resolve 'metabase.test.initialize.test-users-personal-collections/init!)))
 
-(defn- all-components
+(define-initialization :notifications
+  (initialize-if-needed! :db)
+  (notification/seed-notification!))
+
+(define-initialization :row-lock
+  (initialize-if-needed! :db)
+  (classloader/require 'metabase.test.initialize.row-lock)
+  ((resolve 'metabase.test.initialize.row-lock/init!)))
+
+(defn all-components
   "Set of all components/initialization steps that are defined."
   []
   (set (keys (methods do-initialization!))))

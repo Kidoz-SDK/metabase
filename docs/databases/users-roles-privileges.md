@@ -7,13 +7,13 @@ title: Database users, roles, and privileges
 We recommend creating a `metabase` database user with the following database roles:
 
 - [`analytics` for read access](#minimum-database-privileges) to any schemas or tables used for analysis.
-- Optional [`metabase_actions` for write access](#privileges-to-enable-actions) to tables used for Metabase actions.
-- Optional [`metabase_model_caching` for write access](#privileges-to-enable-model-caching) to the schema used for Metabase model caching.
+- Optional [`metabase_actions` for write access](#privileges-to-enable-actions-and-editable-table-data) to tables used for Metabase actions.
+- Optional [`metabase_model_persistence` for write access](#privileges-to-enable-model-persistence) to the schema used for Metabase model persistence.
 
 Bundling your privileges into roles based on use cases makes it easier to manage privileges in the future (especially in [multi-tenant situations](#multi-tenant-permissions)). For example, you could:
 
-- Use the same `analytics` role for other BI tools in your [data stack](https://www.metabase.com/learn/databases/data-landscape#data-analysis-layer) that need read-only access to the analytics tables in your database.
-- Revoke the write access for `metabase_model_caching` without affecting the write access for `metabase_actions`.
+- Use the same `analytics` role for other BI tools in your [data stack](https://www.metabase.com/learn/grow-your-data-skills/data-fundamentals/data-landscape) that need read-only access to the analytics tables in your database.
+- Revoke the write access for `metabase_model_persistence` without affecting the write access for `metabase_actions`.
 
 ## Minimum database privileges
 
@@ -62,7 +62,7 @@ GRANT analytics TO metabase;
 -- GRANT SELECT ON "your_table" IN SCHEMA "your_schema" TO analytics;
 ```
 
-Depending on how you use Metabase, you can also additonally grant:
+Depending on how you use Metabase, you can also additionally grant:
 
 - `TEMPORARY` privileges to create temp tables.
 - `EXECUTE` privileges to use stored procedures or user-defined functions.
@@ -86,52 +86,52 @@ GRANT ALL PRIVILEGES ON "database" TO metabase;
 
 This is a good option if you're connecting to a local database for development or testing.
 
-## Privileges to enable actions
+## Privileges to enable actions and editable table data
 
-[Actions](../actions/introduction.md) let Metabase write back to specific tables in your database.
+Both [actions](../actions/introduction.md) and the [editable table data](../data-modeling/editable-tables.md) let Metabase write back to specific tables in your database.
 
-In addition to the [minimum database privileges](#minimum-database-privileges), you'll need to grant write access to any tables used with actions:
+In addition to the [minimum database privileges](#minimum-database-privileges), you'll need to grant write access to any tables you want to be able to write to.
 
-- Create a new role called `metabase_actions`.
-- Give the role `INSERT`, `UPDATE`, and `DELETE` privileges to any tables used with Metabase actions.
-- Give the `metabase_actions` role to the `metabase` user.
+- Create a new role called `metabase_writer`.
+- Give the role `INSERT`, `UPDATE`, and `DELETE` privileges to the relevant tables.
+- Give the `metabase_writer` role to the `metabase` user.
 
 ```sql
--- Create a role to bundle database privileges for Metabase actions.
-CREATE ROLE metabase_actions WITH LOGIN;
+-- Create a role to bundle database privileges for Metabase writing to your database.
+CREATE ROLE metabase_writer WITH LOGIN;
 
--- Grant write privileges to the TABLE used with Metabase actions.
-GRANT INSERT, UPDATE, DELETE ON "your_table" IN SCHEMA "your_schema" TO metabase_actions;
+-- Grant write privileges to the TABLE
+GRANT INSERT, UPDATE, DELETE ON "your_table" IN SCHEMA "your_schema" TO metabase_writer;
 
 -- Grant role to the metabase user.
-GRANT metabase_actions TO metabase;
+GRANT metabase_writer TO metabase;
 ```
 
-## Privileges to enable model caching
+## Privileges to enable model persistence
 
-[Model caching](../data-modeling/models.md#model-caching) lets Metabase save query results to a specific schema in your database. Metabase's database user will need the `CREATE` privilege to set up the dedicated schema for model caching, as well as write access (`INSERT`, `UPDATE`, `DELETE`) to that schema.
+[Model persistence](../data-modeling/model-persistence.md) lets Metabase save query results to a specific schema in your database. Metabase's database user will need the `CREATE` privilege to set up the dedicated schema for model persistence, as well as write access (`INSERT`, `UPDATE`, `DELETE`) to that schema.
 
 In addition to the [minimum database privileges](#minimum-database-privileges):
 
-- Create a new role called `metabase_model_caching`.
+- Create a new role called `metabase_model_persistence`.
 - Give the role `CREATE` access to the database.
-- Give the role `INSERT`, `UPDATE`, and `DELETE` privileges to the schema used for model caching.
-- Give the `metabase_model_caching` role to the `metabase` user.
+- Give the role `INSERT`, `UPDATE`, and `DELETE` privileges to the schema used for model persistence.
+- Give the `metabase_model_persistence` role to the `metabase` user.
 
 ```sql
--- Create a role to bundle database privileges for Metabase model caching.
-CREATE ROLE metabase_model_caching WITH LOGIN;
+-- Create a role to bundle database privileges for Metabase model persistence.
+CREATE ROLE metabase_model_persistence WITH LOGIN;
 
 -- If you don't want to give CREATE access to your database,
--- add the schema manually before enabling modeling caching.
-GRANT CREATE ON "database" TO metabase_model_caching;
+-- add the schema manually before enabling modeling persistence.
+GRANT CREATE ON "database" TO metabase_model_persistence;
 
--- Grant write privileges to the SCHEMA used for model caching.
-GRANT USAGE ON "your_schema" TO metabase_model_caching;
-GRANT INSERT, UPDATE, DELETE ON "your_model's_table" IN SCHEMA "your_schema" TO metabase_model_caching;
+-- Grant write privileges to the SCHEMA used for model persistence.
+GRANT USAGE ON "your_schema" TO metabase_model_persistence;
+GRANT INSERT, UPDATE, DELETE ON "your_model's_table" IN SCHEMA "your_schema" TO metabase_model_persistence;
 
 -- Grant role to the metabase user.
-GRANT metabase_model_caching TO metabase;
+GRANT metabase_model_persistence TO metabase;
 ```
 
 ## Privileges to enable uploads
@@ -160,7 +160,7 @@ GRANT metabase_uploads TO metabase;
 
 ## Multi-tenant permissions
 
-If you're setting up multi-tenant permissions for customers who need SQL access, you can [create one database connection per customer](https://www.metabase.com/learn/permissions/multi-tenant-permissions#granting-customers-native-sql-access-to-their-schema). That means each customer will connect to the database using their own database user.
+If you're setting up multi-tenant permissions for customers who need SQL access, you can [create one database connection per customer](../permissions/embedding.md#granting-customers-native-sql-access-to-their-schema). That means each customer will connect to the database using their own database user.
 
 Let's say you have customers named Tangerine and Lemon:
 
@@ -169,7 +169,7 @@ Let's say you have customers named Tangerine and Lemon:
 - Create roles to bundle privileges specific to each customer's use case. For example:
   - `tangerine_queries` to bundle read privileges for people to query and create stored procedures against the Tangerine schema.
   - `lemon_queries` to bundle read privileges for people to query tables in the Lemon schema.
-  - `lemon_actions` to bundle the write privileges needed to create [actions](#privileges-to-enable-actions) on a Lemonade table in the Lemon schema.
+  - `lemon_actions` to bundle the write privileges needed to create [actions](#privileges-to-enable-actions-and-editable-table-data) on a Lemonade table in the Lemon schema.
 - Add each user to their respective roles.
 
 ```sql
@@ -207,6 +207,6 @@ We recommend bundling privileges into roles based on use cases per customer. Tha
 
 ## Further reading
 
-- [Permissions strategies](https://www.metabase.com/learn/permissions/strategy)
+- [Permissions strategies](https://www.metabase.com/learn/metabase-basics/administration/permissions/strategy)
 - [Permissions introduction](../permissions/introduction.md)
 - [People overview](../people-and-groups/start.md)

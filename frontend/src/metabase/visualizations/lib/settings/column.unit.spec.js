@@ -1,6 +1,7 @@
 import { getComputedSettings } from "metabase/visualizations/lib/settings";
-import { columnSettings } from "metabase/visualizations/lib/settings/column";
 import registerVisualizations from "metabase/visualizations/register";
+
+import { NUMBER_COLUMN_SETTINGS, columnSettings } from "./column";
 
 registerVisualizations();
 
@@ -36,6 +37,7 @@ describe("column settings", () => {
     const computed = getComputedSettings(defs, series, stored);
     expect(computed.column(series[0].data.cols[0]).currency).toEqual("BTC");
   });
+
   it("should find by column 'field' ID ref", () => {
     const series = seriesWithColumn({
       id: 42,
@@ -52,6 +54,7 @@ describe("column settings", () => {
     const computed = getComputedSettings(defs, series, stored);
     expect(computed.column(series[0].data.cols[0]).currency).toEqual("BTC");
   });
+
   it("should find by column name if it also has a 'field-literal' ref", () => {
     const series = seriesWithColumn({
       field_ref: ["field", "foo", { "base-type": "type/Float" }],
@@ -67,6 +70,7 @@ describe("column settings", () => {
     const computed = getComputedSettings(defs, series, stored);
     expect(computed.column(series[0].data.cols[0]).currency).toEqual("BTC");
   });
+
   it("should find by column name if it also has a 'aggregation' ref", () => {
     const series = seriesWithColumn({
       field_ref: ["aggregation", 0],
@@ -82,6 +86,7 @@ describe("column settings", () => {
     const computed = getComputedSettings(defs, series, stored);
     expect(computed.column(series[0].data.cols[0]).currency).toEqual("BTC");
   });
+
   it("should set a time style but no date style for hour-of-day", () => {
     const series = seriesWithColumn({
       unit: "hour-of-day",
@@ -97,6 +102,7 @@ describe("column settings", () => {
     expect(time_style).toEqual("h:mm A");
     expect(date_style).toEqual("");
   });
+
   it("should set a percentage style to a column with percentage type in its metadata", () => {
     const series = seriesWithColumn({
       semantic_type: "type/Percentage",
@@ -105,5 +111,23 @@ describe("column settings", () => {
     const computed = getComputedSettings(defs, series, {});
     const { number_style } = computed.column(series[0].data.cols[0]);
     expect(number_style).toBe("percent");
+  });
+
+  describe("NUMBER_COLUMN_SETTINGS", () => {
+    it("should have coherent options and onChange (metabase#54728)", () => {
+      const onChangeSpy = jest.fn();
+      const { options, onChange } =
+        NUMBER_COLUMN_SETTINGS.currency_in_header.getProps(
+          undefined,
+          undefined,
+          onChangeSpy,
+        );
+
+      onChange(options[0].value);
+      expect(onChangeSpy).toHaveBeenCalledWith(true);
+
+      onChange(options[1].value);
+      expect(onChangeSpy).toHaveBeenCalledWith(false);
+    });
   });
 });

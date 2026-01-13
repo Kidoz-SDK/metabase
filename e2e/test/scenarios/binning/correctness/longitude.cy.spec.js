@@ -1,27 +1,23 @@
-import {
-  restore,
-  popover,
-  openPeopleTable,
-  summarize,
-  echartsContainer,
-  chartPathWithFillColor,
-} from "e2e/support/helpers";
+const { H } = cy;
 
 import { LONGITUDE_OPTIONS } from "./shared/constants";
 
 describe("scenarios > binning > correctness > longitude", () => {
   beforeEach(() => {
-    restore();
+    H.restore();
     cy.signInAsAdmin();
-    openPeopleTable();
-    summarize();
+    H.openPeopleTable();
+    H.summarize();
     openPopoverFromDefaultBucketSize("Longitude", "Auto bin");
   });
 
   Object.entries(LONGITUDE_OPTIONS).forEach(
     ([bucketSize, { selected, representativeValues }]) => {
       it(`should return correct values for ${bucketSize}`, () => {
-        popover().within(() => {
+        // Increase viewport to allow checking x-axis ticks values on dense data
+        cy.viewport(1440, 800);
+        H.popover().within(() => {
+          cy.findByText("More…").click();
           cy.findByText(bucketSize).click();
         });
 
@@ -33,7 +29,7 @@ describe("scenarios > binning > correctness > longitude", () => {
         cy.findByText("Done").click();
 
         getTitle(`Count by Longitude: ${selected}`);
-        chartPathWithFillColor("#509EE3");
+        H.chartPathWithFillColor("#509EE3");
 
         assertOnXYAxisLabels();
         assertOnXAxisTicks(representativeValues);
@@ -42,7 +38,8 @@ describe("scenarios > binning > correctness > longitude", () => {
   );
 
   it("Don't bin", () => {
-    popover().within(() => {
+    H.popover().within(() => {
+      cy.findByText("More…").click();
       cy.findByText("Don't bin").click();
     });
 
@@ -80,14 +77,14 @@ function getTitle(title) {
 }
 
 function assertOnXYAxisLabels() {
-  echartsContainer().get("text").contains("Count");
-  echartsContainer().get("text").contains("Longitude");
+  H.echartsContainer().get("text").contains("Count");
+  H.echartsContainer().get("text").contains("Longitude");
 }
 
 function assertOnXAxisTicks(values) {
   if (values) {
-    echartsContainer().within(() => {
-      values.forEach(value => {
+    H.echartsContainer().within(() => {
+      values.forEach((value) => {
         cy.findByText(value);
       });
     });

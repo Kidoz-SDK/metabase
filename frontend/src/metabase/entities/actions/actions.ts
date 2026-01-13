@@ -1,17 +1,27 @@
 import { updateIn } from "icepick";
-import { createAction } from "redux-actions";
 import { t } from "ttag";
-import _ from "underscore";
 
-import { createEntity, undo } from "metabase/lib/entities";
-import * as Urls from "metabase/lib/urls";
+import {
+  actionApi,
+  useGetActionQuery,
+  useListActionsQuery,
+} from "metabase/api";
+import {
+  createEntity,
+  entityCompatibleQuery,
+  undo,
+} from "metabase/lib/entities";
+import { createThunkAction } from "metabase/lib/redux";
 import { ActionSchema } from "metabase/schema";
-import { ActionsApi } from "metabase/services";
 import type {
+  CreateActionRequest,
+  GetActionRequest,
+  ListActionsRequest,
+  UpdateActionRequest,
   WritebackAction,
   WritebackActionId,
-  WritebackQueryAction,
   WritebackImplicitQueryAction,
+  WritebackQueryAction,
 } from "metabase-types/api";
 import type { Dispatch } from "metabase-types/store";
 
@@ -54,36 +64,45 @@ const defaultImplicitActionCreateOptions = {
 };
 
 const enableImplicitActionsForModel =
-  async (modelId: number, options = defaultImplicitActionCreateOptions) =>
+  (modelId: number, options = defaultImplicitActionCreateOptions) =>
   async (dispatch: Dispatch) => {
     // We're ordering actions that's most recently created first.
     // So if we want to show Create, Update, Delete, then we need
     // to create them in the reverse order.
     if (options.delete) {
-      await ActionsApi.create({
-        name: t`Delete`,
-        type: "implicit",
-        kind: "row/delete",
-        model_id: modelId,
-      });
+      await Actions.api.create(
+        {
+          name: t`Delete`,
+          type: "implicit",
+          kind: "row/delete",
+          model_id: modelId,
+        },
+        dispatch,
+      );
     }
 
     if (options.update) {
-      await ActionsApi.create({
-        name: t`Update`,
-        type: "implicit",
-        kind: "row/update",
-        model_id: modelId,
-      });
+      await Actions.api.create(
+        {
+          name: t`Update`,
+          type: "implicit",
+          kind: "row/update",
+          model_id: modelId,
+        },
+        dispatch,
+      );
     }
 
     if (options.insert) {
-      await ActionsApi.create({
-        name: t`Create`,
-        type: "implicit",
-        kind: "row/create",
-        model_id: modelId,
-      });
+      await Actions.api.create(
+        {
+          name: t`Create`,
+          type: "implicit",
+          kind: "row/create",
+          model_id: modelId,
+        },
+        dispatch,
+      );
     }
 
     dispatch(Actions.actions.invalidateLists());
@@ -95,18 +114,48 @@ const DELETE_PUBLIC_LINK = "metabase/entities/actions/DELETE_PUBLIC_LINK";
 /**
  * @deprecated use "metabase/api" instead
  */
-const Actions = createEntity({
+export const Actions = createEntity({
   name: "actions",
   nameOne: "action",
   schema: ActionSchema,
   path: "/api/action",
+  rtk: {
+    getUseGetQuery: () => ({
+      useGetQuery: useGetActionQuery,
+    }),
+    useListQuery: useListActionsQuery,
+  },
   api: {
-    create: (params: CreateActionParams) => ActionsApi.create(params),
-    update: (params: UpdateActionParams) => {
-      // Changing action type is not supported
-      const cleanParams = _.omit(params, "type");
-      return ActionsApi.update(cleanParams);
-    },
+    list: (entityQuery: ListActionsRequest, dispatch: Dispatch) =>
+      entityCompatibleQuery(
+        entityQuery,
+        dispatch,
+        actionApi.endpoints.listActions,
+      ),
+    get: (
+      entityQuery: GetActionRequest,
+      _options: unknown,
+      dispatch: Dispatch,
+    ) =>
+      entityCompatibleQuery(
+        entityQuery,
+        dispatch,
+        actionApi.endpoints.getAction,
+      ),
+    create: (entityQuery: CreateActionRequest, dispatch: Dispatch) =>
+      entityCompatibleQuery(
+        entityQuery,
+        dispatch,
+        actionApi.endpoints.createAction,
+      ),
+    update: (entityQuery: UpdateActionRequest, dispatch: Dispatch) =>
+      entityCompatibleQuery(
+        entityQuery,
+        dispatch,
+        actionApi.endpoints.updateAction,
+      ),
+    delete: (id: WritebackActionId, dispatch: Dispatch) =>
+      entityCompatibleQuery(id, dispatch, actionApi.endpoints.deleteAction),
   },
   actions: {
     enableImplicitActionsForModel,
@@ -124,28 +173,31 @@ const Actions = createEntity({
     "archived",
   ],
   objectActions: {
-    createPublicLink: createAction(
+    createPublicLink: createThunkAction(
       CREATE_PUBLIC_LINK,
-      ({ id }: { id: WritebackActionId }) => {
-        return ActionsApi.createPublicLink({ id }).then(
-          ({ uuid }: { uuid: string }) => {
-            return {
-              id,
-              uuid,
-            };
-          },
-        );
-      },
+      ({ id }: { id: WritebackActionId }) =>
+        async (dispatch: Dispatch) => {
+          const data = await entityCompatibleQuery(
+            { id },
+            dispatch,
+            actionApi.endpoints.createActionPublicLink,
+          );
+
+          return { id, uuid: data.uuid };
+        },
     ),
-    deletePublicLink: createAction(
+    deletePublicLink: createThunkAction(
       DELETE_PUBLIC_LINK,
-      ({ id }: { id: WritebackActionId }) => {
-        return ActionsApi.deletePublicLink({ id }).then(() => {
-          return {
-            id,
-          };
-        });
-      },
+      ({ id }: { id: WritebackActionId }) =>
+        async (dispatch: Dispatch) => {
+          await entityCompatibleQuery(
+            { id },
+            dispatch,
+            actionApi.endpoints.deleteActionPublicLink,
+          );
+
+          return { id };
+        },
     ),
     setArchived: ({ id }: WritebackAction, archived: boolean) =>
       Actions.actions.update(
@@ -158,13 +210,13 @@ const Actions = createEntity({
     switch (type) {
       case CREATE_PUBLIC_LINK: {
         const { id, uuid } = payload;
-        return updateIn(state, [id], action => {
+        return updateIn(state, [id], (action) => {
           return { ...action, public_uuid: uuid };
         });
       }
       case DELETE_PUBLIC_LINK: {
         const { id } = payload;
-        return updateIn(state, [id], action => {
+        return updateIn(state, [id], (action) => {
           return { ...action, public_uuid: null };
         });
       }
@@ -173,12 +225,4 @@ const Actions = createEntity({
       }
     }
   },
-  objectSelectors: {
-    getUrl: (action: WritebackAction) =>
-      Urls.action({ id: action.model_id }, action.id),
-    getIcon: () => ({ name: "bolt" }),
-  },
 });
-
-// eslint-disable-next-line import/no-default-export -- deprecated usage
-export default Actions;

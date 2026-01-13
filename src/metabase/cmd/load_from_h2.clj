@@ -5,7 +5,7 @@
 
   or
 
-    java -jar metabase.jar load-from-h2
+    java --add-opens java.base/java.nio=ALL-UNNAMED -jar metabase.jar load-from-h2
 
   Test this as follows:
 
@@ -18,18 +18,20 @@
     mysql -u root -e 'DROP DATABASE IF EXISTS metabase; CREATE DATABASE metabase;'
     MB_DB_TYPE=mysql MB_DB_HOST=localhost MB_DB_PORT=3305 MB_DB_USER=root MB_DB_DBNAME=metabase clojure -M:run load-from-h2"
   (:require
+   [metabase.app-db.core :as mdb]
    [metabase.cmd.copy :as copy]
    [metabase.cmd.copy.h2 :as copy.h2]
-   [metabase.db :as mdb]))
+   [metabase.search.core :as search]))
 
 (defn load-from-h2!
   "Transfer data from existing H2 database to a newly created (presumably MySQL or Postgres) DB. Intended as a tool for
   upgrading from H2 to a 'real' database.
 
-  Defaults to using [[metabase.db.env/db-file]] as the source H2 database if `h2-filename` is `nil`."
+  Defaults to using [[metabase.app-db.env/db-file]] as the source H2 database if `h2-filename` is `nil`."
   ([]
    (load-from-h2! (mdb/db-file)))
   ([h2-filename]
    (let [h2-filename    (str h2-filename ";IFEXISTS=TRUE")
          h2-data-source (copy.h2/h2-data-source h2-filename)]
-     (copy/copy! :h2 h2-data-source (mdb/db-type) (mdb/data-source)))))
+     (copy/copy! :h2 h2-data-source (mdb/db-type) (mdb/data-source))
+     (search/reset-tracking!))))

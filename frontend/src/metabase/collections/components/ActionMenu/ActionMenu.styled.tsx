@@ -1,8 +1,8 @@
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
 
-import EntityItem from "metabase/components/EntityItem";
-import { color } from "metabase/lib/colors";
+import EntityItem from "metabase/common/components/EntityItem";
 
 export const EntityItemMenu = styled(EntityItem.Menu)`
-  color: ${color("text-medium")};
+  color: var(--mb-color-text-medium);
 `;

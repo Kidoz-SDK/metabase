@@ -2,31 +2,31 @@ import type { ReactNode } from "react";
 import { useState } from "react";
 import { t } from "ttag";
 
+import { AggregationPicker } from "metabase/common/components/AggregationPicker";
+import Button from "metabase/common/components/Button";
 import { Popover, Tooltip } from "metabase/ui";
 import * as Lib from "metabase-lib";
 
-import { AggregationPicker } from "../SummarizeSidebar.styled";
-
-import { AddAggregationButtonRoot } from "./AddAggregationButton.styled";
-
-const STAGE_INDEX = -1;
+import AddAggregationButtonS from "./AddAggregationButton.module.css";
 
 interface AddAggregationButtonProps {
   query: Lib.Query;
-  onAddAggregation: (aggregation: Lib.Aggregable) => void;
+  stageIndex: number;
+  onQueryChange: (query: Lib.Query) => void;
 }
 
 export function AddAggregationButton({
   query,
-  onAddAggregation,
+  stageIndex,
+  onQueryChange,
 }: AddAggregationButtonProps) {
   const [isOpened, setIsOpened] = useState(false);
-  const hasAggregations = Lib.aggregations(query, STAGE_INDEX).length > 0;
-  const operators = Lib.availableAggregationOperators(query, STAGE_INDEX);
+  const hasAggregations = Lib.aggregations(query, stageIndex).length > 0;
+  const operators = Lib.availableAggregationOperators(query, stageIndex);
 
   const renderTooltip = (children: ReactNode) =>
     hasAggregations ? (
-      <Tooltip label={t`Add metric`}>{children}</Tooltip>
+      <Tooltip label={t`Add a function or metric`}>{children}</Tooltip>
     ) : (
       children
     );
@@ -35,7 +35,8 @@ export function AddAggregationButton({
     <Popover opened={isOpened} onChange={setIsOpened}>
       <Popover.Target>
         {renderTooltip(
-          <AddAggregationButtonRoot
+          <Button
+            className={AddAggregationButtonS.AddAggregationButtonRoot}
             icon="add"
             borderless
             onlyIcon={hasAggregations}
@@ -43,18 +44,17 @@ export function AddAggregationButton({
             aria-label={t`Add aggregation`}
             data-testid="add-aggregation-button"
           >
-            {hasAggregations ? null : t`Add a metric`}
-          </AddAggregationButtonRoot>,
+            {hasAggregations ? null : t`Add a function or metric`}
+          </Button>,
         )}
       </Popover.Target>
       <Popover.Dropdown>
         <AggregationPicker
           query={query}
-          stageIndex={STAGE_INDEX}
+          stageIndex={stageIndex}
           operators={operators}
-          hasExpressionInput={false}
-          onSelect={aggregation => {
-            onAddAggregation(aggregation);
+          onQueryChange={(query) => {
+            onQueryChange(query);
             setIsOpened(false);
           }}
         />

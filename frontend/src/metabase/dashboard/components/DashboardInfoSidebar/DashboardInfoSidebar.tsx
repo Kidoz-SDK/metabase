@@ -1,162 +1,266 @@
-import type { Dispatch, SetStateAction } from "react";
-import { useCallback, useState } from "react";
+import { useHotkeys } from "@mantine/hooks";
+import type { FocusEvent } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { useMount } from "react-use";
 import { t } from "ttag";
 
 import ErrorBoundary from "metabase/ErrorBoundary";
+import { skipToken, useListRevisionsQuery } from "metabase/api";
+import { isInstanceAnalyticsCollection } from "metabase/collections/utils";
+import {
+  Sidesheet,
+  SidesheetCard,
+  SidesheetTabPanelContainer,
+} from "metabase/common/components/Sidesheet";
+import { InsightsTabOrLink } from "metabase/common/components/Sidesheet/components/InsightsTabOrLink";
+import { SidesheetEditableDescription } from "metabase/common/components/Sidesheet/components/SidesheetEditableDescription";
+import SidesheetS from "metabase/common/components/Sidesheet/sidesheet.module.css";
 import { Timeline } from "metabase/common/components/Timeline";
 import { getTimelineEvents } from "metabase/common/components/Timeline/utils";
-import { useRevisionListQuery } from "metabase/common/hooks";
-import EditableText from "metabase/core/components/EditableText";
+import { revertToRevision, updateDashboard } from "metabase/dashboard/actions";
+import { DASHBOARD_DESCRIPTION_MAX_LENGTH } from "metabase/dashboard/constants";
 import {
-  revertToRevision,
-  toggleAutoApplyFilters,
-  updateDashboard,
-} from "metabase/dashboard/actions";
-import { isDashboardCacheable } from "metabase/dashboard/utils";
-import { useUniqueId } from "metabase/hooks/use-unique-id";
+  type DashboardContextReturned,
+  useDashboardContext,
+} from "metabase/dashboard/context";
 import { useDispatch, useSelector } from "metabase/lib/redux";
-import MetabaseSettings from "metabase/lib/settings";
-import { PLUGIN_CACHING } from "metabase/plugins";
+import { PLUGIN_MODERATION } from "metabase/plugins";
 import { getUser } from "metabase/selectors/user";
-import { Stack, Switch } from "metabase/ui";
-import type { Dashboard } from "metabase-types/api";
+import { Stack, Tabs, Text } from "metabase/ui";
+import type {
+  Dashboard,
+  ModerationReview,
+  Revision,
+  User,
+} from "metabase-types/api";
 
-import {
-  ContentSection,
-  DashboardInfoSidebarRoot,
-  DescriptionHeader,
-  HistoryHeader,
-} from "./DashboardInfoSidebar.styled";
+import { DashboardDetails } from "./DashboardDetails";
+import { DashboardEntityIdCard } from "./DashboardEntityIdCard";
+import { InsightsUpsellTab } from "./components/InsightsUpsellTab";
 
-type DashboardAttributeType = string | number | null | boolean;
-
-interface DashboardInfoSidebarProps {
-  dashboard: Dashboard;
-  setDashboardAttribute: (name: string, value: DashboardAttributeType) => void;
+enum Tab {
+  Overview = "overview",
+  History = "history",
+  Insights = "insights",
 }
 
-export function DashboardInfoSidebar({
-  dashboard,
-  setDashboardAttribute,
-}: DashboardInfoSidebarProps) {
-  const [page, setPage] = useState<"default" | "caching">("default");
+export function DashboardInfoSidebar() {
+  const { dashboard, closeSidebar, setDashboardAttributes } =
+    useDashboardContext();
+
+  if (!dashboard) {
+    return null;
+  }
 
   return (
-    <DashboardInfoSidebarRoot
-      style={{ padding: page === "default" ? "0 2rem 0.5rem" : "1rem 0 0 0" }}
-      data-testid="sidebar-right"
-    >
-      <ErrorBoundary>
-        {page === "default" && (
-          <DashboardInfoSidebarBody
-            dashboard={dashboard}
-            setDashboardAttribute={setDashboardAttribute}
-            setPage={setPage}
-          />
-        )}
-        {page === "caching" && (
-          <PLUGIN_CACHING.DashboardStrategySidebar
-            dashboard={dashboard}
-            setPage={setPage}
-          />
-        )}
-      </ErrorBoundary>
-    </DashboardInfoSidebarRoot>
+    <DashboardInfoSidebarInner
+      dashboard={dashboard}
+      closeSidebar={closeSidebar}
+      setDashboardAttributes={setDashboardAttributes}
+    />
   );
 }
 
-export type DashboardSidebarPageProps = {
-  dashboard: Dashboard;
-  setPage: Dispatch<SetStateAction<"default" | "caching">>;
-  setDashboardAttribute: DashboardInfoSidebarProps["setDashboardAttribute"];
-};
-
-const DashboardInfoSidebarBody = ({
+export function DashboardInfoSidebarInner({
   dashboard,
-  setDashboardAttribute,
-  setPage,
-}: DashboardSidebarPageProps) => {
-  const { data: revisions } = useRevisionListQuery({
-    query: { model_type: "dashboard", model_id: dashboard.id },
+  closeSidebar,
+  setDashboardAttributes,
+}: { dashboard: NonNullable<DashboardContextReturned["dashboard"]> } & Pick<
+  DashboardContextReturned,
+  "closeSidebar" | "setDashboardAttributes"
+>) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [descriptionError, setDescriptionError] = useState<string | null>(null);
+
+  useHotkeys([["]", closeSidebar]]);
+
+  useMount(() => {
+    // this component is not rendered until it is "open"
+    // but we want to set isOpen after it mounts to get
+    // pretty animations
+    setIsOpen(true);
   });
+
+  const { data: revisions } = useListRevisionsQuery(
+    dashboard ? { id: dashboard.id, entity: "dashboard" } : skipToken,
+  );
+
+  const isIADashboard = useMemo(
+    () =>
+      dashboard?.collection &&
+      isInstanceAnalyticsCollection(dashboard?.collection),
+    [dashboard?.collection],
+  );
 
   const currentUser = useSelector(getUser);
   const dispatch = useDispatch();
 
   const handleDescriptionChange = useCallback(
     (description: string) => {
-      setDashboardAttribute?.("description", description);
-      dispatch(updateDashboard({ attributeNames: ["description"] }));
+      if (
+        dashboard?.id &&
+        description.length <= DASHBOARD_DESCRIPTION_MAX_LENGTH
+      ) {
+        setDashboardAttributes?.({
+          id: dashboard.id,
+          attributes: { description },
+        });
+        dispatch(updateDashboard({ attributeNames: ["description"] }));
+      }
     },
-    [dispatch, setDashboardAttribute],
+    [dashboard?.id, dispatch, setDashboardAttributes],
   );
 
-  const handleToggleAutoApplyFilters = useCallback(
-    (isAutoApplyingFilters: boolean) => {
-      dispatch(toggleAutoApplyFilters(isAutoApplyingFilters));
+  const handleDescriptionBlur = useCallback(
+    (event: FocusEvent<HTMLTextAreaElement>) => {
+      if (event.target.value.length > DASHBOARD_DESCRIPTION_MAX_LENGTH) {
+        setDescriptionError(
+          t`Must be ${DASHBOARD_DESCRIPTION_MAX_LENGTH} characters or less`,
+        );
+      }
     },
-    [dispatch],
+    [],
   );
 
-  const autoApplyFilterToggleId = useUniqueId();
+  if (!dashboard) {
+    return null;
+  }
+
   const canWrite = dashboard.can_write && !dashboard.archived;
-  const isCacheable = isDashboardCacheable(dashboard);
-
-  const showCaching =
-    canWrite &&
-    PLUGIN_CACHING.isEnabled() &&
-    MetabaseSettings.get("enable-query-caching");
 
   return (
-    <>
-      <ContentSection>
-        <DescriptionHeader>{t`About`}</DescriptionHeader>
-        <EditableText
-          initialValue={dashboard.description}
-          isDisabled={!canWrite}
+    <div data-testid="sidebar-right">
+      <ErrorBoundary>
+        <Sidesheet
+          isOpen={isOpen}
+          title={t`Info`}
+          onClose={closeSidebar}
+          removeBodyPadding
+          size="md"
+        >
+          <Tabs
+            defaultValue={Tab.Overview}
+            className={SidesheetS.FlexScrollContainer}
+          >
+            <Tabs.List mx="xl">
+              <Tabs.Tab value={Tab.Overview}>{t`Overview`}</Tabs.Tab>
+              {!isIADashboard && (
+                <Tabs.Tab value={Tab.History}>{t`History`}</Tabs.Tab>
+              )}
+              <InsightsTabOrLink dashboard={dashboard} />
+            </Tabs.List>
+            <SidesheetTabPanelContainer>
+              <Tabs.Panel value={Tab.Overview}>
+                <OverviewTab
+                  dashboard={dashboard}
+                  handleDescriptionChange={handleDescriptionChange}
+                  handleDescriptionBlur={handleDescriptionBlur}
+                  descriptionError={descriptionError}
+                  setDescriptionError={setDescriptionError}
+                  canWrite={canWrite}
+                />
+              </Tabs.Panel>
+              <Tabs.Panel value={Tab.History}>
+                <HistoryTab
+                  dashboard={dashboard}
+                  canWrite={canWrite}
+                  revisions={revisions}
+                  currentUser={currentUser}
+                  moderationReviews={dashboard.moderation_reviews}
+                />
+              </Tabs.Panel>
+              <Tabs.Panel value={Tab.Insights}>
+                <InsightsUpsellTab model="dashboard" />
+              </Tabs.Panel>
+            </SidesheetTabPanelContainer>
+          </Tabs>
+        </Sidesheet>
+      </ErrorBoundary>
+    </div>
+  );
+}
+
+const OverviewTab = ({
+  dashboard,
+  handleDescriptionChange,
+  handleDescriptionBlur,
+  descriptionError,
+  setDescriptionError,
+  canWrite,
+}: {
+  dashboard: Dashboard;
+  handleDescriptionChange: (description: string) => void;
+  handleDescriptionBlur: (event: FocusEvent<HTMLTextAreaElement>) => void;
+  descriptionError: string | null;
+  setDescriptionError: (error: string | null) => void;
+  canWrite: boolean;
+}) => {
+  return (
+    <Stack gap="lg">
+      <SidesheetCard title={t`Description`} pb="md">
+        <SidesheetEditableDescription
+          description={dashboard.description}
           onChange={handleDescriptionChange}
-          isOptional
-          isMultiline
-          isMarkdown
-          placeholder={t`Add description`}
-          key={`dashboard-description-${dashboard.description}`}
-          style={{ fontSize: ".875rem" }}
-        />
-      </ContentSection>
-
-      {!dashboard.archived && (
-        <ContentSection>
-          <Stack spacing="md">
-            <Switch
-              disabled={!canWrite}
-              label={t`Auto-apply filters`}
-              labelPosition="left"
-              variant="stretch"
-              size="sm"
-              id={autoApplyFilterToggleId}
-              checked={dashboard.auto_apply_filters}
-              onChange={e => handleToggleAutoApplyFilters(e.target.checked)}
-            />
-            {showCaching && isCacheable && (
-              <PLUGIN_CACHING.SidebarCacheSection
-                model="dashboard"
-                item={dashboard}
-                setPage={setPage}
-              />
-            )}
-          </Stack>
-        </ContentSection>
-      )}
-
-      <ContentSection>
-        <HistoryHeader>{t`History`}</HistoryHeader>
-        <Timeline
-          events={getTimelineEvents({ revisions, currentUser })}
-          data-testid="dashboard-history-list"
-          revert={revision => dispatch(revertToRevision(revision))}
           canWrite={canWrite}
+          onFocus={() => setDescriptionError("")}
+          onBlur={handleDescriptionBlur}
         />
-      </ContentSection>
-    </>
+        {!!descriptionError && (
+          <Text color="error" size="xs" mt="xs">
+            {descriptionError}
+          </Text>
+        )}
+        <PLUGIN_MODERATION.ModerationReviewTextForDashboard
+          dashboard={dashboard}
+        />
+      </SidesheetCard>
+      <SidesheetCard>
+        <DashboardDetails dashboard={dashboard} />
+      </SidesheetCard>
+      <DashboardEntityIdCard dashboard={dashboard} />
+    </Stack>
+  );
+};
+
+const HistoryTab = ({
+  dashboard,
+  canWrite,
+  revisions,
+  currentUser,
+  moderationReviews,
+}: {
+  dashboard: Dashboard;
+  canWrite: boolean;
+  revisions?: Revision[];
+  currentUser: User | null;
+  moderationReviews: ModerationReview[];
+}) => {
+  const dispatch = useDispatch();
+
+  const events = useMemo(() => {
+    const moderationEvents = PLUGIN_MODERATION.getModerationTimelineEvents(
+      moderationReviews,
+      currentUser,
+    );
+    const revisionEvents = getTimelineEvents({ revisions, currentUser });
+
+    return [...revisionEvents, ...moderationEvents].sort(
+      (a, b) =>
+        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+    );
+  }, [moderationReviews, revisions, currentUser]);
+
+  return (
+    <SidesheetCard>
+      <Timeline
+        events={events}
+        data-testid="dashboard-history-list"
+        revert={(revision) =>
+          dispatch(revertToRevision(dashboard.id, revision))
+        }
+        canWrite={canWrite}
+        entity="dashboard"
+      />
+    </SidesheetCard>
   );
 };

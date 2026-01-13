@@ -1,7 +1,7 @@
 import { checkNotNull } from "metabase/lib/types";
 import * as Lib from "metabase-lib";
 
-import { createQuery, columnFinder, findTemporalBucket } from "./test-helpers";
+import { columnFinder, createQuery, findTemporalBucket } from "./test-helpers";
 
 describe("breakout", () => {
   describe("add breakout", () => {
@@ -21,7 +21,9 @@ describe("breakout", () => {
       const breakouts = Lib.breakouts(nextQuery, 0);
 
       expect(breakouts).toHaveLength(1);
-      expect(Lib.displayName(nextQuery, breakouts[0])).toBe("Title");
+      expect(Lib.displayInfo(nextQuery, 0, breakouts[0]).displayName).toBe(
+        "Title",
+      );
     });
 
     it("should preserve breakout positions between v1-v2 roundtrip", () => {
@@ -34,12 +36,12 @@ describe("breakout", () => {
         "TAX",
       );
 
-      expect(
-        Lib.displayInfo(nextQuery, 0, nextTaxColumn).breakoutPosition,
-      ).toBe(0);
+      expect(Lib.displayInfo(nextQuery, 0, nextTaxColumn)).toMatchObject({
+        breakoutPositions: [0],
+      });
 
       const roundtripQuery = createQuery({
-        query: Lib.toLegacyQuery(nextQuery),
+        query: Lib.toJsQuery(nextQuery),
       });
       const roundtripQueryColumns = Lib.breakoutableColumns(roundtripQuery, 0);
       const roundtripTaxColumn = columnFinder(
@@ -48,8 +50,8 @@ describe("breakout", () => {
       )("ORDERS", "TAX");
 
       expect(
-        Lib.displayInfo(roundtripQuery, 0, roundtripTaxColumn).breakoutPosition,
-      ).toBe(0);
+        Lib.displayInfo(roundtripQuery, 0, roundtripTaxColumn),
+      ).toMatchObject({ breakoutPositions: [0] });
     });
 
     it("should note whether the temporal unit is for extraction in the displayInfo", () => {
@@ -117,7 +119,9 @@ describe("breakout", () => {
         productCategory,
       );
       const nextBreakouts = Lib.breakouts(nextQuery, 0);
-      expect(Lib.displayName(nextQuery, nextBreakouts[0])).toBe("Category");
+      expect(Lib.displayInfo(nextQuery, 0, nextBreakouts[0]).displayName).toBe(
+        "Category",
+      );
       expect(breakouts[0]).not.toEqual(nextBreakouts[0]);
     });
   });

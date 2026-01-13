@@ -1,12 +1,12 @@
 (ns metabase.lib.extraction-test
   (:require
+   #?@(:cljs ([metabase.test-runner.assert-exprs.approximately-equal]))
    [clojure.test :refer [deftest is testing]]
    [medley.core :as m]
    [metabase.lib.core :as lib]
    [metabase.lib.metadata :as lib.metadata]
    [metabase.lib.test-metadata :as meta]
-   [metabase.lib.test-util :as lib.tu]
-   #?@(:cljs ([metabase.test-runner.assert-exprs.approximately-equal]))))
+   [metabase.lib.test-util :as lib.tu]))
 
 (deftest ^:parallel column-extraction-test-1-datetime-column
   (testing "extract on a regular datetime column without aggregations adds the column in this stage"
@@ -78,10 +78,10 @@
                          :display-name   "Ship time"
                          :base-type      :type/Time
                          :effective-type :type/Time
-                         :semantic-type  :type/Time)
+                         :semantic-type  nil)
         mp        (lib/composed-metadata-provider
-                    (lib.tu/mock-metadata-provider {:fields [ship-time]})
-                    meta/metadata-provider)
+                   (lib.tu/mock-metadata-provider {:fields [ship-time]})
+                   meta/metadata-provider)
         query     (lib/query mp (lib.metadata/table mp (meta/id :orders)))]
     (is (=? [{:tag :hour-of-day}]
             (->> (lib/returned-columns query)
@@ -95,10 +95,10 @@
                          :display-name   "Expected arrival"
                          :base-type      :type/Date
                          :effective-type :type/Date
-                         :semantic-type  :type/Date)
+                         :semantic-type  nil)
         mp        (lib/composed-metadata-provider
-                    (lib.tu/mock-metadata-provider {:fields [arrival]})
-                    meta/metadata-provider)
+                   (lib.tu/mock-metadata-provider {:fields [arrival]})
+                   meta/metadata-provider)
         query     (lib/query mp (lib.metadata/table mp (meta/id :orders)))]
     (is (=? [{:tag :day-of-month}
              {:tag :day-of-week}
@@ -122,8 +122,8 @@
   ([] (homepage-provider meta/metadata-provider))
   ([base-provider]
    (lib/composed-metadata-provider
-     (lib.tu/mock-metadata-provider {:fields [homepage]})
-     base-provider)))
+    (lib.tu/mock-metadata-provider {:fields [homepage]})
+    base-provider)))
 
 (deftest ^:parallel extract-from-url-test
   ;; There's no URL columns in the same dataset, but let's pretend there's one called People.HOMEPAGE.
@@ -134,7 +134,7 @@
                            (m/find-first #(= (:name %) "HOMEPAGE"))
                            (lib/column-extractions query))
           by-tag      (m/index-by :tag extractions)]
-      (is (=? #{:domain :subdomain :host} (set (keys by-tag))))
+      (is (=? #{:domain :subdomain :host :path} (set (keys by-tag))))
       (testing "to :domain"
         (is (=? [:domain {} [:field {} 9999001]]
                 (lib/extraction-expression (:domain by-tag))))
@@ -152,35 +152,42 @@
                 (lib/extraction-expression (:host by-tag))))
         (is (=? {:stages [{:expressions [[:host {:lib/expression-name "Host"}
                                           [:field {} 9999001]]]}]}
-                (lib/extract query -1 (:host by-tag))))))))
+                (lib/extract query -1 (:host by-tag)))))
+      (testing "to :path"
+        (is (=? [:path {} [:field {} 9999001]]
+                (lib/extraction-expression (:path by-tag))))
+        (is (=? {:stages [{:expressions [[:path {:lib/expression-name "Path"}
+                                          [:field {} 9999001]]]}]}
+                (lib/extract query -1 (:path by-tag))))))))
 
 (deftest ^:parallel extracting-from-urls-requires-regex-feature-test
   (let [query-regex    (lib/query (homepage-provider) (meta/table-metadata :people))
-        no-regex       (homepage-provider (meta/updated-metadata-provider update :features disj :regex))
+        no-regex       (homepage-provider (meta/updated-metadata-provider update :features disj :regex/lookaheads-and-lookbehinds))
         query-no-regex (lib/query no-regex (meta/table-metadata :people))]
-    (testing "when the database supports :regex URL extraction is available"
+    (testing "when the database supports `:regex/lookaheads-and-lookbehinds` URL extraction is available"
       (is (=? [{:tag :domain,    :display-name "Domain"}
                {:tag :subdomain, :display-name "Subdomain"}
-               {:tag :host,      :display-name "Host"}]
+               {:tag :host,      :display-name "Host"}
+               {:tag :path,      :display-name "Path"}]
               (->> (lib/returned-columns query-regex)
                    (m/find-first #(= (:name %) "HOMEPAGE"))
                    (lib/column-extractions query-regex)))))
-    (testing "when the database does not support :regex URL extraction is not available"
+    (testing "when the database does not support `:regex/lookaheads-and-lookbehinds` URL extraction is not available"
       (is (empty? (->> (lib/returned-columns query-no-regex)
                        (m/find-first #(= (:name %) "HOMEPAGE"))
                        (lib/column-extractions query-no-regex)))))))
 
 (deftest ^:parallel extracting-from-emails-requires-regex-feature-test
   (let [query-regex    (lib/query meta/metadata-provider (meta/table-metadata :people))
-        no-regex       (meta/updated-metadata-provider update :features disj :regex)
+        no-regex       (meta/updated-metadata-provider update :features disj :regex/lookaheads-and-lookbehinds)
         query-no-regex (lib/query no-regex (meta/table-metadata :people))]
-    (testing "when the database supports :regex email extraction is available"
+    (testing "when the database supports `:regex/lookaheads-and-lookbehinds` email extraction is available"
       (is (=? [{:tag :domain,    :display-name "Domain"}
                {:tag :host,      :display-name "Host"}]
               (->> (lib/returned-columns query-regex)
                    (m/find-first #(= (:name %) "EMAIL"))
                    (lib/column-extractions query-regex)))))
-    (testing "when the database does not support :regex email extraction is not available"
+    (testing "when the database does not support `:regex/lookaheads-and-lookbehinds` email extraction is not available"
       (is (empty? (->> (lib/returned-columns query-no-regex)
                        (m/find-first #(= (:name %) "EMAIL"))
                        (lib/column-extractions query-no-regex)))))))

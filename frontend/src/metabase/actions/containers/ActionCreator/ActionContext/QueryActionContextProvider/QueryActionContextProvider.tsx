@@ -7,8 +7,8 @@ import type Metadata from "metabase-lib/v1/metadata/Metadata";
 import { getTemplateTagParametersFromCard } from "metabase-lib/v1/parameters/utils/template-tags";
 import type NativeQuery from "metabase-lib/v1/queries/NativeQuery";
 import type {
-  Card,
   ActionFormSettings,
+  Card,
   DatabaseId,
   NativeDatasetQuery,
   VisualizationSettings,
@@ -56,6 +56,7 @@ function convertActionToQuestionCard(
 ): Card<NativeDatasetQuery> {
   return {
     id: action.id,
+    entity_id: action.entity_id,
     created_at: action.created_at,
     updated_at: action.updated_at,
     name: action.name,
@@ -67,9 +68,11 @@ function convertActionToQuestionCard(
     type: "question",
     can_write: true,
     can_restore: false,
+    can_delete: false,
     public_uuid: null,
     collection_id: null,
     collection_position: null,
+    dashboard: null,
     result_metadata: [],
     cache_ttl: null,
     last_query_start: null,
@@ -78,6 +81,9 @@ function convertActionToQuestionCard(
     enable_embedding: false,
     embedding_params: null,
     initially_published_at: null,
+    can_manage_db: true,
+    dashboard_count: null,
+    dashboard_id: null,
   };
 }
 
@@ -139,7 +145,7 @@ function QueryActionContextProvider({
   const [question, setQuestion] = useState(initialQuestion);
 
   const query = useMemo(
-    () => question.legacyQuery() as NativeQuery,
+    () => question.legacyNativeQuery() as NativeQuery,
     [question],
   );
 
@@ -188,7 +194,10 @@ function QueryActionContextProvider({
 
   const handleQueryChange = useCallback((nextQuery: NativeQuery) => {
     const nextQuestion = nextQuery.question();
-    const parameters = getTemplateTagParametersFromCard(nextQuestion.card());
+    const parameters = getTemplateTagParametersFromCard(
+      nextQuestion.card(),
+      nextQuestion.metadata(),
+    );
     setQuestion(nextQuestion.setParameters(parameters));
   }, []);
 

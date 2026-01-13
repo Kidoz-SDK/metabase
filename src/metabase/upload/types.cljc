@@ -39,27 +39,27 @@
 ;;
 ;; We have a number of special "abstract" nodes in this graph:
 ;;
-;; - `*boolean-int*` is an ambiguous node, that could either be parsed as a boolean or as an integer.
+;; - `*boolean-int*` is an ambiguous node that could either be parsed as a boolean or as an integer.
 ;; - `*float-or-int*` is any integer, whether it has an explicit decimal point or not.
 ;;
 ;; While a `*boolean-int*` is a genuinely ambiguous value, `*float-or-int*` exist to power our desired value-type
-;; coercion and column-type promotion behaviour.
+;; coercion and column-type promotion behavior.
 ;;
 ;; - If we encounter a `*float-or-int*` inside an `int` column, then we can safely coerce it down to an integer.
-;; - If we encounter a `float` (i.e. a non-zero fraction component), then we need to promote the column to a `float.`
+;; - If we encounter a `float` (i.e., a non-zero fraction component), then we need to promote the column to a `float.`
 ;;
-;; Columns can not have an abstract type, which has no meaning outside of inference and reconciliation.
+;; Columns cannot have an abstract type, which has no meaning outside inference and reconciliation.
 ;; If we are left with an abstract type after having processed all the values, we first check whether we can coerce
-;; the type to the existing column type, and otherwise traverse further up the graph until we reach a concrete type.
+;; the type to the existing column type; if not, we traverse further up the graph until we reach a concrete type.
 ;;
-;; For ease of reference and explicitness these corresponding values are given in the `abstract->concrete` map.
+;; For ease of reference and explicitness, these corresponding values are given in the `abstract->concrete` map.
 ;; One can figure out these mappings by simply looking up through the ancestors. For now, we require that it is always
 ;; a direct ancestor, and lay out or graph so that it is the left-most one.
 
 (def h
   "This hierarchy defines a relationship between value types and their specializations.
   We use an [[metabase.util.ordered-hierarchy]] for its topological sorting, which simplify writing efficient and
-  consistent implementations for of our type inference, parsing, and relaxation."
+  consistent implementations for our type inference, parsing, and relaxation."
   (make-hierarchy
    [::text
     [::varchar-255
@@ -79,13 +79,6 @@
   This maps implicitly defines the abstract types, by mapping them each to a default concretion."
   {::*boolean-int*  ::boolean
    ::*float-or-int* ::float})
-
-;; TODO: the set of allowed promotions should be driver-specific, because not all drivers support coercions between all
-;; types e.g. redshift does not allow coercions except between text types
-(def ^:private allowed-promotions
-  "A mapping of which types a column can be implicitly relaxed to, based on the content of appended values.
-  If we require a relaxation which is not allow-listed here, we will reject the corresponding file."
-  {::int #{::float}})
 
 (def ^:private column-type->coercible-value-types
   "A mapping of which value types should be coerced to the given existing type, rather than triggering promotion."
@@ -128,11 +121,13 @@
 
 (defn- with-parens
   "Returns a regex that matches the argument, with or without surrounding parentheses."
+  {:style/indent [:form]}
   [number-regex]
   (re-pattern (str "(" number-regex ")|(\\(" number-regex "\\))")))
 
 (defn- with-currency
   "Returns a regex that matches a positive or negative number, including currency symbols"
+  {:style/indent [:form]}
   [number-regex]
   ;; currency signs can be all over: $2, -$2, $-2, 2€
   (re-pattern (str upload-parsing/currency-regex "?\\s*-?"
@@ -152,7 +147,7 @@
       ".’" #"\d[\d’]*"))))
 
 (defn- float-or-int-regex
-  "Matches integral numbers, even if they have a decimal separator - e.g. 2 or 2.0"
+  "Matches integral numbers, even if they have a decimal separator - e.g., 2 or 2.0"
   [number-separators]
   (with-parens
    (with-currency
@@ -163,7 +158,7 @@
       ".’" #"\d[\d’]*(\.[0.]+)?"))))
 
 (defn- float-regex
-  "Matches numbers, regardless of whether they have a decimal separator - e.g. 2, 2.0, or 2.2"
+  "Matches numbers, regardless of whether they have a decimal separator - e.g., 2, 2.0, or 2.2"
   [number-separators]
   (with-parens
    (with-currency
@@ -215,7 +210,7 @@
   (into [:map] (map #(vector % [:=> [:cat :string] :boolean])
                     (remove non-inferable-types value-types))))
 
-(mu/defn ^:private settings->type->check :- type->check-schema
+(mu/defn- settings->type->check :- type->check-schema
   [{:keys [number-separators] :as _settings}]
   (let [int-string?   (regex-matcher (int-regex number-separators))
         float-or-int? (regex-matcher (float-or-int-regex number-separators))
@@ -261,11 +256,22 @@
       ;; It's important to realize this lazy sequence, because otherwise we can build a huge stack and overflow.
       (vec (u/map-all relax value-types row)))))
 
+(def ^:private column-type->abstract
+  "Before a type has been concretized, values have more degrees of freedom for relaxation.
+
+  e.g. The type given for '1' would be *boolean-or-int*, which can relax into an int if a '2' is encountered.
+
+  If we are appending or replacing a previous .csv, we no longer know how the existing values were encoded.
+  Therefore, this mapping allows us to give a type the 'the benefit of the doubt'
+  and assume relaxations that might have been available given all possible encodings."
+  {::boolean ::*boolean-int*})
+
 (mu/defn column-types-from-rows :- [:sequential (into [:enum] column-types)]
   "Given the types of the existing columns (if there are any), and rows to be added, infer the best supporting types."
   [settings existing-types rows]
-  (->> (reduce (type-relaxer settings) existing-types rows)
-       (u/map-all concretize existing-types)))
+  (let [current-types (mapv #(column-type->abstract % %) existing-types)]
+    (->> (reduce (type-relaxer settings) current-types rows)
+         (u/map-all concretize existing-types))))
 
 (defn base-type->upload-type
   "Returns the most specific upload type for the given base type."
@@ -283,14 +289,14 @@
 
 (defn- promotable?
   "Are we allowed to promote a column's schema from `current-type` to `inferred-type`?"
-  [current-type inferred-type]
-  (when-let [allowed? (allowed-promotions current-type)]
+  [current-type inferred-type allowed-promotions]
+  (when-let [allowed? (get allowed-promotions current-type)]
     (allowed? inferred-type)))
 
 (defn new-type
   "Given the `current-type` of a column, and an `inferred-type` for new values to be added, return its new type.
   This assumes we have already coerced the new values down to the existing type, if possible."
-  [current-type inferred-type]
+  [current-type inferred-type allowed-promotions]
   (cond
     ;; No restriction on new columns
     (nil? current-type) inferred-type
@@ -298,6 +304,6 @@
     (= current-type inferred-type) current-type
     :else
     ;; Keep the existing type unless a promotion is allowed.
-    (if (promotable? current-type inferred-type)
+    (if (promotable? current-type inferred-type allowed-promotions)
       inferred-type
       current-type)))

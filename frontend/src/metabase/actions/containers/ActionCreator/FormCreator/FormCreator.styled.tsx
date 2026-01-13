@@ -1,31 +1,31 @@
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
 
-import { color, alpha } from "metabase/lib/colors";
-import { space } from "metabase/styled-components/theme";
+import { alpha } from "metabase/lib/colors";
 
 export const FormContainer = styled.div`
   display: flex;
-  gap: ${space(2)};
+  gap: var(--mantine-spacing-md);
   padding: 0 1.5rem 1rem;
   transition: flex 500ms ease-in-out;
-  background-color: ${color("white")};
+  background-color: var(--mb-color-bg-white);
   flex-direction: column;
 `;
 
 export const FormFieldEditorDragContainer = styled.div`
-  margin-bottom: ${space(1)};
+  margin-bottom: var(--mantine-spacing-sm);
 `;
 
 export const FieldSettingsButtonsContainer = styled.div`
   display: flex;
   align-items: center;
-  gap: ${space(1)};
+  gap: var(--mantine-spacing-sm);
 `;
 
 export const WarningBanner = styled.div`
-  padding: ${space(2)};
-  border: 1px solid ${color("warning")};
-  border-radius: ${space(1)};
-  background: ${alpha("warning", 0.1)};
+  padding: var(--mantine-spacing-md);
+  border: 1px solid var(--mb-color-warning);
+  border-radius: var(--mantine-spacing-sm);
+  background: ${() => alpha("warning", 0.1)};
   line-height: 1.25rem;
 `;

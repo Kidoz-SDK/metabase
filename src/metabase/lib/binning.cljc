@@ -1,5 +1,8 @@
 (ns metabase.lib.binning
+  (:refer-clojure :exclude [mapv select-keys get-in])
   (:require
+   [clojure.set :as set]
+   [clojure.string :as str]
    [metabase.lib.binning.util :as lib.binning.util]
    [metabase.lib.dispatch :as lib.dispatch]
    [metabase.lib.hierarchy :as lib.hierarchy]
@@ -8,16 +11,19 @@
    [metabase.lib.schema.binning :as lib.schema.binning]
    [metabase.lib.schema.common :as lib.schema.common]
    [metabase.lib.schema.metadata :as lib.schema.metadata]
-   [metabase.shared.formatting.numbers :as fmt.num]
-   [metabase.shared.util.i18n :as i18n]
-   [metabase.util.malli :as mu]))
+   [metabase.lib.util :as lib.util]
+   [metabase.util :as u]
+   [metabase.util.i18n :as i18n]
+   [metabase.util.malli :as mu]
+   [metabase.util.performance :refer [mapv select-keys get-in]]))
 
 (defmulti with-binning-method
   "Implementation for [[with-binning]]. Implement this to tell [[with-binning]] how to add binning to a particular MBQL
   clause."
   {:arglists '([x binning])}
   (fn [x _binning]
-    (lib.dispatch/dispatch-value x)) :hierarchy lib.hierarchy/hierarchy)
+    (lib.dispatch/dispatch-value x))
+  :hierarchy lib.hierarchy/hierarchy)
 
 (mu/defn with-binning
   "Add binning to an MBQL clause or something that can be converted to an MBQL clause.
@@ -63,7 +69,7 @@
   [_query _stage-number _x]
   nil)
 
-(mu/defn available-binning-strategies :- [:sequential [:ref ::lib.schema.binning/binning-option]]
+(mu/defn available-binning-strategies :- [:maybe [:sequential [:ref ::lib.schema.binning/binning-option]]]
   "Get a set of available binning strategies for `x`. Returns nil if none are available."
   ([query x]
    (available-binning-strategies query -1 x))
@@ -101,23 +107,39 @@
   []
   (mapv with-binning-option-type
         [(default-auto-bin)
-         {:display-name (i18n/tru "Bin every 0.1 degrees") :mbql {:strategy :bin-width :bin-width 0.1}}
-         {:display-name (i18n/tru "Bin every 1 degree")    :mbql {:strategy :bin-width :bin-width 1.0}}
-         {:display-name (i18n/tru "Bin every 10 degrees")  :mbql {:strategy :bin-width :bin-width 10.0}}
-         {:display-name (i18n/tru "Bin every 20 degrees")  :mbql {:strategy :bin-width :bin-width 20.0}}]))
+         {:display-name (i18n/tru "Bin every 0.1 degrees")   :mbql {:strategy :bin-width :bin-width 0.1}}
+         {:display-name (i18n/tru "Bin every 1 degree")      :mbql {:strategy :bin-width :bin-width 1.0}}
+         {:display-name (i18n/tru "Bin every 10 degrees")    :mbql {:strategy :bin-width :bin-width 10.0}}
+         {:display-name (i18n/tru "Bin every 20 degrees")    :mbql {:strategy :bin-width :bin-width 20.0}}
+         {:display-name (i18n/tru "Bin every 0.05 degrees")  :mbql {:strategy :bin-width :bin-width 0.05}}
+         {:display-name (i18n/tru "Bin every 0.01 degrees")  :mbql {:strategy :bin-width :bin-width 0.01}}
+         {:display-name (i18n/tru "Bin every 0.005 degrees") :mbql {:strategy :bin-width :bin-width 0.005}}]))
+
+(defn- format-number-simple
+  "Format a number for display in binning display names. Returns integers as whole numbers (no decimal point), and
+  decimals as-is. The limited configurability is sufficient for the usecase where this function is invoked."
+  [n]
+  (str (if (zero? (rem n 1))
+         (int n)
+         n)))
 
 (mu/defn binning-display-name :- ::lib.schema.common/non-blank-string
   "This is implemented outside of [[lib.metadata.calculation/display-name]] because it needs access to the field type.
   It's called directly by `:field` or `:metadata/column`'s [[lib.metadata.calculation/display-name]]."
   [{:keys [bin-width num-bins strategy] :as binning-options} :- ::lib.schema.binning/binning
-   column-metadata                                           :- ::lib.schema.metadata/column]
+   x                                                         :- [:maybe
+                                                                 [:or
+                                                                  ::lib.schema.metadata/column
+                                                                  ::lib.schema.common/semantic-or-relation-type]]]
   (when binning-options
-    (case strategy
-      :num-bins  (i18n/trun "{0} bin" "{0} bins" num-bins)
-      :bin-width (str (fmt.num/format-number bin-width {})
-                      (when (isa? (:semantic-type column-metadata) :type/Coordinate)
-                        "°"))
-      :default   (i18n/tru "Auto binned"))))
+    (let [semantic-type (cond-> x
+                          (and (map? x) (= :metadata/column (:lib/type x))) :semantic-type)]
+      (case strategy
+        :num-bins  (i18n/trun "{0} bin" "{0} bins" num-bins)
+        :bin-width (str (format-number-simple bin-width)
+                        (when (isa? semantic-type :type/Coordinate)
+                          "°"))
+        :default   (i18n/tru "Auto binned")))))
 
 (defmethod lib.metadata.calculation/display-info-method :option/binning
   [_query _stage-number binning-option]
@@ -130,13 +152,22 @@
            (when (= :default (:strategy binning-value))
              {:default true}))))
 
+(mu/defn binning= :- boolean?
+  "Given binning values (as returned by [[binning]]), check if they match."
+  [x :- [:maybe ::lib.schema.binning/binning]
+   y :- [:maybe ::lib.schema.binning/binning]]
+  (let [binning-keys (case (:strategy x)
+                       :num-bins  [:strategy :num-bins]
+                       :bin-width [:strategy :bin-width]
+                       [:strategy])]
+    (= (select-keys x binning-keys) (select-keys y binning-keys))))
+
 (mu/defn strategy= :- boolean?
   "Given a binning option (as returned by [[available-binning-strategies]]) and the binning value (possibly nil) from
   a column, check if they match."
   [binning-option :- ::lib.schema.binning/binning-option
    column-binning :- [:maybe ::lib.schema.binning/binning]]
-  (= (:mbql binning-option)
-     (select-keys column-binning [:strategy :num-bins :bin-width])))
+  (binning= (:mbql binning-option) column-binning))
 
 (mu/defn resolve-bin-width :- [:maybe [:map
                                        [:bin-width ::lib.schema.binning/bin-width]
@@ -154,8 +185,8 @@
   (when-let [binning-options (binning column-metadata)]
     (case (:strategy binning-options)
       :num-bins
-      (or ;; If the column is already binned, compute the width of this single bin based on its bounds and width.
-          (when-let [bin-width (:bin-width binning-options)]
+      ;;   If the column is already binned, compute the width of this single bin based on its bounds and width.
+      (or (when-let [bin-width (:bin-width binning-options)]
             {:bin-width bin-width
              :min-value value
              :max-value (+ value bin-width)})
@@ -185,3 +216,35 @@
           {:bin-width bin-width
            :min-value value
            :max-value (+ value bin-width)})))))
+
+(defn- binning_info->binning-options
+  [binning_info]
+  (-> binning_info
+      u/normalize-map
+      (set/rename-keys {:binning-strategy :strategy})))
+
+(defn ends-with-binning?
+  "Decide whether string `s` has binning suffix based on `binning-options`."
+  [s binning-options semantic-type]
+  (str/ends-with? s (str ": " (binning-display-name binning-options semantic-type))))
+
+(defn ensure-ends-with-binning
+  "Ensure that `s` is suffixed by appropriate binning info."
+  [s binning-options semantic-type]
+  (if (or (not (string? s))
+          (not (:strategy binning-options))
+          (ends-with-binning? s binning-options semantic-type))
+    s
+    (lib.util/format "%s: %s" s (binning-display-name binning-options semantic-type))))
+
+;;; TODO (Cam 6/13/25) -- only used outside of Lib; Lib doesn't use `snake_cased` keys. We should reconsider if this
+;;; belongs in Lib in its current shape.
+(defn ensure-binning-in-display-name
+  "Update results column so binning is contained in its display_name."
+  {:deprecated "0.57.0"}
+  [column]
+  (if (:binning_info column)
+    (update column :display_name #(ensure-ends-with-binning %1
+                                                            (binning_info->binning-options (:binning_info column))
+                                                            (:semantic_type column)))
+    column))

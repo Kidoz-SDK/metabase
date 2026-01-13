@@ -29,8 +29,12 @@ export function getParameterValue({
 }
 
 /**
+ * @import { UiParameter } from "metabase-lib/v1/parameters/types";
+ *
  * In some cases, we need to use default parameter value in place of an absent one.
  * Please use this function when dealing with the required parameters.
+ *
+ * @returns {UiParameter[]}
  */
 export function getValuePopulatedParameters({
   parameters,
@@ -45,7 +49,7 @@ export function getValuePopulatedParameters({
     return [];
   }
 
-  return parameters.map(parameter => ({
+  return parameters.map((parameter) => ({
     ...parameter,
     value: getParameterValue({
       parameter,
@@ -59,7 +63,7 @@ export function getDefaultValuePopulatedParameters(
   parameters,
   parameterValues,
 ) {
-  return parameters.map(parameter => {
+  return parameters.map((parameter) => {
     const value = parameterValues?.[parameter.id];
     return {
       ...parameter,
@@ -77,6 +81,11 @@ export function areParameterValuesIdentical(a, b) {
   );
 }
 
+/**
+ * @import { NormalizedParameter } from "metabase-types/api";
+ *
+ * @returns {NormalizedParameter}
+ */
 export function normalizeParameter(parameter) {
   return {
     id: parameter.id,
@@ -93,7 +102,7 @@ export function normalizeParameter(parameter) {
 
 export function normalizeParameters(parameters) {
   return parameters
-    .filter(parameter => _.has(parameter, "value"))
+    .filter((parameter) => _.has(parameter, "value"))
     .map(({ id, type, value, target, options }) => ({
       id,
       type,
@@ -118,7 +127,11 @@ export function isParameterValueEmpty(value) {
 // Should treat undefined and null equally.
 // TODO reconcile with isParameterValueEmpty
 export function parameterHasNoDisplayValue(value) {
-  return !value || value === "" || (Array.isArray(value) && value.length === 0);
+  return (
+    (!value && value !== 0) ||
+    value === "" ||
+    (Array.isArray(value) && value.length === 0)
+  );
 }
 
 export function normalizeParameterValue(type, value) {
@@ -139,9 +152,33 @@ export function getParameterValuesBySlug(parameters, parameterValuesById) {
   parameterValuesById = parameterValuesById ?? {};
 
   return Object.fromEntries(
-    parameters.map(parameter => [
+    parameters.map((parameter) => [
       parameter.slug,
       parameter.value ?? parameterValuesById[parameter.id] ?? null,
     ]),
   );
+}
+
+/**
+ * 1. Preserve compatibility with existing native query parameters where
+ * `isMultiSelect` was not set. Before, non field filter variables were
+ * always single-value, and field filters were always multi-value.
+ * `hasVariableTemplateTagTarget` is `false` for field filters and `true`
+ * otherwise. Now you can control this setting, and we set the default value
+ * here to match the old behavior.
+ *
+ * 2. Dashboard parameters are automatically switched to single-value when
+ * mapped to native query variables that are not field filters. This works
+ * because `isMultiSelect` is `undefined`, and `hasVariableTemplateTagTarget`
+ * becomes `true`, leading to `getIsMultiSelect` returning `false`. It would be
+ * better if dashboards manually set the correct `isMultiValue` value when
+ * mapping is changed instead of relying on the `undefined` value and the
+ * implicit behavior of this function.
+ */
+export function getIsMultiSelect(parameter) {
+  return parameter.isMultiSelect ?? !parameter.hasVariableTemplateTagTarget;
+}
+
+export function hasValue(value) {
+  return Array.isArray(value) ? value.length > 0 : value != null;
 }

@@ -3,14 +3,14 @@ import type {
   DataPermissionValue,
 } from "metabase/admin/permissions/types";
 import type {
-  DatabaseId,
-  TableId,
-  SchemaName,
   CollectionId,
+  DatabaseId,
+  SchemaName,
+  TableId,
 } from "metabase-types/api";
 
 import type { GroupId } from "./group";
-import type { UserAttribute } from "./user";
+import type { UserAttributeKey } from "./user";
 
 export type PermissionsGraph = {
   groups: GroupsPermissions;
@@ -18,7 +18,7 @@ export type PermissionsGraph = {
 };
 
 export type GroupsPermissions = {
-  [key: GroupId]: GroupPermissions;
+  [key: GroupId | string]: GroupPermissions;
 };
 
 export type GroupPermissions = {
@@ -69,6 +69,10 @@ export type DatabaseAccessPermissions = {
 };
 
 export type NativePermissions =
+  | NativePermissionValues
+  | { [key: SchemaName]: { [key: TableId]: NativePermissionValues } };
+
+export type NativePermissionValues =
   | DataPermissionValue.QUERY_BUILDER_AND_NATIVE
   | DataPermissionValue.QUERY_BUILDER
   | DataPermissionValue.NO
@@ -87,6 +91,7 @@ export type SchemasPermissions =
 export type TablesPermissions =
   | DataPermissionValue.UNRESTRICTED
   | DataPermissionValue.LEGACY_NO_SELF_SERVICE
+  | DataPermissionValue.BLOCKED
   | {
       [key: TableId]: FieldsPermissions;
     };
@@ -94,7 +99,8 @@ export type TablesPermissions =
 export type FieldsPermissions =
   | DataPermissionValue.UNRESTRICTED
   | DataPermissionValue.LEGACY_NO_SELF_SERVICE
-  | DataPermissionValue.SANDBOXED;
+  | DataPermissionValue.SANDBOXED
+  | DataPermissionValue.BLOCKED;
 
 export type CollectionPermissionsGraph = {
   groups: CollectionPermissions;
@@ -102,7 +108,7 @@ export type CollectionPermissionsGraph = {
 };
 
 export type CollectionPermissions = {
-  [key: GroupId]: Partial<Record<CollectionId, CollectionPermission>>;
+  [key: GroupId | string]: Partial<Record<CollectionId, CollectionPermission>>;
 };
 
 export type CollectionPermission = "write" | "read" | "none";
@@ -116,7 +122,7 @@ export type GroupTableAccessPolicy = {
   table_id: number;
   card_id: number | null;
   attribute_remappings: {
-    [key: UserAttribute]: DimensionRef;
+    [key: UserAttributeKey]: DimensionRef;
   };
   permission_id: number | null;
 };
@@ -124,5 +130,5 @@ export type GroupTableAccessPolicy = {
 export type Impersonation = {
   db_id: DatabaseId;
   group_id: GroupId;
-  attribute: UserAttribute;
+  attribute: UserAttributeKey;
 };

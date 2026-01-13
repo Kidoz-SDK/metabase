@@ -1,8 +1,12 @@
 import userEvent from "@testing-library/user-event";
 import { Route } from "react-router";
 
-import { getIcon, renderWithProviders, screen } from "__support__/ui";
-import type { IconName } from "metabase/ui";
+import {
+  renderWithProviders,
+  screen,
+  getIcon as testGetIcon,
+} from "__support__/ui";
+import { getIcon } from "metabase/lib/icon";
 import type { CollectionItem, CollectionItemModel } from "metabase-types/api";
 import {
   createMockCollection,
@@ -44,8 +48,6 @@ const getCollectionItem = ({
   name = "My Item",
   description = "description foo foo foo",
   collection_position = 1,
-  icon = "dashboard",
-  url = "/dashboard/1",
   setArchived = jest.fn(),
   setPinned = jest.fn(),
   ...rest
@@ -55,9 +57,7 @@ const getCollectionItem = ({
   name?: string;
   description?: string;
   collection_position?: number;
-  icon?: IconName;
-  url?: string;
-  setArchived?: (isArchived: boolean) => void;
+  setArchived?: (isArchived: boolean) => Promise<void>;
   setPinned?: (isPinned: boolean) => void;
 } = {}): CollectionItem & { description: string } => {
   return createMockCollectionItem({
@@ -67,8 +67,6 @@ const getCollectionItem = ({
     name,
     description,
     collection_position,
-    getIcon: () => ({ name: icon }),
-    getUrl: () => url,
     setArchived,
     setPinned,
   }) as CollectionItem & { description: string };
@@ -101,7 +99,7 @@ function setup({ item = defaultItem, collection = defaultCollection } = {}) {
 describe("PinnedItemCard", () => {
   it("should show the item's icon", () => {
     setup();
-    expect(getIcon(defaultItem.getIcon().name)).toBeInTheDocument();
+    expect(testGetIcon(getIcon(defaultItem).name)).toBeInTheDocument();
   });
 
   it("should show the item's name", () => {
@@ -121,55 +119,29 @@ describe("PinnedItemCard", () => {
 
   it("should show an action menu when user clicks on the menu icon in the card", async () => {
     setup();
-    await userEvent.click(getIcon("ellipsis"));
+    await userEvent.click(testGetIcon("ellipsis"));
     expect(await screen.findByText("Unpin")).toBeInTheDocument();
   });
 
-  it("doesn't show model detail page link", () => {
-    setup();
-    expect(screen.queryByTestId("model-detail-link")).not.toBeInTheDocument();
-  });
-
-  describe("models", () => {
-    const model = getCollectionItem({
-      id: 1,
-      name: "Order",
-      model: "dataset",
-      url: "/model/1",
-    });
-
-    it("should show a model detail page link", () => {
-      setup({ item: model });
-      expect(screen.getByTestId("model-detail-link")).toBeInTheDocument();
-      expect(screen.getByTestId("model-detail-link")).toHaveAttribute(
-        "href",
-        "/model/1-order/detail",
-      );
-    });
-  });
-
   describe("description", () => {
-    const originalScrollWidth = Object.getOwnPropertyDescriptor(
-      HTMLElement.prototype,
-      "scrollWidth",
-    );
+    const getBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+    const rangeGetBoundingClientRect = Range.prototype.getBoundingClientRect;
 
     beforeAll(() => {
-      // emulate ellipsis
-      Object.defineProperty(HTMLElement.prototype, "scrollWidth", {
-        configurable: true,
-        value: 100,
-      });
+      // Mock return values so that getIsTruncated can kick in
+      HTMLElement.prototype.getBoundingClientRect = jest
+        .fn()
+        .mockReturnValue({ height: 1, width: 1 });
+      Range.prototype.getBoundingClientRect = jest
+        .fn()
+        .mockReturnValue({ height: 1, width: 2 });
     });
 
     afterAll(() => {
-      if (originalScrollWidth) {
-        Object.defineProperty(
-          HTMLElement.prototype,
-          "scrollWidth",
-          originalScrollWidth,
-        );
-      }
+      HTMLElement.prototype.getBoundingClientRect = getBoundingClientRect;
+      Range.prototype.getBoundingClientRect = rangeGetBoundingClientRect;
+
+      jest.resetAllMocks();
     });
 
     it("should render description markdown as plain text", () => {
@@ -183,7 +155,9 @@ describe("PinnedItemCard", () => {
 
       await userEvent.hover(screen.getByText(MARKDOWN_AS_TEXT));
 
-      expect(screen.getByRole("tooltip")).toHaveTextContent(MARKDOWN_AS_TEXT);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent(
+        MARKDOWN_AS_TEXT,
+      );
     });
   });
 });

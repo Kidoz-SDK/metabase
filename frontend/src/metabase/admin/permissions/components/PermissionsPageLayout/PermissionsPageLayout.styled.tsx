@@ -1,7 +1,8 @@
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
+import { forwardRef } from "react";
 
-import { color } from "metabase/lib/colors";
-import { Icon } from "metabase/ui";
+import { Icon, type IconProps } from "metabase/ui";
 
 export const PermissionPageRoot = styled.div`
   display: flex;
@@ -23,7 +24,7 @@ export const PermissionPageSidebar = styled.aside`
   flex-direction: column;
   height: 100%;
   overflow: auto;
-  border-left: 1px solid ${color("border")};
+  border-left: 1px solid var(--mb-color-border);
   max-width: 320px;
 `;
 
@@ -39,20 +40,22 @@ export const FullHeightContainer = styled.div`
   overflow: hidden;
 `;
 
-export const CloseSidebarButton = styled(Icon)`
+export const CloseSidebarButton = styled(
+  forwardRef<SVGSVGElement, IconProps>(function CloseSidebarButton(props, ref) {
+    return <Icon {...props} name={props.name ?? "close"} ref={ref} />;
+  }),
+)`
   top: 1.75rem;
   right: 1.5rem;
-  color: ${color("text-light")};
+  color: var(--mb-color-text-light);
   position: absolute;
   cursor: pointer;
   transition: color 200ms;
 
   &:hover {
-    color: ${color("text-medium")};
+    color: var(--mb-color-text-medium);
   }
 `;
-
-CloseSidebarButton.defaultProps = { name: "close" };
 
 export const ToolbarButtonsContainer = styled.div`
   display: flex;

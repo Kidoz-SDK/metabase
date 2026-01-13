@@ -1,8 +1,8 @@
 import { createAction, createReducer } from "@reduxjs/toolkit";
 
-import Users from "metabase/entities/users";
+import { Dashboards } from "metabase/entities/dashboards";
 import { createAsyncThunk } from "metabase/lib/redux";
-import { CLOSE_QB_NEWB_MODAL } from "metabase/query_builder/actions";
+import { CLOSE_QB_NEWB_MODAL } from "metabase/query_builder/actions/modal";
 import { UserApi } from "metabase/services";
 import type { User } from "metabase-types/api";
 
@@ -29,26 +29,34 @@ export const loadCurrentUser = createAsyncThunk(
 export const clearCurrentUser = createAction(
   "metabase/user/CLEAR_CURRENT_USER",
 );
+export const userUpdated = createAction<User>("metabase/user/UPDATED");
 
-export const currentUser = createReducer<User | null>(null, builder => {
+export const currentUser = createReducer<User | null>(null, (builder) => {
   builder
     .addCase(clearCurrentUser, () => null)
     .addCase(refreshCurrentUser.fulfilled, (state, action) => action.payload)
-    .addCase(CLOSE_QB_NEWB_MODAL, state => {
+    .addCase(CLOSE_QB_NEWB_MODAL, (state) => {
       if (state) {
         state.is_qbnewb = false;
         return state;
       }
       return state;
     })
-    .addCase(Users.actionTypes.UPDATE, (state, { payload }) => {
-      const isCurrentUserUpdated = state?.id === payload.user.id;
+    .addCase(userUpdated, (state, { payload: user }) => {
+      const isCurrentUserUpdated = user && state?.id === user.id;
       if (isCurrentUserUpdated) {
-        return {
-          ...state,
-          ...payload.user,
-        };
+        return { ...state, ...user };
       }
       return state;
+    })
+    .addCase(Dashboards.actionTypes.UPDATE, (state, { payload }) => {
+      const { dashboard } = payload;
+      if (
+        state != null &&
+        state.custom_homepage?.dashboard_id === dashboard.id &&
+        dashboard.archived
+      ) {
+        state.custom_homepage = null;
+      }
     });
 });

@@ -2,8 +2,9 @@
   (:require
    [clojure.set :as set]
    [clojure.string :as str]
-   [metabase.db :as mdb]
-   [metabase.models]
+   [metabase.app-db.core :as mdb]
+   [metabase.collections.models.collection :as collection]
+   [metabase.models.resolution :as models.resolution]
    [metabase.models.serialization :as serdes]
    [metabase.util :as u]
    [metabase.util.i18n :refer [trs]]
@@ -12,14 +13,14 @@
 
 (set! *warn-on-reflection* true)
 
-;;; make sure all the models get loaded up so we can resolve them based on their table names.
-;;;
-;;; TODO -- what about enterprise models that have `entity_id`? Don't know of any yet. We'll have to cross that bridge
-;;; when we get there.
-(comment metabase.models/keep-me)
+(def ^:private ignored-entity-id-table-names
+  "Legacy (V1) Metrics are no longer supported, and all their code has been removed. However the Tables are still in the
+  app DB (for now)... ignore them."
+  #{"metric" "METRIC" "metric_important_field" "METRIC_IMPORTANT_FIELD"})
 
 (defn- entity-id-table-names
-  "Return a set of lower-cased names of all application database tables that have an `entity_id` column, excluding views."
+  "Return a set of lower-cased names of all application database tables that have an `entity_id` column, excluding
+  views."
   []
   (with-open [conn (.getConnection (mdb/app-db))]
     (let [dbmeta (.getMetaData conn)]
@@ -29,13 +30,13 @@
                                                              :h2                "ENTITY_ID"
                                                              (:mysql :postgres) "entity_id"))]
             (let [entity-id-tables (into #{} (map (comp u/lower-case-en :table_name)) (resultset-seq rset))]
-              (set/intersection non-view-tables entity-id-tables))))))))
+              (-> (set/intersection non-view-tables entity-id-tables)
+                  (set/difference ignored-entity-id-table-names)))))))))
 
 (defn toucan-models
   "Return a list of all toucan models."
   []
-  (->> (descendants :metabase/model)
-       (filter #(= (namespace %) "model"))))
+  (keys models.resolution/model->namespace))
 
 (defn- make-table-name->model
   "Create a map of (lower-cased) application DB table name -> corresponding Toucan model."
@@ -46,7 +47,7 @@
               :when table-name
               ;; ignore any models defined in test namespaces.
               :when (not (str/includes? (namespace model) "test"))]
-         [table-name model])))
+          [table-name model])))
 
 (defn- entity-id-models
   "Return a set of all Toucan models that have an `entity_id` column."
@@ -56,19 +57,21 @@
         entity-id-table-name->model (into {}
                                           (map (fn [table-name]
                                                  (if-let [model (table-name->model table-name)]
-                                                  [table-name model]
-                                                  (throw (ex-info (trs "Model not found for table {0}" table-name)
-                                                                  {:table-name table-name})))))
+                                                   [table-name model]
+                                                   (throw (ex-info (trs "Model not found for table {0}" table-name)
+                                                                   {:table-name table-name
+                                                                    :error      ::model-not-found})))))
                                           entity-id-table-names)
         entity-id-models            (set (vals entity-id-table-name->model))]
-    ;; make sure we've resolved all of the tables that have entity_id to their corresponding models.
+    ;; make sure we've resolved all the tables that have entity_id to their corresponding models.
     (when-not (= (count entity-id-table-names)
                  (count entity-id-models))
       (throw (ex-info (trs "{0} tables have entity_id; expected to resolve the same number of models, but only got {1}"
                            (count entity-id-table-names)
                            (count entity-id-models))
                       {:tables   entity-id-table-names
-                       :resolved entity-id-table-name->model})))
+                       :resolved entity-id-table-name->model
+                       :error    ::mismatched-model-count})))
     (set entity-id-models)))
 
 (defn- seed-entity-id-for-instance! [model instance]
@@ -78,8 +81,10 @@
       (when-not (some? pk-value)
         (throw (ex-info (format "Missing value for primary key column %s" (pr-str primary-key))
                         {:model       (name model)
+                         :table       (t2/table-name model)
                          :instance    instance
-                         :primary-key primary-key})))
+                         :primary-key primary-key
+                         :error       ::missing-pk})))
       (let [new-hash (serdes/identity-hash instance)]
         (log/infof "Update %s %s entity ID => %s" (name model) (pr-str pk-value) (pr-str new-hash))
         (t2/update! model pk-value {:entity_id new-hash}))
@@ -122,10 +127,15 @@
                                (entity-id-models))]
     (zero? error-count)))
 
+(defn- drop-entity-id-conditions-for-model [model]
+  (case model
+    :model/Collection {:id [:not= (collection/trash-collection-id)]}
+    {}))
+
 (defn- drop-entity-ids-for-model! [model]
   (log/infof "Dropping Entity IDs for model %s" (name model))
   (try
-    (let [update-count (t2/update! model {:entity_id nil})]
+    (let [update-count (t2/update! model (drop-entity-id-conditions-for-model model) {:entity_id nil})]
       (when (pos? update-count)
         (log/infof "Updated %d %s instance(s) successfully." update-count (name model)))
       {:update-count update-count})

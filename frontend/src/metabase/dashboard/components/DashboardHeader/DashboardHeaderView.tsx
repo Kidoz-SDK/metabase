@@ -1,101 +1,99 @@
 import cx from "classnames";
-import type { Location } from "history";
-import type * as React from "react";
-import { useState, useRef, useMemo, useCallback, useEffect } from "react";
-import { t } from "ttag";
+import type { JSX } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import EditBar from "metabase/components/EditBar";
+import { isInstanceAnalyticsCollection } from "metabase/collections/utils";
+import EditBar from "metabase/common/components/EditBar";
+import LastEditInfoLabel from "metabase/common/components/LastEditInfoLabel";
 import CS from "metabase/css/core/index.css";
-import { updateDashboard } from "metabase/dashboard/actions";
 import {
+  applyDraftParameterValues,
+  resetParameters,
+} from "metabase/dashboard/actions";
+import { DashboardHeaderButtonRow } from "metabase/dashboard/components/DashboardHeader/DashboardHeaderButtonRow/DashboardHeaderButtonRow";
+import { useDashboardContext } from "metabase/dashboard/context";
+import {
+  getCanResetFilters,
+  getIsEditing,
   getIsHeaderVisible,
+  getIsShowDashboardInfoSidebar,
+  getIsShowDashboardSettingsSidebar,
   getIsSidebarOpen,
 } from "metabase/dashboard/selectors";
-import { color } from "metabase/lib/colors";
 import { useDispatch, useSelector } from "metabase/lib/redux";
-import { PLUGIN_COLLECTION_COMPONENTS } from "metabase/plugins";
-import type { Collection, Dashboard } from "metabase-types/api";
-
 import {
-  EditWarning,
-  HeaderRow,
-  HeaderBadges,
-  HeaderContent,
-  HeaderButtonsContainer,
-  HeaderButtonSection,
-  HeaderLastEditInfoLabel,
-  HeaderCaption,
-  HeaderCaptionContainer,
-  HeaderFixedWidthContainer,
-  HeaderContainer,
-} from "../../components/DashboardHeaderView.styled";
-import { DashboardTabs } from "../../components/DashboardTabs/DashboardTabs";
+  PLUGIN_COLLECTION_COMPONENTS,
+  PLUGIN_MODERATION,
+} from "metabase/plugins";
+import { getIsNavbarOpen } from "metabase/selectors/app";
+import { FullWidthContainer } from "metabase/styled-components/layout/FullWidthContainer";
+import { Box, Flex } from "metabase/ui";
+import type { Collection, Dashboard as IDashboard } from "metabase-types/api";
 
-interface DashboardHeaderViewProps {
+import { Dashboard } from "../Dashboard";
+import { FixedWidthContainer } from "../Dashboard/DashboardComponents";
+import { SIDEBAR_WIDTH } from "../Sidebar";
+
+import S from "./DashboardHeaderView.module.css";
+
+type DashboardHeaderViewProps = {
   editingTitle?: string;
-  editingSubtitle?: string;
   editingButtons?: JSX.Element[];
   editWarning?: string;
-  headerButtons?: React.ReactNode[];
-  headerClassName: string;
-  location: Location;
-  isEditing: boolean;
-  isEditingInfo: boolean;
-  isNavBarOpen: boolean;
-  dashboard: Dashboard;
-  collection: Collection;
+  dashboard: IDashboard;
+  collection: Collection | undefined;
   isBadgeVisible: boolean;
   isLastEditInfoVisible: boolean;
-  onLastEditInfoClick: () => void;
-  setDashboardAttribute: <Key extends keyof Dashboard>(
-    key: Key,
-    value: Dashboard[Key],
-  ) => void;
-}
+  onLastEditInfoClick?: () => void;
+};
 
-export function DashboardHeaderComponent({
+export function DashboardHeaderView({
   editingTitle = "",
-  editingSubtitle = "",
   editingButtons = [],
   editWarning,
-  headerButtons = [],
-  headerClassName = cx(CS.py1, CS.lgPy2, CS.xlPy3, CS.wrapper),
-  location,
-  isEditing,
-  isNavBarOpen,
   dashboard,
   collection,
   isLastEditInfoVisible,
   onLastEditInfoClick,
-  setDashboardAttribute,
 }: DashboardHeaderViewProps) {
+  const { titled } = useDashboardContext();
+
+  const isNavBarOpen = useSelector(getIsNavbarOpen);
+  const isEditing = useSelector(getIsEditing);
+
   const [showSubHeader, setShowSubHeader] = useState(true);
   const header = useRef<HTMLDivElement>(null);
   const dispatch = useDispatch();
 
+  const canResetFilters = useSelector(getCanResetFilters);
   const isSidebarOpen = useSelector(getIsSidebarOpen);
+  const isInfoSidebarOpen = useSelector(getIsShowDashboardInfoSidebar);
+  const isSettingsSidebarOpen = useSelector(getIsShowDashboardSettingsSidebar);
+
   const isDashboardHeaderVisible = useSelector(getIsHeaderVisible);
+
+  const isAnalyticsDashboard = isInstanceAnalyticsCollection(collection);
+
+  const handleResetFilters = useCallback(async () => {
+    await dispatch(resetParameters());
+    await dispatch(applyDraftParameterValues());
+  }, [dispatch]);
 
   const _headerButtons = useMemo(
     () => (
-      <HeaderButtonSection
-        className="Header-buttonSection"
-        isNavBarOpen={isNavBarOpen}
+      <Flex
+        className={cx("Header-buttonSection", S.HeaderButtonSection, {
+          [S.isNavBarOpen]: isNavBarOpen,
+        })}
       >
-        {headerButtons}
-      </HeaderButtonSection>
+        <DashboardHeaderButtonRow
+          canResetFilters={canResetFilters}
+          onResetFilters={handleResetFilters}
+          isAnalyticsDashboard={isAnalyticsDashboard}
+        />
+      </Flex>
     ),
-    [headerButtons, isNavBarOpen],
-  );
-
-  const handleUpdateCaption = useCallback(
-    async (name: string) => {
-      await setDashboardAttribute("name", name);
-      if (!isEditing) {
-        await dispatch(updateDashboard({ attributeNames: ["name"] }));
-      }
-    },
-    [setDashboardAttribute, isEditing, dispatch],
+    [canResetFilters, handleResetFilters, isAnalyticsDashboard, isNavBarOpen],
   );
 
   useEffect(() => {
@@ -109,84 +107,101 @@ export function DashboardHeaderComponent({
 
   return (
     <div>
-      {isEditing && (
-        <EditBar
-          title={editingTitle}
-          subtitle={editingSubtitle}
-          buttons={editingButtons}
-        />
-      )}
+      {isEditing && <EditBar title={editingTitle} buttons={editingButtons} />}
       {editWarning && (
-        <EditWarning className={CS.wrapper}>
+        <Flex className={cx(CS.wrapper, S.EditWarning)}>
           <span>{editWarning}</span>
-        </EditWarning>
+        </Flex>
       )}
-      <HeaderContainer
-        isFixedWidth={dashboard?.width === "fixed"}
-        isSidebarOpen={isSidebarOpen}
+      <div
+        className={cx(S.HeaderContainer, {
+          [S.isFixedWidth]: dashboard?.width === "fixed",
+          [S.offsetSidebar]:
+            isSidebarOpen && !isInfoSidebarOpen && !isSettingsSidebarOpen,
+        })}
+        style={
+          {
+            "--sidebar-width": `${SIDEBAR_WIDTH}px`,
+          } as React.CSSProperties
+        }
       >
         {isDashboardHeaderVisible && (
-          <HeaderRow
-            className={cx("QueryBuilder-section", headerClassName)}
+          <FullWidthContainer
+            className={cx(CS.wrapper, S.HeaderRow)}
             data-testid="dashboard-header"
             ref={header}
           >
-            <HeaderFixedWidthContainer
+            <FixedWidthContainer
+              className={cx(S.HeaderFixedWidthContainer, {
+                [S.isNavBarOpen]: isNavBarOpen,
+              })}
               data-testid="fixed-width-dashboard-header"
-              isNavBarOpen={isNavBarOpen}
               isFixedWidth={dashboard?.width === "fixed"}
             >
-              <HeaderContent
-                role="heading"
-                hasSubHeader
-                showSubHeader={showSubHeader}
-              >
-                <HeaderCaptionContainer>
-                  <HeaderCaption
-                    key={dashboard.name}
-                    initialValue={dashboard.name}
-                    placeholder={t`Add title`}
-                    isDisabled={!dashboard.can_write}
-                    data-testid="dashboard-name-heading"
-                    onChange={handleUpdateCaption}
-                  />
-                  <PLUGIN_COLLECTION_COMPONENTS.CollectionInstanceAnalyticsIcon
-                    color={color("brand")}
-                    collection={collection}
-                    entity="dashboard"
-                  />
-                </HeaderCaptionContainer>
-                <HeaderBadges>
-                  {isLastEditInfoVisible && (
-                    <HeaderLastEditInfoLabel
-                      item={dashboard}
-                      onClick={onLastEditInfoClick}
-                      className=""
-                    />
-                  )}
-                </HeaderBadges>
-              </HeaderContent>
+              {titled && (
+                <Box
+                  role="heading"
+                  className={cx(S.HeaderContent, {
+                    [S.showSubHeader]: showSubHeader,
+                  })}
+                >
+                  <Flex className={S.HeaderCaptionContainer} gap={2}>
+                    <Dashboard.Title className={S.HeaderCaption} />
 
-              <HeaderButtonsContainer isNavBarOpen={isNavBarOpen}>
+                    <Flex
+                      align="center"
+                      flex="0 0 auto"
+                      gap="sm"
+                      pos="relative"
+                      // intentionally misaligned: https://github.com/metabase/metabase/pull/63871#pullrequestreview-3259596723
+                      top={2}
+                    >
+                      <PLUGIN_MODERATION.EntityModerationIcon
+                        moderationReviews={dashboard.moderation_reviews}
+                      />
+                      {!!collection && (
+                        <PLUGIN_COLLECTION_COMPONENTS.CollectionInstanceAnalyticsIcon
+                          color="brand"
+                          collection={collection}
+                          entity="dashboard"
+                        />
+                      )}
+                    </Flex>
+                  </Flex>
+                  <Flex className={S.HeaderBadges}>
+                    {isLastEditInfoVisible && (
+                      <LastEditInfoLabel
+                        className={S.HeaderLastEditInfoLabel}
+                        item={dashboard}
+                        onClick={onLastEditInfoClick}
+                      />
+                    )}
+                  </Flex>
+                </Box>
+              )}
+
+              <Flex
+                className={cx(S.HeaderButtonsContainer, {
+                  [S.isNavBarOpen]: isNavBarOpen,
+                })}
+              >
                 {_headerButtons}
-              </HeaderButtonsContainer>
-            </HeaderFixedWidthContainer>
-          </HeaderRow>
+              </Flex>
+            </FixedWidthContainer>
+          </FullWidthContainer>
         )}
-        <HeaderRow>
-          <HeaderFixedWidthContainer
+        <FullWidthContainer className={S.HeaderRow}>
+          <FixedWidthContainer
+            className={cx(S.HeaderFixedWidthContainer, {
+              [S.isNavBarOpen]: isNavBarOpen,
+            })}
             data-testid="fixed-width-dashboard-tabs"
-            isNavBarOpen={isNavBarOpen}
             isFixedWidth={dashboard?.width === "fixed"}
           >
-            <DashboardTabs
-              dashboardId={dashboard.id}
-              location={location}
-              isEditing={isEditing}
-            />
-          </HeaderFixedWidthContainer>
-        </HeaderRow>
-      </HeaderContainer>
+            <Dashboard.Tabs />
+          </FixedWidthContainer>
+        </FullWidthContainer>
+      </div>
     </div>
   );
 }

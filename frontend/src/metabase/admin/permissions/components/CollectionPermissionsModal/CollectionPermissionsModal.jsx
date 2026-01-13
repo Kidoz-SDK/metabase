@@ -1,35 +1,35 @@
 import PropTypes from "prop-types";
-import { useEffect, useCallback } from "react";
-import { connect } from "react-redux";
+import { useCallback, useEffect } from "react";
 import { t } from "ttag";
 import _ from "underscore";
 
 import { isPersonalCollectionChild } from "metabase/collections/utils";
-import ModalContent from "metabase/components/ModalContent";
-import Button from "metabase/core/components/Button";
-import Link from "metabase/core/components/Link";
+import Button from "metabase/common/components/Button";
+import Link from "metabase/common/components/Link";
+import ModalContent from "metabase/common/components/ModalContent";
 import CS from "metabase/css/core/index.css";
-import Collections from "metabase/entities/collections";
-import Groups from "metabase/entities/groups";
+import { Collections } from "metabase/entities/collections";
+import { Groups } from "metabase/entities/groups";
+import { connect, useSelector } from "metabase/lib/redux";
 import * as Urls from "metabase/lib/urls";
 
 import {
   initializeCollectionPermissions,
-  updateCollectionPermission,
   saveCollectionPermissions,
+  updateCollectionPermission,
 } from "../../permissions";
 import {
-  getIsDirty,
-  getCollectionsPermissionEditor,
   collectionsQuery,
   getCollectionEntity,
+  getCollectionsPermissionEditor,
+  getIsDirty,
 } from "../../selectors/collection-permissions";
 import { permissionEditorPropTypes } from "../PermissionsEditor";
 import { PermissionsTable } from "../PermissionsTable";
 
 import { PermissionTableContainer } from "./CollectionPermissionsModal.styled";
 
-const getDefaultTitle = namespace =>
+const getDefaultTitle = (namespace) =>
   namespace === "snippets"
     ? t`Permissions for this folder`
     : t`Permissions for this collection`;
@@ -82,6 +82,9 @@ const CollectionPermissionsModal = ({
   updateCollectionPermission,
   saveCollectionPermissions,
 }) => {
+  const originalPermissionsState = useSelector(
+    ({ admin }) => admin.permissions.originalCollectionPermissions,
+  );
   useEffect(() => {
     initialize(namespace);
   }, [initialize, namespace]);
@@ -114,9 +117,10 @@ const CollectionPermissionsModal = ({
         collection,
         value,
         shouldPropagate: toggleState,
+        originalPermissionsState,
       });
     },
-    [collection, updateCollectionPermission],
+    [collection, updateCollectionPermission, originalPermissionsState],
   );
 
   return (

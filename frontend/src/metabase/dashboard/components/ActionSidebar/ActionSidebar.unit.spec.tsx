@@ -1,5 +1,4 @@
 import userEvent from "@testing-library/user-event";
-import type * as React from "react";
 
 import {
   setupActionsEndpoints,
@@ -8,19 +7,21 @@ import {
   setupSearchEndpoints,
 } from "__support__/server-mocks";
 import {
+  renderWithProviders,
   screen,
   waitFor,
-  renderWithProviders,
   waitForLoaderToBeRemoved,
 } from "__support__/ui";
+import { MockDashboardContext } from "metabase/public/containers/PublicOrEmbeddedDashboard/mock-context";
+import type { DashCardId } from "metabase-types/api";
 import {
-  createMockDashboard,
   createMockActionDashboardCard,
-  createMockDashboardCard,
-  createMockQueryAction,
   createMockCard,
-  createMockDatabase,
   createMockCollectionItem,
+  createMockDashboard,
+  createMockDashboardCard,
+  createMockDatabase,
+  createMockQueryAction,
 } from "metabase-types/api/mocks";
 
 import { ActionSidebar } from "./ActionSidebar";
@@ -43,9 +44,11 @@ const dashboard = createMockDashboard({
   dashcards: [dashcard, actionDashcard, actionDashcardWithAction],
 });
 
-const setup = (
-  options?: Partial<React.ComponentProps<typeof ActionSidebar>>,
-) => {
+const setup = ({
+  dashcardId = actionDashcard.id,
+}: {
+  dashcardId?: DashCardId;
+} = {}) => {
   setupDatabasesEndpoints([actionsDatabase]);
   setupSearchEndpoints([collectionItem]);
   setupActionsEndpoints([]);
@@ -55,13 +58,18 @@ const setup = (
   const closeSpy = jest.fn();
 
   renderWithProviders(
-    <ActionSidebar
-      onUpdateVisualizationSettings={vizUpdateSpy}
-      onClose={closeSpy}
+    <MockDashboardContext
+      dashboardId={dashboard.id}
       dashboard={dashboard}
-      dashcardId={actionDashcard.id}
-      {...options}
-    />,
+      sidebar={{
+        props: { dashcardId },
+      }}
+      onUpdateDashCardVisualizationSettings={vizUpdateSpy as any}
+      closeSidebar={closeSpy}
+      navigateToNewCardFromDashboard={null}
+    >
+      <ActionSidebar />
+    </MockDashboardContext>,
   );
 
   return { vizUpdateSpy, closeSpy };
@@ -69,6 +77,7 @@ const setup = (
 
 const navigateToActionCreatorModal = async () => {
   await userEvent.click(screen.getByText("Pick an action"));
+  await screen.findByTestId("action-dashcard-settings");
   await waitForLoaderToBeRemoved();
   await userEvent.click(screen.getByText(collectionItem.name));
   await userEvent.click(screen.getByText("Create new action"));
@@ -96,7 +105,9 @@ describe("Dashboard > ActionSidebar", () => {
     await userEvent.type(textInput, "xyz");
 
     await waitFor(() =>
-      expect(vizUpdateSpy).toHaveBeenLastCalledWith({ "button.label": "xyz" }),
+      expect(vizUpdateSpy).toHaveBeenLastCalledWith(actionDashcard.id, {
+        "button.label": "xyz",
+      }),
     );
   });
 
@@ -105,12 +116,12 @@ describe("Dashboard > ActionSidebar", () => {
 
     const dropdown = screen.getByLabelText("Button variant");
 
-    expect(screen.getByText("Primary")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Primary")).toBeInTheDocument();
     await userEvent.click(dropdown);
     await userEvent.click(screen.getByText("Danger"));
 
     await waitFor(() =>
-      expect(vizUpdateSpy).toHaveBeenLastCalledWith({
+      expect(vizUpdateSpy).toHaveBeenLastCalledWith(actionDashcard.id, {
         "button.variant": "danger",
       }),
     );
@@ -153,9 +164,11 @@ describe("Dashboard > ActionSidebar", () => {
 
       await userEvent.click(cancelButton);
 
-      expect(
-        screen.queryByTestId("mock-native-query-editor"),
-      ).not.toBeInTheDocument();
+      await waitFor(() =>
+        expect(
+          screen.queryByTestId("mock-native-query-editor"),
+        ).not.toBeInTheDocument(),
+      );
     });
   });
 });

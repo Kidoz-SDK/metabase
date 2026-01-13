@@ -93,7 +93,7 @@
              (let [some-pred? (constantly true)]
                (lib.util.match/match another-query
                  :field
-                 (when some-pred?
+                 (when (some-pred? &match)
                    &match)))))))
 
 (t/deftest ^:parallel match-&parents-test
@@ -197,8 +197,8 @@
                          [:field "Wow" {:base-type :type/*}]]
               :fields   [[:field 40 {:source-field 30}]]}
              (lib.util.match/replace-in a-query [:breakout]
-                                        [:field (id :guard integer?) nil]
-                                        [:field id {:temporal-unit :day}])))))
+               [:field (id :guard integer?) nil]
+               [:field id {:temporal-unit :day}])))))
 
 (t/deftest ^:parallel replace-multiple-patterns-test
   (t/testing "can we use multiple patterns at the same time?!"
@@ -207,11 +207,11 @@
                          [:field "Wow" {:base-type :type/*, :temporal-unit :month}]]
               :fields   [[:field 40 {:source-field 30}]]}
              (lib.util.match/replace-in a-query [:breakout]
-                                        [:field (id :guard integer?) nil]
-                                        [:field id {:temporal-unit :day}]
+               [:field (id :guard integer?) nil]
+               [:field id {:temporal-unit :day}]
 
-                                        [:field (id :guard string?) opts]
-                                        [:field id (assoc opts :temporal-unit :month)])))))
+               [:field (id :guard string?) opts]
+               [:field id (assoc opts :temporal-unit :month)])))))
 
 (t/deftest ^:parallel replace-field-ids-test
   (t/testing "can we use `replace` to replace the ID of the Field in :field clauses?"
@@ -228,11 +228,11 @@
     (t/is (= {:query {:fields [[:fk-> [:field 1 nil] [:field 2 nil]]
                                [:fk-> [:field 3 nil] [:field 4 nil]]]}}
              (lib.util.match/replace-in
-              {:query {:fields [[:fk-> 1 2]
-                                [:fk-> [:field 3 nil] [:field 4 nil]]]}}
-              [:query :fields]
-              [:fk-> (source :guard integer?) (dest :guard integer?)]
-              [:fk-> [:field source nil] [:field dest nil]])))))
+               {:query {:fields [[:fk-> 1 2]
+                                 [:fk-> [:field 3 nil] [:field 4 nil]]]}}
+               [:query :fields]
+               [:fk-> (source :guard integer?) (dest :guard integer?)]
+               [:fk-> [:field source nil] [:field dest nil]])))))
 
 (t/deftest ^:parallel replace-raw-keyword-patterns-test
   (t/testing "does `replace` accept a raw keyword as the pattern the way `match` does?"
@@ -295,7 +295,7 @@
     (t/is (= [:and nil [:= [:field 100 nil] 20]]
              (lib.util.match/replace [:and
                                       [:=
-                                       [:field "ga:date" {:temporal-unit :day}]
+                                       [:field 1 {:temporal-unit :day}]
                                        [:absolute-datetime #inst "2016-11-08T00:00:00.000-00:00" :day]]
                                       [:= [:field 100 nil] 20]]
                [_ [:field _ (_ :guard :temporal-unit)] & _] nil)))))
@@ -316,3 +316,71 @@
 
                  [:field (id :guard id-is-datetime-field?) opts]
                  [:field id (assoc opts :temporal-unit :day)]))))))
+
+(t/deftest ^:parallel match-lite-test
+  (t/is (= 6 (lib.util.match/match-lite [1 2 3]
+               [a b c] (+ a b c))))
+  (t/is (= 5 (lib.util.match/match-lite [1 :value1 4]
+               [var1 :value1 var2] (+ var1 var2))))
+  (t/is (= [1 2 [3 4 5]] (lib.util.match/match-lite [1 2 3 4 5]
+                           [a b & rest] [a b rest])))
+  (t/is (= 48 (lib.util.match/match-lite [2 4 6]
+                [a (b :guard even?) c] (* a b c))))
+  (t/is (= "matched odd"
+           (lib.util.match/match-lite [1 3 5]
+             [a (b :guard even?) c] "matched even"
+             [a b c] "matched odd")))
+  (t/is (= "fallback: not a vector"
+           (lib.util.match/match-lite "not a vector"
+             x (str "fallback: " x))))
+  ;; Rest with guard
+  (t/is (= "a=1 b=2 rest=(3 4 5)"
+           (lib.util.match/match-lite [1 2 3 4 5]
+             [a b & (rst :guard (> (count rst) 2))] (str "a=" a " b=" b " rest=" rst))))
+
+  (t/testing "Edge cases"
+    (t/testing "Empty collections"
+      (t/is (= :empty-vec (lib.util.match/match-lite []
+                            [] :empty-vec)))
+      (t/is (= :empty-map (lib.util.match/match-lite {}
+                            {} :empty-map))))
+    (t/testing "Nil values"
+      (t/is (= :nil-value (lib.util.match/match-lite nil
+                            nil :nil-value
+                            _ :not-nil))))
+    (t/testing "Boolean values"
+      (t/is (= :true-value (lib.util.match/match-lite true
+                             true :true-value
+                             false :false-value)))
+      (t/is (= :false-value (lib.util.match/match-lite false
+                              true :true-value
+                              false :false-value))))))
+
+(t/deftest ^:parallel same-result-with-different-bindings-test
+  (t/testing "result here should not be treated as a common because it refers to different bindings in branches"
+    (t/is (= 1 (lib.util.match/match-lite [1 2]
+                 [(a :guard (odd? a)) (b :guard (even? b))] (- b a)
+                 [(b :guard (even? b)) (a :guard (odd? a))] (- b a))))))
+
+(t/deftest ^:parallel guard-predicate-test
+  (t/is (= -2 (lib.util.match/match-lite [2]
+                [(a :guard odd?)] a
+                [(b :guard even?)] (- b))))
+  (t/is (= -2 (lib.util.match/match-lite [2]
+                [(a :guard (odd? a))] a
+                [(b :guard (even? b))] (- b))))
+  (t/is (= -2 (lib.util.match/match-lite [2]
+                [(_ :guard odd?)] 1
+                [(_ :guard even?)] -2)))
+  (t/is (= 2 (lib.util.match/match-lite [{:b 2}]
+               [(_ :guard :a)] 1
+               [(_ :guard :b)] 2)))
+  (t/is (= :ok (lib.util.match/match-lite [3]
+                 [(_ :guard #{1 2 3})] :ok)))
+
+  #?(:clj (t/is (thrown? clojure.lang.Compiler$CompilerException
+                         (eval '(lib.util.match/match-lite [1]
+                                  [(a :guard #(odd? %))] a)))))
+  #?(:clj (t/is (thrown? clojure.lang.Compiler$CompilerException
+                         (eval '(lib.util.match/match-lite [1]
+                                  [(a :guard (fn [x] (odd? x)))] a))))))

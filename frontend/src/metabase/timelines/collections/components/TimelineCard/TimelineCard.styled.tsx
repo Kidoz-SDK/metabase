@@ -1,13 +1,14 @@
+// eslint-disable-next-line no-restricted-imports
 import { css } from "@emotion/react";
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
 
-import Link from "metabase/core/components/Link";
-import Markdown from "metabase/core/components/Markdown";
-import { color } from "metabase/lib/colors";
+import Link from "metabase/common/components/Link";
+import Markdown from "metabase/common/components/Markdown";
 import { Icon } from "metabase/ui";
 
 export const CardIcon = styled(Icon)`
-  color: ${color("text-light")};
+  color: var(--mb-color-text-light);
   width: 1.375rem;
   height: 1.375rem;
 `;
@@ -21,7 +22,7 @@ export const CardBody = styled.span`
 
 export const CardTitle = styled.span`
   display: block;
-  color: ${color("text-dark")};
+  color: var(--mb-color-text-dark);
   font-weight: bold;
   margin-bottom: 0.125rem;
   word-wrap: break-word;
@@ -29,19 +30,19 @@ export const CardTitle = styled.span`
 
 export const CardDescription = styled(Markdown)`
   display: block;
-  color: ${color("text-dark")};
+  color: var(--mb-color-text-dark);
   word-wrap: break-word;
 `;
 
-export interface CardCountProps {
+interface CardCountProps {
   isTopAligned?: boolean;
 }
 
 export const CardCount = styled.span<CardCountProps>`
   display: block;
   flex: 0 0 auto;
-  color: ${color("text-dark")};
-  align-self: ${props => (props.isTopAligned ? "flex-start" : "")};
+  color: var(--mb-color-text-dark);
+  align-self: ${(props) => (props.isTopAligned ? "flex-start" : "")};
 `;
 
 export const CardMenu = styled.span`
@@ -51,14 +52,14 @@ export const CardMenu = styled.span`
 
 const cardRootHoverStyles = css`
   &:hover {
-    border-color: ${color("brand")};
+    border-color: var(--mb-color-brand);
 
     ${CardIcon} {
-      color: ${color("brand")};
+      color: var(--mb-color-brand);
     }
 
     ${CardTitle} {
-      color: ${color("brand")};
+      color: var(--mb-color-brand);
     }
   }
 `;
@@ -67,9 +68,9 @@ export const CardRoot = styled(Link)`
   display: flex;
   padding: 1.75rem;
   align-items: center;
-  border: 1px solid ${color("border")};
+  border: 1px solid var(--mb-color-border);
   border-radius: 6px;
-  cursor: ${props => (props.to ? "pointer" : "default")};
+  cursor: ${(props) => (props.to ? "pointer" : "default")};
 
-  ${props => props.to && cardRootHoverStyles}
+  ${(props) => props.to && cardRootHoverStyles}
 `;

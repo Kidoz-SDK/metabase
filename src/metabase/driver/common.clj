@@ -1,13 +1,17 @@
 (ns metabase.driver.common
   "Shared definitions and helper functions for use across different drivers."
+  (:refer-clojure :exclude [get-in])
+  #_{:clj-kondo/ignore [:metabase/modules]}
   (:require
    [clojure.string :as str]
    [metabase.driver :as driver]
-   [metabase.models.setting :as setting]
-   [metabase.public-settings :as public-settings]
+   [metabase.premium-features.core :as premium-features]
+   [metabase.settings.core :as setting]
    [metabase.util.i18n :refer [deferred-tru]]
    [metabase.util.log :as log]
-   [metabase.util.malli :as mu]))
+   [metabase.util.malli :as mu]
+   [metabase.util.performance :refer [get-in]]
+   [metabase.warehouses.core :as warehouses]))
 
 (set! *warn-on-reflection* true)
 
@@ -17,7 +21,7 @@
   "Map of the db host details field, useful for `connection-properties` implementations"
   {:name         "host"
    :display-name (deferred-tru "Host")
-   :helper-text  (deferred-tru "Your database's IP address (e.g. 98.137.149.56) or its domain name (e.g. esc.mydatabase.com).")
+   :helper-text  (deferred-tru "Your database''s IP address (e.g. 98.137.149.56) or its domain name (e.g. esc.mydatabase.com).")
    :placeholder  "name.database.com"})
 
 (def default-port-details
@@ -40,6 +44,13 @@
    :display-name (deferred-tru "Password")
    :type         :password
    :placeholder  "••••••••"})
+
+(def default-role-details
+  "Map of the db default role details field, useful for `connection-properties` implementations"
+  {:name         "role"
+   :display-name (deferred-tru "Role (optional, required for connection impersonation)")
+   :helper-text (deferred-tru "Specify a role to override the database user''s default role.")
+   :placeholder (deferred-tru "user")})
 
 (def default-dbname-details
   "Map of the db name details field, useful for `connection-properties` implementations"
@@ -113,12 +124,19 @@
     :placeholder  "******"
     :visible-if   {"tunnel-auth-option" "ssh-key"}}])
 
+(def destination-database-option
+  "Map representing the 'is this a destination database' option"
+  {:name "destination-database"
+   :type :hidden
+   :default false})
+
 (def advanced-options-start
   "Map representing the start of the advanced option section in a DB connection form. Fields in this section should
   have their visibility controlled using the `visible-if` property."
   {:name    "advanced-options"
    :type    :section
-   :default false})
+   :default false
+   :visible-if {"destination-database" false}})
 
 (def auto-run-queries
   "Map representing the `auto-run-queries` option in a DB connection form."
@@ -127,8 +145,8 @@
    :default      true
    :display-name (deferred-tru "Rerun queries for simple explorations")
    :description  (deferred-tru
-                   (str "We execute the underlying query when you explore data using Summarize or Filter. "
-                        "This is on by default but you can turn it off if performance is slow."))
+                  (str "We execute the underlying query when you explore data using Summarize or Filter. "
+                       "This is on by default but you can turn it off if performance is slow."))
    :visible-if   {"advanced-options" true}})
 
 (def let-user-control-scheduling
@@ -145,8 +163,8 @@
   {:name "schedules.metadata_sync"
    :display-name (deferred-tru "Database syncing")
    :description  (deferred-tru
-                   (str "This is a lightweight process that checks for updates to this database’s schema. "
-                        "In most cases, you should be fine leaving this set to sync hourly."))
+                  (str "This is a lightweight process that checks for updates to this database’s schema. "
+                       "In most cases, you should be fine leaving this set to sync hourly."))
    :visible-if   {"let-user-control-scheduling" true}})
 
 (def cache-field-values-schedule
@@ -155,10 +173,10 @@
   {:name "schedules.cache_field_values"
    :display-name (deferred-tru "Scanning for Filter Values")
    :description  (deferred-tru
-                   (str "Metabase can scan the values present in each field in this database to enable checkbox "
-                        "filters in dashboards and questions. This can be a somewhat resource-intensive process, "
-                        "particularly if you have a very large database. When should Metabase automatically scan "
-                        "and cache field values?"))
+                  (str "Metabase can scan the values present in each field in this database to enable checkbox "
+                       "filters in dashboards and questions. This can be a somewhat resource-intensive process, "
+                       "particularly if you have a very large database. When should Metabase automatically scan "
+                       "and cache field values?"))
    :visible-if   {"let-user-control-scheduling" true}})
 
 (def json-unfolding
@@ -168,9 +186,9 @@
    :type         :boolean
    :visible-if   {"advanced-options" true}
    :description  (deferred-tru
-                   (str "This enables unfolding JSON columns into their component fields. "
-                        "Disable unfolding if performance is slow. If enabled, you can still disable unfolding for "
-                        "individual fields in their settings."))
+                  (str "This enables unfolding JSON columns into their component fields. "
+                       "Disable unfolding if performance is slow. If enabled, you can still disable unfolding for "
+                       "individual fields in their settings."))
    :default      true})
 
 (def refingerprint
@@ -179,13 +197,19 @@
    :type         :boolean
    :display-name (deferred-tru "Periodically refingerprint tables")
    :description  (deferred-tru
-                   (str "This enables Metabase to scan for additional field values during syncs allowing smarter "
-                        "behavior, like improved auto-binning on your bar charts."))
+                  (str "This enables Metabase to scan for additional field values during syncs allowing smarter "
+                       "behavior, like improved auto-binning on your bar charts."))
    :visible-if   {"advanced-options" true}})
+
+(def multi-level-schema
+  "Map representing the `multi-level-schema` option for databases. Stores schemas with multiple levels of hierarchy."
+  {:name    "multi-level-schema"
+   :type    :boolean
+   :default false})
 
 (def default-advanced-options
   "Vector containing the three most common options present in the advanced option section of the DB connection form."
-  [auto-run-queries let-user-control-scheduling metadata-sync-schedule cache-field-values-schedule refingerprint])
+  [destination-database-option auto-run-queries let-user-control-scheduling metadata-sync-schedule cache-field-values-schedule refingerprint])
 
 (def default-options
   "Default options listed above, keyed by name. These keys can be listed in the plugin manifest to specify connection
@@ -204,6 +228,7 @@
    :ssl                      default-ssl-details
    :user                     default-user-details
    :ssh-tunnel               ssh-tunnel-preferences
+   :multi-level-schema       multi-level-schema
    :additional-options       additional-options
    :advanced-options-start   advanced-options-start
    :default-advanced-options default-advanced-options})
@@ -214,10 +239,10 @@
   {:name   "cloud-ip-address-info"
    :type   :info
    :getter (fn []
-             (when-let [ips (public-settings/cloud-gateway-ips)]
+             (when-let [ips (warehouses/cloud-gateway-ips)]
                (str (deferred-tru
-                      (str "If your database is behind a firewall, you may need to allow connections from our Metabase "
-                           "[Cloud IP addresses](https://www.metabase.com/cloud/docs/ip-addresses-to-whitelist.html):"))
+                     (str "If your database is behind a firewall, you may need to allow connections from our Metabase "
+                          "[Cloud IP addresses](https://www.metabase.com/cloud/docs/ip-addresses-to-whitelist.html):"))
                     "\n"
                     (str/join " - " ips))))})
 
@@ -226,6 +251,50 @@
   added to the plugin manifest as connection properties, similar to the keys in the `default-options` map."
   {:cloud-ip-address-info cloud-ip-address-info})
 
+(defn auth-provider-options
+  "Options for using an auth provider instead of a literal password.
+  When called with no arguments, returns options for all available auth providers.
+  When called with a collection of provider keywords (e.g., #{:aws-iam}), returns options
+  filtered to only those providers."
+  ([]
+   (auth-provider-options nil))
+  ([allowed-providers]
+   (let [all-provider-options [{:name (deferred-tru "Azure Managed Identity")
+                                :value "azure-managed-identity"}
+                               {:name (deferred-tru "AWS IAM")
+                                :value "aws-iam"}
+                               {:name (deferred-tru "OAuth")
+                                :value "oauth"}]
+         provider-options (if (seq allowed-providers)
+                            (let [allowed-set (set (map name allowed-providers))]
+                              (filterv #(contains? allowed-set (:value %)) all-provider-options))
+                            all-provider-options)
+         default-provider (:value (first provider-options))]
+     [{:name "use-auth-provider"
+       :type :checked-section
+       :check (fn []
+                (and
+                  ;; Managed Identities only make sense if Metabase is in the same cloud as the DW
+                 (not (premium-features/is-hosted?))
+                 (premium-features/enable-database-auth-providers?)))
+       :default false}
+      {:name "auth-provider"
+       :display-name (deferred-tru "Auth provider")
+       :type :select
+       :options provider-options
+       :default default-provider
+       :visible-if {"use-auth-provider" true}}
+      {:name "azure-managed-identity-client-id"
+       :display-name (deferred-tru "Client ID")
+       :required true
+       :visible-if {"auth-provider" "azure-managed-identity"}}
+      {:name "oauth-token-url"
+       :display-name (deferred-tru "Auth token URL")
+       :required true
+       :visible-if {"auth-provider" "oauth"}}
+      {:name "oauth-token-headers"
+       :display-name (deferred-tru "Auth token request headers (a JSON map)")
+       :visible-if {"auth-provider" "oauth"}}])))
 
 ;;; +----------------------------------------------------------------------------------------------------------------+
 ;;; |                                               Class -> Base Type                                               |
@@ -258,7 +327,7 @@
     ;; `OffsetTime` and `OffsetDateTime` should be mapped to one of `type/TimeWithLocalTZ`/`type/TimeWithZoneOffset`
     ;; and `type/DateTimeWithLocalTZ`/`type/DateTimeWithZoneOffset` respectively. We can't really tell how they're
     ;; stored in the DB based on class alone, so drivers should return more specific types where possible. See
-    ;; discussion in the `metabase.types` namespace.
+    ;; discussion in the [[metabase.types.core]] namespace.
     java.time.OffsetTime           :type/TimeWithTZ
     java.time.OffsetDateTime       :type/DateTimeWithTZ
     java.time.ZonedDateTime        :type/DateTimeWithZoneID
@@ -296,22 +365,21 @@
   [:monday :tuesday :wednesday :thursday :friday :saturday :sunday])
 
 (def ^:dynamic *start-of-week*
-  "Used to override the [[metabase.public-settings/start-of-week]] settings.
+  "Used to override the [[metabase.lib-be.core/start-of-week]] settings.
   Primarily being used to calculate week-of-year in US modes where the start-of-week is always Sunday.
   More in (defmethod date [:sql :week-of-year-us])."
   nil)
 
 (mu/defn start-of-week->int :- [:int {:min 0, :max 6, :error/message "Start of week integer"}]
-  "Returns the int value for the current [[metabase.public-settings/start-of-week]] Setting value, which ranges from
-  `0` (`:monday`) to `6` (`:sunday`). This is guaranteed to return a value."
-  {:added "0.42.0"}
+  "Returns the int value for the current [[metabase.lib-be.core/start-of-week]] Setting value, which
+  ranges from `0` (`:monday`) to `6` (`:sunday`). This is guaranteed to return a value." {:added "0.42.0"}
   []
   (.indexOf days-of-week (or *start-of-week* (setting/get-value-of-type :keyword :start-of-week))))
 
 (defn start-of-week-offset-for-day
   "Like [[start-of-week-offset]] but takes a `start-of-week` keyword like `:sunday` rather than ` driver`. Returns the
   offset (as a negative number) needed to adjust a day of week in the range 1..7 with `start-of-week` as one to a day
-  of week in the range 1..7 with [[metabase.public-settings/start-of-week]] as 1."
+  of week in the range 1..7 with [[metabase.lib-be.core/start-of-week]] as 1."
   [start-of-week]
   (let [db-start-of-week     (.indexOf days-of-week start-of-week)
         target-start-of-week (start-of-week->int)
@@ -321,13 +389,13 @@
 
 (mu/defn start-of-week-offset :- :int
   "Return the offset needed to adjust a day of the week (in the range 1..7) returned by the `driver`, with `1`
-  corresponding to [[driver/db-start-of-week]], so that `1` corresponds to [[metabase.public-settings/start-of-week]] in
+  corresponding to [[driver/db-start-of-week]], so that `1` corresponds to [[metabase.lib-be.core/start-of-week]] in
   results.
 
   e.g.
 
   If `:my-driver` returns [[driver/db-start-of-week]] as `:sunday` (1 is Sunday, 2 is Monday, and so forth),
-  and [[metabase.public-settings/start-of-week]] is `:monday` (the results should have 1 as Monday, 2 as Tuesday... 7 is
+  and [[metabase.lib-be.core/start-of-week]] is `:monday` (the results should have 1 as Monday, 2 as Tuesday... 7 is
   Sunday), then the offset should be `-1`, because `:monday` returned by the driver (`2`) minus `1` = `1`."
   [driver]
   (start-of-week-offset-for-day (driver/db-start-of-week driver)))

@@ -1,12 +1,14 @@
 import { assocIn } from "icepick";
+import { t } from "ttag";
 
-import * as MetabaseAnalytics from "metabase/lib/analytics";
+import { getErrorMessage } from "metabase/api/utils";
 import {
+  combineReducers,
   createAction,
   createThunkAction,
   handleActions,
-  combineReducers,
 } from "metabase/lib/redux";
+import { addUndo } from "metabase/redux/undo";
 
 import { ApplicationPermissionsApi } from "./api";
 
@@ -14,7 +16,7 @@ const INITIALIZE_APPLICATION_PERMISSIONS =
   "metabase-enterprise/general-permissions/INITIALIZE_APPLICATION_PERMISSIONS";
 export const initializeApplicationPermissions = createThunkAction(
   INITIALIZE_APPLICATION_PERMISSIONS,
-  () => async dispatch => {
+  () => async (dispatch) => {
     dispatch(loadApplicationPermissions());
   },
 );
@@ -33,7 +35,6 @@ const UPDATE_APPLICATION_PERMISSION =
 export const updateApplicationPermission = createAction(
   UPDATE_APPLICATION_PERMISSION,
   ({ groupId, permission, value }) => {
-    MetabaseAnalytics.trackStructEvent("General Permissions", "save");
     return {
       groupId,
       permission: permission.permission,
@@ -46,15 +47,20 @@ const SAVE_APPLICATION_PERMISSIONS =
   "metabase-enterprise/general-permissions/data/SAVE_APPLICATION_PERMISSIONS";
 export const saveApplicationPermissions = createThunkAction(
   SAVE_APPLICATION_PERMISSIONS,
-  () => async (_dispatch, getState) => {
-    MetabaseAnalytics.trackStructEvent("General Permissions", "save");
-
+  () => async (dispatch, getState) => {
     const { applicationPermissions, applicationPermissionsRevision } =
       getState().plugins.applicationPermissionsPlugin;
 
     const result = await ApplicationPermissionsApi.updateGraph({
       groups: applicationPermissions,
       revision: applicationPermissionsRevision,
+    }).catch((error) => {
+      dispatch(
+        addUndo({
+          icon: "warning",
+          message: getErrorMessage(error, t`Error saving permissions`),
+        }),
+      );
     });
 
     return result;

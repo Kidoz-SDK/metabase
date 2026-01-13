@@ -1,19 +1,21 @@
-import type { ComponentStory } from "@storybook/react";
+import type { StoryFn } from "@storybook/react";
 
 import {
   createMockEngine,
   createMockEngineSource,
 } from "metabase-types/api/mocks";
 
-import DatabaseEngineWarning from "./DatabaseEngineWarning";
+import DatabaseEngineWarning, {
+  type DatabaseEngineWarningProps,
+} from "./DatabaseEngineWarning";
 
 export default {
-  title: "Databases/DatabaseEngineWarning",
+  title: "App/Databases/DatabaseEngineWarning",
   component: DatabaseEngineWarning,
   argTypes: { onChange: { action: "onChange" } },
 };
 
-const Template: ComponentStory<typeof DatabaseEngineWarning> = args => {
+const Template: StoryFn<DatabaseEngineWarningProps> = (args) => {
   return <DatabaseEngineWarning {...args} />;
 };
 Template.args = {
@@ -37,39 +39,32 @@ Template.args = {
         type: "community",
       }),
     }),
-    partnerEngine: createMockEngine({
-      "driver-name": "PartnerEngine",
-      source: createMockEngineSource({
-        type: "partner",
-        contact: {
-          name: "Partners Incorporated",
-          address: "https://example.com/contact",
-        },
-      }),
-    }),
   },
 };
 
-export const New = Template.bind({});
-New.args = {
-  engineKey: "presto-jdbc",
-  ...Template.args,
+export const New = {
+  render: Template,
+
+  args: {
+    engineKey: "presto-jdbc",
+    ...Template.args,
+  },
 };
 
-export const Deprecated = Template.bind({});
-Deprecated.args = {
-  engineKey: "presto",
-  ...Template.args,
+export const Deprecated = {
+  render: Template,
+
+  args: {
+    engineKey: "presto",
+    ...Template.args,
+  },
 };
 
-export const Community = Template.bind({});
-Community.args = {
-  engineKey: "communityEngine",
-  ...Template.args,
-};
+export const Community = {
+  render: Template,
 
-export const Partner = Template.bind({});
-Partner.args = {
-  engineKey: "partnerEngine",
-  ...Template.args,
+  args: {
+    engineKey: "communityEngine",
+    ...Template.args,
+  },
 };

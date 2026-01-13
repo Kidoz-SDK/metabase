@@ -1,8 +1,9 @@
-import type { Moment } from "moment-timezone"; // eslint-disable-line no-restricted-imports -- deprecated usage
+import type { Dayjs } from "dayjs";
 import { useCallback } from "react";
 import { t } from "ttag";
 
 import SidebarContent from "metabase/query_builder/components/SidebarContent";
+import type { QueryModalType } from "metabase/query_builder/constants";
 import { MODAL_TYPES } from "metabase/query_builder/constants";
 import TimelinePanel from "metabase/timelines/questions/containers/TimelinePanel";
 import type Question from "metabase-lib/v1/Question";
@@ -13,12 +14,12 @@ export interface TimelineSidebarProps {
   timelines: Timeline[];
   visibleTimelineEventIds: number[];
   selectedTimelineEventIds: number[];
-  xDomain?: [Moment, Moment];
+  xDomain?: [Dayjs, Dayjs];
   onShowTimelineEvents: (timelineEvent: TimelineEvent[]) => void;
   onHideTimelineEvents: (timelineEvent: TimelineEvent[]) => void;
   onSelectTimelineEvents?: (timelineEvents: TimelineEvent[]) => void;
   onDeselectTimelineEvents?: () => void;
-  onOpenModal?: (modal: string, modalContext?: unknown) => void;
+  onOpenModal?: (modal: QueryModalType, modalContext?: unknown) => void;
   onClose?: () => void;
 }
 
@@ -82,13 +83,13 @@ const TimelineSidebar = ({
   );
 };
 
-const formatTitle = (xDomain?: [Moment, Moment]) => {
+const formatTitle = (xDomain?: [Dayjs, Dayjs]) => {
   return xDomain
     ? t`Events between ${formatDate(xDomain[0])} and ${formatDate(xDomain[1])}`
     : t`Events`;
 };
 
-const formatDate = (date: Moment) => {
+const formatDate = (date: Dayjs) => {
   return date.format("ll");
 };
 

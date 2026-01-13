@@ -1,16 +1,13 @@
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
-
-import { color } from "metabase/lib/colors";
-import { Icon } from "metabase/ui";
 
 export const LegendItemRoot = styled.div<{ isVertical: boolean }>`
   display: flex;
   align-items: center;
   min-width: 0;
-  overflow: hidden;
 
   &:not(:first-of-type) {
-    margin-top: ${({ isVertical }) => (isVertical ? "0.5rem" : "")};
+    margin-top: ${({ isVertical }) => (isVertical ? "0.25rem" : "")};
     margin-left: ${({ isVertical }) => (isVertical ? "" : "0.75rem")};
   }
 `;
@@ -18,44 +15,33 @@ export const LegendItemRoot = styled.div<{ isVertical: boolean }>`
 export const LegendItemLabel = styled.div<{ isMuted: boolean }>`
   display: flex;
   align-items: center;
+  width: 100%;
   opacity: ${({ isMuted }) => (isMuted ? "0.4" : "1")};
-  cursor: ${({ onClick }) => (onClick ? "pointer" : "")};
-  overflow: hidden;
   transition: opacity 0.25s linear;
 
   &:hover {
-    color: ${({ onMouseEnter }) => (onMouseEnter ? color("brand") : "")};
+    color: ${({ onMouseEnter }) => onMouseEnter && "var(--mb-color-brand)"};
   }
 `;
 
-export const LegendItemDot = styled.div`
-  flex: 0 0 auto;
-  width: 0.75rem;
-  height: 0.75rem;
-  border-radius: 50%;
-  background-color: ${({ color }) => color};
-  color-adjust: exact;
-`;
+const LEGEND_ITEM_TITLE_MARGIN = 4;
 
-export const LegendItemTitle = styled.div`
-  color: ${color("text-dark")};
-  font-weight: bold;
-  font-size: 12px;
-  margin-left: 4px;
+export const LegendItemTitle = styled.div<{
+  dotSize: string;
+  isInsidePopover?: boolean;
+}>`
+  color: var(--mb-color-text-primary);
+  font-size: 0.928em;
+  font-weight: 700;
+  margin-left: ${LEGEND_ITEM_TITLE_MARGIN}px;
   overflow: hidden;
-`;
-
-export const LegendItemRemoveIcon = styled(Icon)`
-  color: ${color("text-light")};
-  cursor: pointer;
-  margin-left: 0.5rem;
+  cursor: ${({ onClick }) => (onClick ? "pointer" : "")};
+  max-width: ${({ dotSize, isInsidePopover }) =>
+    isInsidePopover
+      ? `calc(100% - ${dotSize}px - ${LEGEND_ITEM_TITLE_MARGIN}px)`
+      : "unset"};
 
   &:hover {
-    color: ${color("text-medium")};
+    color: ${({ onClick }) => onClick && "var(--mb-color-brand)"};
   }
 `;
-
-LegendItemRemoveIcon.defaultProps = {
-  name: "close",
-  size: 12,
-};

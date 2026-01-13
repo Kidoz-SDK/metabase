@@ -2,9 +2,12 @@ import { createSelector } from "@reduxjs/toolkit";
 import { t } from "ttag";
 import _ from "underscore";
 
+import { skipToken, useGetCollectionQuery } from "metabase/api";
 import { canonicalCollectionId } from "metabase/collections/utils";
-import NormalCollections, {
+import {
+  Collections,
   getExpandedCollectionsById,
+  useListQuery as useListCollectionsQuery,
 } from "metabase/entities/collections";
 import { createEntity, undo } from "metabase/lib/entities";
 import { SnippetCollectionSchema } from "metabase/schema";
@@ -12,16 +15,25 @@ import { SnippetCollectionSchema } from "metabase/schema";
 /**
  * @deprecated use "metabase/api" instead
  */
-const SnippetCollections = createEntity({
+export const SnippetCollections = createEntity({
   name: "snippetCollections",
   schema: SnippetCollectionSchema,
 
+  // eslint-disable-next-line ttag/no-module-declaration -- see metabase#55045
   displayNameOne: t`snippet collection`,
+  // eslint-disable-next-line ttag/no-module-declaration -- see metabase#55045
   displayNameMany: t`snippet collections`,
 
+  rtk: {
+    getUseGetQuery: () => ({
+      useGetQuery,
+    }),
+    useListQuery,
+  },
+
   api: _.mapObject(
-    NormalCollections.api,
-    request =>
+    Collections.api,
+    (request) =>
       (opts, ...rest) =>
         request({ ...opts, namespace: "snippets" }, ...rest),
   ),
@@ -46,8 +58,8 @@ const SnippetCollections = createEntity({
 
   selectors: {
     getExpandedCollectionsById: createSelector(
-      state => SnippetCollections.selectors.getList(state) || [],
-      collections => getExpandedCollectionsById(collections, null),
+      (state) => SnippetCollections.selectors.getList(state) || [],
+      (collections) => getExpandedCollectionsById(collections, null),
     ),
   },
 
@@ -56,13 +68,23 @@ const SnippetCollections = createEntity({
       getFetched(state, props) || getObject(state, props),
   }),
 
-  objectSelectors: {
-    getIcon: () => ({ name: "folder" }),
-  },
-
   getAnalyticsMetadata() {
     return undefined; // not tracking
   },
 });
 
-export default SnippetCollections;
+const useGetQuery = (query, options) => {
+  return useGetCollectionQuery(
+    query === skipToken
+      ? skipToken
+      : {
+          namespace: "snippets",
+          ...query,
+        },
+    options,
+  );
+};
+
+function useListQuery(query, options) {
+  return useListCollectionsQuery({ ...query, namespace: "snippets" }, options);
+}

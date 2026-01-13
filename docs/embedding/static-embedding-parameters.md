@@ -1,7 +1,8 @@
 ---
 title: Parameters for static embeds
+summary: Using parameters to customize embedded static questions and dashboards.
 redirect_from:
-- /docs/latest/embedding/signed-embedding-parameters
+  - /docs/latest/embedding/signed-embedding-parameters
 ---
 
 # Parameters for static embeds
@@ -10,16 +11,22 @@ Also known as: parameters for signed embeds, or standalone embeds.
 
 Parameters are pieces of information that are passed between Metabase and your website via the [embedding URL](./static-embedding.md#adding-the-embedding-url-to-your-website). You can use parameters to specify how Metabase items should look and behave inside the iframe on your website.
 
+{% include shared/in-page-promo-embedding-workshop.html %}
+
 ## Types of parameters
 
 Parameters can be signed or unsigned.
 
-**Signed parameters**, such as filter names and values, must be added to your server code.
+### Signed parameters
+
+Signed parameters, such as filter names and values, must be added to your server code.
 
 - [Editable parameters](#adding-a-filter-widget-to-a-static-embed)
-- [Locked parameters](#restricting-data-in-a-static-embed)
+- [Locked parameters](#restricting-data-in-a-static-embed-with-locked-parameters)
 
-**Unsigned parameters**, such as appearance settings, should be added directly to your iframe's `src` attribute.
+### Unsigned parameters
+
+Unsigned parameters, such as appearance settings, should be added directly to your iframe's `src` attribute.
 
 - [Default values for editable parameters](#populating-an-embedded-filter-widget-with-a-default-value)
 - [Visibility settings for editable parameters](#hiding-filter-widgets-from-a-static-embed)
@@ -27,7 +34,7 @@ Parameters can be signed or unsigned.
 
 ## Adding a filter widget to a static embed
 
-You can use **editable parameters** to add [filter widgets](https://www.metabase.com/glossary/filter_widget) to embedded dashboards or SQL questions.
+You can use **editable parameters** to add [filter widgets](https://www.metabase.com/glossary/filter-widget) to embedded dashboards or SQL questions.
 
 1. Go to your dashboard or SQL question. Make sure you've set up a [dashboard filter](../dashboards/filters.md) or [SQL variable](../questions/native-editor/sql-parameters.md).
 2. Click on the **sharing icon** > **Embed this item in an application**.
@@ -40,7 +47,7 @@ Editable parameters are responsible for passing filter values from the embedded 
 
 ### You can't disable parameters when the original question or dashboard requires a value
 
-If the filter on a dashboard or question is set to [Always require a value](../dashboards/filters.md#requiring-a-filter), you won't be able to disable the parameter when embedding.
+If the filter on a dashboard or question is set to [Always require a value](../dashboards/filters.md), you won't be able to disable the parameter when embedding.
 
 ## Populating an embedded filter widget with a default value
 
@@ -50,33 +57,33 @@ If you want to set a default value for your [editable filter widget](#adding-a-f
 your_embedding_url?parameter_name=value
 ```
 
-Let's say your embedded dashboard has a filter connected to an editable parameter called "Breakfast". If you want to set the default value for the "Breakfast" filter to "Scrambled eggs":
+For example, if your embedded dashboard has a filter connected to an editable parameter called "Breakfast", and you want to set the default value to "Hash browns":
 
 ```
-your_embedding_url?breakfast=Scrambled_eggs
+your_embedding_url?breakfast=Hash_browns
 ```
 
-To specify default values for more than one filter, separate the filters with ampersands (&):
+To specify default values for multiple filters, separate them with ampersands (&):
 
 ```
-your_embedding_url?breakfast=Scrambled_eggs&lunch=Grilled_cheese
+your_embedding_url?breakfast=Hash_browns&lunch=Sandwich
 ```
 
-You can set multiple default values for a filter by separating the `key=value` pairs with ampersands (&):
+You can set multiple default values for a single filter by separating the values with ampersands (&):
 
 ```
-your_embedding_url?breakfast=Scrambled_eggs&breakfast=Bacon
+your_embedding_url?breakfast=Hash_browns&breakfast=Pancakes
 ```
 
 ## Hiding filter widgets from a static embed
 
-If you have a lot of editable parameters (resulting in a lot of filter widgets), you can hide them from your static embed by adding `#hide_parameters` to the end of the URL in your iframe's `src` attribute:
+If you have multiple editable parameters (resulting in multiple filter widgets), you can hide specific ones from your static embed by adding `#hide_parameters` to the end of the URL in your iframe's `src` attribute:
 
 ```
 your_embedding_url#hide_parameters=parameter_name
 ```
 
-For example, if you want to hide a filter called "Breakfast" from your embedded dashboard:
+For example, to hide a filter called "Breakfast" from your embedded dashboard:
 
 ```
 your_embedding_url#hide_parameters=breakfast
@@ -91,7 +98,7 @@ your_embedding_url#hide_parameters=breakfast,lunch
 You can also simultaneously assign a parameter a default value _and_ hide its filter widget:
 
 ```
-your_embedding_url?breakfast=Scrambled_eggs#hide_parameters=breakfast
+your_embedding_url?breakfast=Hash_browns#hide_parameters=breakfast
 ```
 
 ## Unsigned parameter syntax
@@ -102,7 +109,7 @@ Whenever you're adding a parameter to the embedding URL in your iframe's `src` a
 - Parameter _values_ are case-sensitive (the values must match your data).
 - Spaces should be replaced by underscores.
 
-## Restricting data in a static embed
+## Restricting data in a static embed with locked parameters
 
 If you want to restrict the data that's displayed in an embedded dashboard or SQL question, you can set up a **locked parameter**. A locked parameter filters the data in a dashboard or SQL question _before_ the results are displayed to people in a static embed.
 
@@ -118,7 +125,7 @@ You can use locked parameters to display filtered data based on attributes captu
 
 Locked parameters will apply the selected filter values to your original dashboard or SQL question, but they won't be displayed as filter widgets on your embed. Locked parameters may also limit the values that are shown in your [editable filter widgets](#adding-a-filter-widget-to-a-static-embed).
 
-If you just want to require a value for the parameter, you could set the filter as editable and configure the underlying question or dashboard to [always require a value](../dashboards/filters.md#requiring-a-filter).
+If you just want to require a value for the parameter, you could set the filter as editable and configure the underlying question or dashboard to [always require a value](../dashboards/filters.md).
 
 ## Updating a locked parameter
 
@@ -126,25 +133,45 @@ Things to keep in mind if you need to make changes to your locked parameters.
 
 ### Include all locked parameters in your server code
 
-Once you publish a chart or dashboard with a locked parameter, you must include the name of the locked parameter in your server code. If you forget to do this, the logs will remind you with a message like this: `You must specify a value for :parameter in the JWT`.
+Once you publish a chart or dashboard with a locked parameter, you _must_ include the name of the locked parameter in your server code. If you exclude the parameter name, the logs will gently remind you: `You must specify a value for :parameter in the JWT`.
+
+### To turn off a locked parameter, pass an empty array as its value in the JWT
+
+If you don't want the locked filter to apply, you can pass an empty array, `[]`, as the value for the parameter in the JWT.
 
 ### Make sure the filter name matches the locked parameter name
 
-If you change the name of a query builder filter that's used as a locked parameter, make sure to update the parameter's name and value(s) in your server code as well. You don't have to do this if your locked parameter is connected to a [SQL variable](../questions/native-editor/sql-parameters.md).
+If you change the name of a query builder filter that's used as a locked parameter, make sure to update the parameter's name and value(s) in your server code as well. If your locked parameter is connected to a [SQL variable](../questions/native-editor/sql-parameters.md), you don't need to change the parameter's name and value(s).
 
 ### Multiple locked parameters or multiple values
 
 The values for the locked parameter in your server code should match your filter's values exactly. The best way to set multiple locked parameters, or pass multiple values to a locked parameter, is to pick a filter value under **Preview locked parameters** and [preview the server code generated by Metabase](./static-embedding.md#previewing-the-code-for-an-embed).
 
+Using multiple locked parameters together will filter with `AND`, not `OR`. If you only want to apply a subset of the locked parameters, you must tell Metabase to [ignore the other locked parameters](#to-turn-off-a-locked-parameter-pass-an-empty-array-as-its-value-in-the-jwt).
+
+## Locked parameters limit the values available to other editable parameters
+
+Because locked parameters filter data _before_ the results are displayed in the embed, locked parameters limit the values available to other, editable filter widgets.
+
+For example, say you're embedding a dashboard with two filters, State and City. If you lock the State parameter with the value "Vermont", Metabase will only display the City filter widget on the dashboard, and the dropdown menu for that City filter widget will be limited to cities in Vermont. While you don't explicitly link the two filters, the two filters behave implicitly like [linked filters](../dashboards/filters.md#linking-filters).
+
 ## Locked parameters on dashboards with SQL questions
 
-If your [locked parameter](#restricting-data-in-a-static-embed) is linked to a dashboard filter that's in turn linked to a SQL question, you'll only be able to choose a _single_ value for your locked parameter.
+If your [locked parameter](#restricting-data-in-a-static-embed-with-locked-parameters) is linked to a dashboard filter that's in turn linked to a SQL question, you'll only be able to choose a _single_ value for your locked parameter.
 
 For example, let's say you have a dashboard filter called "Breakfast" with the values "Hash browns", "Muffin", and "Waffles". If the "Breakfast" filter is linked to _any_ SQL questions on the dashboard, you'll only be able to choose _one_ of the options for a locked parameter linked to the "Breakfast" filter.
 
+## Using locked parameters to power custom widgets in your app
+
+Because Metabase doesn't display locked parameters as filter widgets, you can use locked parameters to power custom filter widgets that you build in your app. You may want to build your own filter widget(s) to:
+
+- Make the widgets more consistent with the look and feel of your application.
+- Include custom logic. For example, to have a filter widget remember recent values.
+- Reuse one dashboard in different ways in different parts of your app. For example, you may have a dashboard with multiple locked parameters, and use one parameter in one case, and another parameter in another case. Like a sales dashboard that in one part of your app is locked by "region", in another by "team".
+
 ## Customizing the appearance of a static embed
 
-You can change the appearance of an embedded item by adding hash parameters to the end of the URL in your iframe's `src` attribute.
+You can change the appearance of an embedded item by adding hash parameters (e.g., `#theme=night`) to the end of the URL in your iframe's `src` attribute.
 
 For example, the following embedding URL will display an embedded item in dark mode, without a border, and with its original title:
 
@@ -152,38 +179,77 @@ For example, the following embedding URL will display an embedded item in dark m
 your_embedding_url#theme=night&bordered=false&titled=true
 ```
 
-You can preview appearance settings from your question or dashboard's [embedded appearance settings](./static-embedding.md#customizing-the-appearance-of-static-embeds).
+You can preview appearance settings from your question or dashboard's embedded appearance settings.
 
-| Parameter name                            | Possible values                               |
-| ----------------------------------------- | --------------------------------------------- |
-| `bordered`                                | true, false                                   |
-| `titled`                                  | true, false                                   |
-| `theme`                                   | null, transparent, night                      |
-| `refresh` (dashboard only)                                 | integer (seconds, e.g., `refresh=60`)         |
-| `font`\*                                  | [font name](../configuring-metabase/fonts.md) |
-| `hide_download_button`\* (questions only) | true, false                                   |
+| Parameter name             | Possible values                                                                                                                                    |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `background`               | `true` (default), `false`. Dashboards only.                                                                                                        |
+| `bordered`                 | `true` (default), `false`.                                                                                                                         |
+| `locale`\*                 | E.g., `ko`. See [list of locales](../configuring-metabase/localization.md#supported-languages)                                                     |
+| `titled`                   | `true` (default), `false`.                                                                                                                         |
+| `theme`                    | `null` (default), `night`. `theme=transparent` should work, but is deprecated (see [Transparent backgrounds](#transparent-backgrounds-for-embeds)) |
+| `refresh` (dashboard only) | integer (seconds, e.g., `refresh=60`).                                                                                                             |
+| `font`\*                   | [font name](../configuring-metabase/fonts.md)                                                                                                      |
+| `downloads`\*\*            | `true` (default), `false`, `results`, `pdf`                                                                                                        |
 
-\* Available on [Pro](https://www.metabase.com/product/pro) and [Enterprise](https://www.metabase.com/product/enterprise) plans.
+\* Available on [Pro](https://www.metabase.com/product/pro) and [Enterprise](https://www.metabase.com/product/enterprise) plans
 
-### Allow people to download the results of an embedded question
+\*\* Disabling downloads is available on [Pro](https://www.metabase.com/product/pro) and [Enterprise](https://www.metabase.com/product/enterprise) plans.
 
-{% include plans-blockquote.html feature="Downloading results" %}
+For global appearance settings, such as the colors and fonts used across your entire Metabase instance, see [Customizing Metabase's appearance](../configuring-metabase/appearance.md).
 
-By default, Metabase will include a **Download** button on embedded questions. You can remove the download button by setting `hide_download_button=true` in the embedding URL in the iframe's `src` attribute, see [customizing the appearance of static embeds](./static-embedding.md#customizing-the-appearance-of-static-embeds).
+## Setting the language for a static embed
 
-If the download button is missing when you expected it to be available, check that the URL in the `src` attribute for your iframe has the parameter `hide_download_button=false`.
+{% include plans-blockquote.html feature="Locales for static embeds" %}
 
-> Downloading results is available only for questions, not dashboards.
+To change the UI language for a static embed, you can set its [locale](../configuring-metabase/localization.md#supported-languages). For example, to set a public link's language to Korean, append `#locale=ko`:
 
+```
+https://metabase.example.com/public/dashboard/7b6e347b-6928-4aff-a56f-6cfa5b718c6b?category=&city=&state=#locale=ko
+```
+
+If you have multiple parameters, separate them with an ampersand (`&`):
+
+```
+category=Gadget&state=Vermont#theme=night&locale=ko
+```
+
+The `locale` parameter changes the language for Metabase UI elements, like the label of "Export to PDF" button. To change the _content_'s language in a static embed (like names of questions and dashboards), you'll need to [upload a translation dictionary](./translations.md).
+
+## Transparent backgrounds for embeds
+
+Making an embed transparent depends on the type of embed:
+
+- Dashboards: set `background=false`. The `background` parameter can be combined with the `theme` parameter (e.g., `background=false&theme=night`).
+- Questions: set `theme=transparent` (deprecated, but still supported).
+
+## Disable downloads for an embedded question or dashboard
+
+{% include plans-blockquote.html feature="Disabling downloads" %}
+
+By default, Metabase will include a **Download** button on embedded questions, and an **Export to PDF** option on embedded dashboards.
+
+You can configure these options with the `downloads` parameter in the embedding URL in the iframe's `src` attribute, see [customizing the appearance of static embeds](./static-embedding.md#customizing-the-appearance-of-static-embeds).
+
+`downloads` accepts the following values:
+
+- `true` (default): include both the Download and Export to PDF options.
+- `false`: hide both the Download and Export to PDF options.
+- `results`: show the Download option.
+- `pdf`: show the Export to PDF option (dashboards only).
+
+You can combine the explicit options: `downloads=results,pdf` is the same as `downloads=true`.
+
+The `downloads` parameter replaces the legacy `hide_download_button` parameter.
 
 ## Maximum request size
 
-The maximum length of a static embedding URL (including all parameters) is the value of your [`MB_JETTY_REQUEST_HEADER_SIZE`](../configuring-metabase/environment-variables.md#mb_jetty_request_header_size) environment variable. The default is 8192 bytes.
+The maximum length of a static embedding URL (including all parameters) is determined by your [`MB_JETTY_REQUEST_HEADER_SIZE`](../configuring-metabase/environment-variables.md#mb_jetty_request_header_size) environment variable. The default is 8192 bytes.
 
 If your static embedding URL exceeds the maximum header size, you'll see a log message like `URI too long`. You can update the environment variable to accept larger headers. If you're using a proxy server, you may need to set a corresponding property on the server as well.
 
 ## Further reading
 
 - [Static embedding documentation](./static-embedding.md).
-- [Strategies for delivering customer-facing analytics](https://www.metabase.com/learn/embedding/embedding-overview).
-- [Publishing data visualizations to the web](https://www.metabase.com/learn/embedding/embedding-charts-and-dashboards).
+- [Strategies for delivering customer-facing analytics](https://www.metabase.com/learn/metabase-basics/embedding/overview).
+- [Publishing data visualizations to the web](https://www.metabase.com/learn/metabase-basics/embedding/charts-and-dashboards).

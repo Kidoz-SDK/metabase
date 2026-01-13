@@ -1,48 +1,45 @@
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import { t } from "ttag";
 
 import { useCreateApiKeyMutation } from "metabase/api";
 import {
   Form,
   FormErrorMessage,
-  FormProvider,
   FormGroupWidget,
+  FormProvider,
   FormSubmitButton,
   FormTextInput,
 } from "metabase/forms";
-import { Text, Button, Group, Modal, Stack } from "metabase/ui";
+import { Button, Group, Modal, Stack, Text } from "metabase/ui";
 import type { CreateApiKeyRequest } from "metabase-types/api";
 
 import { SecretKeyModal } from "./SecretKeyModal";
 import { API_KEY_VALIDATION_SCHEMA } from "./utils";
 
 export const CreateApiKeyModal = ({ onClose }: { onClose: () => void }) => {
-  const [modal, setModal] = useState<"create" | "secretKey">("create");
   const [createApiKey, response] = useCreateApiKeyMutation();
   const secretKey = response?.data?.unmasked_key || "";
 
   const handleSubmit = useCallback(
     async (vals: { group_id: number | null; name: string }) => {
       if (vals.group_id !== null) {
-        await createApiKey(vals as CreateApiKeyRequest);
-        setModal("secretKey");
+        await createApiKey(vals as CreateApiKeyRequest).unwrap();
       }
     },
     [createApiKey],
   );
 
-  if (modal === "secretKey") {
+  if (response.isSuccess) {
     return <SecretKeyModal secretKey={secretKey} onClose={onClose} />;
   }
 
-  if (modal === "create") {
+  if (response.isUninitialized || response.isLoading || response.isError) {
     return (
       <Modal
         size="30rem"
-        padding="xl"
         opened
         onClose={onClose}
-        title={t`Create a new API Key`}
+        title={t`Create a new API key`}
       >
         <FormProvider
           initialValues={{ name: "", group_id: null }}
@@ -50,7 +47,7 @@ export const CreateApiKeyModal = ({ onClose }: { onClose: () => void }) => {
           onSubmit={handleSubmit}
         >
           <Form data-testid="create-api-key-modal">
-            <Stack spacing="md">
+            <Stack gap="md">
               <FormTextInput
                 name="name"
                 label={t`Key name`}
@@ -69,7 +66,7 @@ export const CreateApiKeyModal = ({ onClose }: { onClose: () => void }) => {
                 size="sm"
               >{t`We don't version the Metabase API. We rarely change API endpoints, and almost never remove them, but if you write code that relies on the API, there's a chance you might have to update your code in the future.`}</Text>
               <FormErrorMessage />
-              <Group position="right">
+              <Group justify="flex-end">
                 <Button onClick={onClose}>{t`Cancel`}</Button>
                 <FormSubmitButton variant="filled" label={t`Create`} />
               </Group>

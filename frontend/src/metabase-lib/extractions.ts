@@ -4,10 +4,11 @@ import { expressionParts } from "./expression";
 import type {
   ColumnExtraction,
   ColumnMetadata,
-  Query,
   DrillThru,
-  ExpressionParts,
   ExpressionArg,
+  ExpressionClause,
+  ExpressionParts,
+  Query,
 } from "./types";
 
 export function extract(
@@ -46,7 +47,17 @@ export type ColumnExtractionTag =
   | "year"
   | "domain"
   | "host"
-  | "subdomain";
+  | "subdomain"
+  | "path";
+
+export function functionsUsedByExpression(
+  query: Query,
+  stageIndex: number,
+  expression: ExpressionClause,
+): string[] {
+  const parts = expressionParts(query, stageIndex, expression);
+  return walk(parts);
+}
 
 /**
  * Return the functions used by a specific column extraction.
@@ -63,7 +74,7 @@ export function functionsUsedByExtraction(
 
 function walk(parts: ExpressionParts): string[] {
   const res: string[] = [parts.operator];
-  parts.args.forEach(arg => {
+  parts.args.forEach((arg) => {
     if (isExpressionParts(arg)) {
       res.push(...walk(arg));
     }

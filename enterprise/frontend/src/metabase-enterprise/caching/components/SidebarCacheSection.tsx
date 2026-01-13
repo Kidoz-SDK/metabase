@@ -3,8 +3,8 @@ import { t } from "ttag";
 import _ from "underscore";
 
 import { useCacheConfigs } from "metabase/admin/performance/hooks/useCacheConfigs";
-import { getShortStrategyLabel } from "metabase/admin/performance/strategies";
-import { DelayedLoadingAndErrorWrapper } from "metabase/components/LoadingAndErrorWrapper/DelayedLoadingAndErrorWrapper";
+import { getShortStrategyLabel } from "metabase/admin/performance/utils";
+import { DelayedLoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper/DelayedLoadingAndErrorWrapper";
 import type { SidebarCacheSectionProps } from "metabase/plugins";
 import { Flex } from "metabase/ui";
 
@@ -33,12 +33,17 @@ export const SidebarCacheSection = ({
 
   const shortStrategyLabel =
     getShortStrategyLabel(savedStrategy, model) || t`Use default`;
+  const labelId = "question-caching-policy-label";
 
   return (
     <DelayedLoadingAndErrorWrapper delay={0} loading={loading} error={error}>
       <Flex align="center" justify="space-between">
-        {t`Caching policy`}
-        <FormLauncher role="button" onClick={() => setPage("caching")}>
+        <span id={labelId}>{t`When to get new results`}</span>
+        <FormLauncher
+          role="button"
+          onClick={() => setPage("caching")}
+          aria-labelledby={labelId}
+        >
           {shortStrategyLabel}
         </FormLauncher>
       </Flex>

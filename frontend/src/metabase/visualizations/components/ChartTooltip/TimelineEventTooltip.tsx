@@ -6,9 +6,9 @@ import {
   TimelineEventDate,
   TimelineEventIconContainer,
   TimelineEventInfoContainer,
+  TimelineEventList,
   TimelineEventName,
   TimelineEventRow,
-  TimelineEventList,
 } from "./TimelineEventTooltip.styled";
 
 export interface TimelineEventTooltipProps {
@@ -21,7 +21,7 @@ const TimelineEventTooltip = (props: TimelineEventTooltipProps) => {
 
   return (
     <TimelineEventList>
-      {timelineEvents.map(event => (
+      {timelineEvents.map((event) => (
         <li key={event.id}>
           <TimelineEventRow>
             <TimelineEventIconContainer>

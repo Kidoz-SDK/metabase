@@ -1,16 +1,15 @@
 import * as Lib from "metabase-lib";
 import type Question from "metabase-lib/v1/Question";
 import type Database from "metabase-lib/v1/metadata/Database";
-import { getQuestionVirtualTableId } from "metabase-lib/v1/metadata/utils/saved-questions";
 import type NativeQuery from "metabase-lib/v1/queries/NativeQuery";
-import { isSameField } from "metabase-lib/v1/queries/utils/field-ref";
+import { findColumnIndexesForColumnSettings } from "metabase-lib/v1/queries/utils/dataset";
 import type {
-  DatasetColumn,
+  Field,
   FieldId,
   FieldReference,
   ModelCacheRefreshStatus,
-  TableColumnOrderSetting,
   TemplateTag,
+  VisualizationSettings,
 } from "metabase-types/api";
 
 type FieldMetadata = {
@@ -86,46 +85,38 @@ function isSupportedTemplateTagForModel(tag: TemplateTag) {
   return ["card", "snippet"].includes(tag.type);
 }
 
-function checkDatabaseSupportsModels(database?: Database | null) {
-  return database && database.hasFeature("nested-queries");
-}
-
 export function checkDatabaseCanPersistDatasets(database?: Database | null) {
   return database && database.supportsPersistence() && database.isPersisted();
 }
 
 export function checkCanBeModel(question: Question) {
-  if (!checkDatabaseSupportsModels(question.database())) {
-    return false;
-  }
-
   const { isNative } = Lib.queryDisplayInfo(question.query());
-
   if (!isNative) {
     return true;
   }
 
-  return (question.legacyQuery() as NativeQuery)
+  return (question.legacyNativeQuery() as NativeQuery)
     .templateTags()
     .every(isSupportedTemplateTagForModel);
 }
 
-export function isAdHocModelQuestion(
+export function isAdHocModelOrMetricQuestion(
   question?: Question,
   originalQuestion?: Question,
 ) {
-  if (!question || !originalQuestion) {
-    return false;
+  if (
+    question &&
+    originalQuestion &&
+    question.id() === originalQuestion.id() &&
+    (question.type() !== "question" || originalQuestion.type() !== "question")
+  ) {
+    return Lib.areLegacyQueriesEqual(
+      question.datasetQuery(),
+      originalQuestion.composeQuestion().datasetQuery(),
+    );
   }
 
-  const isModel =
-    question.type() !== "question" || originalQuestion.type() !== "question";
-  const isSameQuestion = question.id() === originalQuestion.id();
-  const isSelfReferencing =
-    Lib.sourceTableOrCardId(question.query()) ===
-    getQuestionVirtualTableId(originalQuestion.id());
-
-  return isModel && isSameQuestion && isSelfReferencing;
+  return false;
 }
 
 export function checkCanRefreshModelCache(
@@ -139,29 +130,13 @@ export function checkCanRefreshModelCache(
     return false;
   }
 
-  return refreshInfo.state === "persisted" || refreshInfo.state === "error";
+  return ["creating", "persisted", "error"].includes(refreshInfo.state);
 }
 
 export function getModelCacheSchemaName(databaseId: number, siteUUID: string) {
   const uuidParts = siteUUID.split("-");
-  const firstLetters = uuidParts.map(part => part.charAt(0)).join("");
+  const firstLetters = uuidParts.map((part) => part.charAt(0)).join("");
   return `metabase_cache_${firstLetters}_${databaseId}`;
-}
-
-type QueryField = FieldReference & { field_ref: FieldReference };
-
-function getFieldFromColumnVizSetting(
-  columnVizSetting: TableColumnOrderSetting,
-  columns: DatasetColumn[],
-  columnMetadata: QueryField[],
-) {
-  // We have some corrupted visualization settings where both names are mixed
-  // We should settle on `fieldRef`, make it required and remove `field_ref`
-  const fieldRef = columnVizSetting.fieldRef || columnVizSetting.field_ref;
-  return (
-    columns.find(column => isSameField(column.field_ref, fieldRef)) ||
-    columnMetadata.find(column => isSameField(column.field_ref, fieldRef))
-  );
 }
 
 // Columns in resultsMetadata contain all the necessary metadata
@@ -170,30 +145,15 @@ function getFieldFromColumnVizSetting(
 // but they only get updated after running a query (which is not triggered after reordering columns).
 // This ensures metadata rich columns are sorted correctly not to break the "Tab" key navigation behavior.
 export function getSortedModelFields(
-  model: Question,
-  columnMetadata?: QueryField[],
+  columns: Field[],
+  visualizationSettings: VisualizationSettings,
 ) {
-  if (!Array.isArray(columnMetadata)) {
-    return [];
+  const columnSettings = visualizationSettings["table.columns"];
+  if (!Array.isArray(columnSettings)) {
+    return columns;
   }
 
-  const orderedColumns = model.setting("table.columns");
-
-  if (!Array.isArray(orderedColumns)) {
-    return columnMetadata;
-  }
-
-  const table = model.legacyQueryTable();
-  const tableFields = table?.fields ?? [];
-  const tableColumns = tableFields.map(field => field.column());
-
-  return orderedColumns
-    .map(columnVizSetting =>
-      getFieldFromColumnVizSetting(
-        columnVizSetting,
-        tableColumns,
-        columnMetadata,
-      ),
-    )
-    .filter(Boolean);
+  return findColumnIndexesForColumnSettings(columns, columnSettings)
+    .filter((columnIndex) => columnIndex >= 0)
+    .map((columnIndex) => columns[columnIndex]);
 }

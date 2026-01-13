@@ -1,23 +1,25 @@
-import { getIn } from "icepick";
 import _ from "underscore";
 
-import * as MetabaseAnalytics from "metabase/lib/analytics";
+import { isEmbeddingSdk } from "metabase/embedding-sdk/config";
+import {
+  convertLinkColumnToClickBehavior,
+  removeInternalClickBehaviors,
+} from "metabase/embedding-sdk/lib/links";
 import { ChartSettingColorPicker } from "metabase/visualizations/components/settings/ChartSettingColorPicker";
 import ChartSettingColorsPicker from "metabase/visualizations/components/settings/ChartSettingColorsPicker";
-import ChartSettingFieldPicker from "metabase/visualizations/components/settings/ChartSettingFieldPicker";
-import ChartSettingFieldsPartition from "metabase/visualizations/components/settings/ChartSettingFieldsPartition";
+import { ChartSettingFieldPicker } from "metabase/visualizations/components/settings/ChartSettingFieldPicker";
+import { ChartSettingFieldsPartition } from "metabase/visualizations/components/settings/ChartSettingFieldsPartition";
 import ChartSettingFieldsPicker from "metabase/visualizations/components/settings/ChartSettingFieldsPicker";
-import ChartSettingInput from "metabase/visualizations/components/settings/ChartSettingInput";
-import ChartSettingInputGroup from "metabase/visualizations/components/settings/ChartSettingInputGroup";
+import { ChartSettingInput } from "metabase/visualizations/components/settings/ChartSettingInput";
 import { ChartSettingInputNumeric } from "metabase/visualizations/components/settings/ChartSettingInputNumeric";
-import ChartSettingRadio from "metabase/visualizations/components/settings/ChartSettingRadio";
-import ChartSettingSegmentedControl from "metabase/visualizations/components/settings/ChartSettingSegmentedControl";
-import ChartSettingSelect from "metabase/visualizations/components/settings/ChartSettingSelect";
-import ChartSettingToggle from "metabase/visualizations/components/settings/ChartSettingToggle";
+import { ChartSettingMultiSelect } from "metabase/visualizations/components/settings/ChartSettingMultiSelect";
+import { ChartSettingRadio } from "metabase/visualizations/components/settings/ChartSettingRadio";
+import { ChartSettingSegmentedControl } from "metabase/visualizations/components/settings/ChartSettingSegmentedControl";
+import { ChartSettingSelect } from "metabase/visualizations/components/settings/ChartSettingSelect";
+import { ChartSettingToggle } from "metabase/visualizations/components/settings/ChartSettingToggle";
 
 const WIDGETS = {
   input: ChartSettingInput,
-  inputGroup: ChartSettingInputGroup,
   number: ChartSettingInputNumeric,
   radio: ChartSettingRadio,
   select: ChartSettingSelect,
@@ -28,6 +30,7 @@ const WIDGETS = {
   fieldsPartition: ChartSettingFieldsPartition,
   color: ChartSettingColorPicker,
   colors: ChartSettingColorsPicker,
+  multiselect: ChartSettingMultiSelect,
 };
 
 export function getComputedSettings(
@@ -47,6 +50,14 @@ export function getComputedSettings(
       extra,
     );
   }
+
+  if (isEmbeddingSdk()) {
+    return _.compose(
+      removeInternalClickBehaviors,
+      convertLinkColumnToClickBehavior,
+    )(computedSettings);
+  }
+
   return computedSettings;
 }
 
@@ -159,7 +170,13 @@ function getSettingWidget(
     props: {
       ...(settingDef.props ? settingDef.props : {}),
       ...(settingDef.getProps
-        ? settingDef.getProps(object, computedSettings, onChange, extra)
+        ? settingDef.getProps(
+            object,
+            computedSettings,
+            onChange,
+            extra,
+            onChangeSettings,
+          )
         : {}),
     },
     set: settingId in storedSettings,
@@ -181,7 +198,7 @@ export function getSettingsWidgets(
   extra = {},
 ) {
   return Object.keys(settingDefs)
-    .map(settingId =>
+    .map((settingId) =>
       getSettingWidget(
         settingDefs,
         settingId,
@@ -192,7 +209,7 @@ export function getSettingsWidgets(
         extra,
       ),
     )
-    .filter(widget => widget.widget);
+    .filter((widget) => widget.widget);
 }
 
 export function getPersistableDefaultSettings(settingsDefs, completeSettings) {
@@ -207,9 +224,6 @@ export function getPersistableDefaultSettings(settingsDefs, completeSettings) {
 }
 
 export function updateSettings(storedSettings, changedSettings) {
-  for (const key of Object.keys(changedSettings)) {
-    MetabaseAnalytics.trackStructEvent("Chart Settings", "Change Setting", key);
-  }
   const newSettings = {
     ...storedSettings,
     ...changedSettings,
@@ -222,53 +236,6 @@ export function updateSettings(storedSettings, changedSettings) {
   }
   return newSettings;
 }
-
-// Merge two settings objects together.
-// Settings from the second argument take precedence over the first.
-export function mergeSettings(first = {}, second = {}) {
-  // Note: This hardcoded list of all nested settings is potentially fragile,
-  // but both the list of nested settings and the keys used are very stable.
-  const nestedSettings = ["series_settings", "column_settings"];
-  const merged = { ...first, ...second };
-  for (const key of nestedSettings) {
-    // only set key if one of the objects to be merged has that key set
-    if (first[key] != null || second[key] != null) {
-      merged[key] = {};
-      for (const nestedKey of Object.keys({ ...first[key], ...second[key] })) {
-        merged[key][nestedKey] = mergeSettings(
-          getIn(first, [key, nestedKey]) || {},
-          getIn(second, [key, nestedKey]) || {},
-        );
-      }
-    }
-  }
-
-  if (first["table.columns"] && second["table.columns"]) {
-    merged["table.columns"] = mergeTableColumns(
-      first["table.columns"],
-      second["table.columns"],
-    );
-  }
-
-  return merged;
-}
-
-const mergeTableColumns = (firstTableColumns, secondTableColumns) => {
-  const addedColumns = firstTableColumns.filter(
-    ({ name }) => secondTableColumns.findIndex(col => col.name === name) === -1,
-  );
-  const removedColumns = secondTableColumns
-    .filter(
-      ({ name }) =>
-        firstTableColumns.findIndex(col => col.name === name) === -1,
-    )
-    .map(({ name }) => name);
-
-  return [
-    ...secondTableColumns.filter(({ name }) => !removedColumns.includes(name)),
-    ...addedColumns,
-  ];
-};
 
 export function getClickBehaviorSettings(settings) {
   const newSettings = {};

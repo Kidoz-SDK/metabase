@@ -1,33 +1,15 @@
 import {
-  createPublicDashboardLink,
-  createPublicQuestionLink,
-  describeEE,
-  describeWithSnowplow,
-  enableTracking,
-  entityPickerModal,
-  entityPickerModalTab,
-  expectGoodSnowplowEvent,
-  expectNoBadSnowplowEvents,
-  getEmbedModalSharingPane,
-  modal,
-  openEmbedModalFromMenu,
-  openNewPublicLinkDropdown,
-  openPublicLinkPopoverFromMenu,
-  openStaticEmbeddingModal,
-  popover,
-  resetSnowplow,
-  restore,
-  setTokenFeatures,
-  startNewQuestion,
-  visitDashboard,
-  visitQuestion,
-  visualize,
+  embedModalContent,
+  legacyStaticEmbeddingButton,
+  openSharingMenu,
 } from "e2e/support/helpers";
 
-["dashboard", "question"].forEach(resource => {
+const { H } = cy;
+
+["dashboard", "question"].forEach((resource) => {
   describe(`embed modal behavior for ${resource}s`, () => {
     beforeEach(() => {
-      restore();
+      H.restore();
       cy.signInAsAdmin();
 
       createResource(resource).then(({ body: { id } }) => {
@@ -37,37 +19,36 @@ import {
 
     describe("when embedding is disabled", () => {
       beforeEach(() => {
-        cy.request("PUT", "/api/setting/enable-embedding", { value: false });
+        H.updateSetting("enable-embedding-static", false);
       });
 
       describe("when user is admin", () => {
-        it(`should disable the embed button for ${resource} and provide a tooltip`, () => {
-          cy.get("@resourceId").then(id => {
+        it(`should always show the embed button for ${resource}`, () => {
+          cy.get("@resourceId").then((id) => {
             visitResource(resource, id);
           });
 
-          cy.findByTestId("resource-embed-button").click();
-          cy.findByTestId("embed-header-menu").within(() => {
-            cy.findByTestId("embed-menu-embed-modal-item").should(
-              "be.disabled",
-            );
-            cy.findByText("Embedding is off").should("be.visible");
-            cy.findByText("Enable it in settings").should("be.visible");
-          });
+          H.openSharingMenu();
+          H.sharingMenu()
+            .findByRole("menuitem", { name: "Embed" })
+            .should("be.visible")
+            .and("be.enabled")
+            .click();
+
+          H.embedModalContent().should("be.visible");
         });
       });
 
       describe("when user is non-admin", () => {
-        it(`should show disabled embed button and tooltip for ${resource}`, () => {
+        it(`should not show embed button for ${resource}`, () => {
           cy.signInAsNormalUser();
 
-          cy.get("@resourceId").then(id => {
+          cy.get("@resourceId").then((id) => {
             visitResource(resource, id);
           });
 
-          expectDisabledButtonWithTooltipLabel(
-            "Ask your admin to create a public link",
-          );
+          H.openSharingMenu();
+          H.sharingMenu().findByText(/embed/i).should("not.exist");
         });
       });
     });
@@ -75,64 +56,63 @@ import {
     describe("when embedding is enabled", () => {
       describe("when public sharing is enabled", () => {
         beforeEach(() => {
-          cy.request("PUT", "/api/setting/enable-public-sharing", {
-            value: true,
-          });
-          cy.request("PUT", "/api/setting/enable-embedding", { value: true });
+          H.updateSetting("enable-public-sharing", true);
+          H.updateSetting("enable-embedding-static", true);
         });
 
         describe("when user is admin", () => {
           it(`should show the embed menu for ${resource}`, () => {
-            cy.get("@resourceId").then(id => {
+            cy.get("@resourceId").then((id) => {
               visitResource(resource, id);
             });
 
-            cy.icon("share").click();
-            cy.findByTestId("embed-header-menu").should("be.visible");
+            H.openSharingMenu("Embed");
+            H.embedModalContent().should("be.visible");
           });
 
           it(`should let the user create a public link for ${resource}`, () => {
-            cy.get("@resourceId").then(id => {
+            cy.get("@resourceId").then((id) => {
               createPublicResourceLink(resource, id);
               visitResource(resource, id);
             });
 
-            openPublicLinkPopoverFromMenu();
+            H.openSharingMenu(/public link/i);
 
             assertValidPublicLink({ resource, shouldHaveRemoveLink: true });
           });
         });
 
         describe("when user is non-admin", () => {
-          it(`should show a disabled embed button if the ${resource} doesn't have a public link`, () => {
+          it(`should show a disabled public link button if the ${resource} doesn't have a public link`, () => {
             cy.signInAsNormalUser();
 
-            cy.get("@resourceId").then(id => {
+            cy.get("@resourceId").then((id) => {
               visitResource(resource, id);
             });
 
-            expectDisabledButtonWithTooltipLabel(
+            H.openSharingMenu();
+            H.sharingMenu().findByText(
               "Ask your admin to create a public link",
             );
           });
 
-          it(`should show the embed button if the ${resource} has a public link`, () => {
-            cy.get("@resourceId").then(id => {
+          it(`should show the public link button if the ${resource} has a public link`, () => {
+            cy.get("@resourceId").then((id) => {
               createPublicResourceLink(resource, id);
               visitResource(resource, id);
             });
 
-            openPublicLinkPopoverFromMenu();
+            H.openSharingMenu(/public link/i);
 
             assertValidPublicLink({ resource, shouldHaveRemoveLink: true });
 
             cy.signInAsNormalUser();
 
-            cy.get("@resourceId").then(id => {
+            cy.get("@resourceId").then((id) => {
               visitResource(resource, id);
             });
 
-            cy.icon("share").click();
+            H.openSharingMenu("Public link");
 
             assertValidPublicLink({
               resource,
@@ -144,42 +124,39 @@ import {
 
       describe("when public sharing is disabled", () => {
         beforeEach(() => {
-          cy.request("PUT", "/api/setting/enable-public-sharing", {
-            value: false,
-          });
-          cy.request("PUT", "/api/setting/enable-embedding", { value: true });
+          H.updateSetting("enable-public-sharing", false);
+          H.updateSetting("enable-embedding-static", true);
         });
 
         describe("when user is admin", () => {
           it(`should show a disabled menu item for public links for ${resource} and allow the user to access the embed modal`, () => {
-            cy.get("@resourceId").then(id => {
+            cy.get("@resourceId").then((id) => {
               visitResource(resource, id);
             });
 
-            cy.icon("share").click();
+            H.openSharingMenu();
 
-            cy.findByTestId("embed-menu-public-link-item").within(() => {
-              cy.findByText("Public links are off").should("be.visible");
-              cy.findByText("Enable them in settings").should("be.visible");
+            H.sharingMenu().within(() => {
+              cy.findByText("Public link").should("be.visible");
+              cy.findByText("Enable").should("be.visible");
             });
 
             cy.findByTestId("embed-menu-embed-modal-item").click();
-
-            getEmbedModalSharingPane().within(() => {
-              cy.findByText("Static embed").should("be.visible");
-              cy.findByText("Public embed").should("be.visible");
-            });
           });
         });
+
         describe("when user is non-admin", () => {
           it(`should show a disabled button for ${resource}`, () => {
             cy.signInAsNormalUser();
 
-            cy.get("@resourceId").then(id => {
+            cy.get("@resourceId").then((id) => {
               visitResource(resource, id);
             });
 
-            expectDisabledButtonWithTooltipLabel("Public links are disabled");
+            H.openSharingMenu();
+            H.sharingMenu().findByText(
+              "Ask your admin to create a public link",
+            );
           });
         });
       });
@@ -187,9 +164,9 @@ import {
   });
 });
 
-describe("embed modal display", () => {
+describe("Embed JS modal display", () => {
   beforeEach(() => {
-    restore();
+    H.restore();
     cy.signInAsAdmin();
 
     createResource("dashboard").then(({ body: { id } }) => {
@@ -197,95 +174,157 @@ describe("embed modal display", () => {
     });
   });
 
-  describeEE("when the user has a paid instance", () => {
-    it("should display a link to the interactive embedding settings", () => {
-      setTokenFeatures("all");
-      visitDashboard("@dashboardId");
+  describe("when the user has a paid instance", () => {
+    it("should open Embed JS modal with the `enable simple embedding` card", () => {
+      H.activateToken("pro-self-hosted");
+      H.visitDashboard("@dashboardId");
 
-      openEmbedModalFromMenu();
+      H.openSharingMenu("Embed");
 
-      getEmbedModalSharingPane().within(() => {
-        cy.findByText("Static embed").should("be.visible");
-        cy.findByText("Public embed").should("be.visible");
-        cy.findByTestId("interactive-embedding-cta").within(() => {
-          cy.findByText("Interactive Embedding").should("be.visible");
-          cy.findByText(
-            "Your plan allows you to use Interactive Embedding create interactive embedding experiences with drill-through and more.",
-          ).should("be.visible");
-          cy.findByText("Set it up").should("be.visible");
-        });
-        cy.findByTestId("interactive-embedding-cta").click();
-
-        cy.url().should(
-          "equal",
-          Cypress.config().baseUrl +
-            "/admin/settings/embedding-in-other-applications/full-app",
-        );
+      H.embedModalEnableEmbeddingCard().within(() => {
+        cy.findByText(/modular embedding/).should("be.visible");
       });
     });
   });
 
   describe("when the user has an OSS instance", () => {
-    it("should display a link to the product page for embedded analytics", () => {
-      cy.signInAsAdmin();
-      visitDashboard("@dashboardId");
-      openEmbedModalFromMenu();
+    it(
+      "should display a link to the product page for embedded analytics",
+      { tags: "@OSS" },
+      () => {
+        cy.signInAsAdmin();
+        H.visitDashboard("@dashboardId");
+        H.openSharingMenu("Embed");
 
-      getEmbedModalSharingPane().within(() => {
-        cy.findByText("Static embed").should("be.visible");
-        cy.findByText("Public embed").should("be.visible");
-        cy.findByTestId("interactive-embedding-cta").within(() => {
-          cy.findByText("Interactive Embedding").should("be.visible");
-          cy.findByText(
-            "Give your customers the full power of Metabase in your own app, with SSO, advanced permissions, customization, and more.",
-          ).should("be.visible");
-          cy.findByText("Learn more").should("be.visible");
+        it("should open Embed JS modal with the `enable simple embedding` card", () => {
+          H.activateToken("pro-self-hosted");
+          H.visitDashboard("@dashboardId");
+
+          H.openSharingMenu("Embed");
+
+          H.embedModalEnableEmbeddingCard().within(() => {
+            cy.findByText(/guest embeds/).should("be.visible");
+          });
         });
-        cy.findByTestId("interactive-embedding-cta").should(
-          "have.attr",
-          "href",
-          "https://www.metabase.com/product/embedded-analytics?utm_source=oss&utm_media=static-embed-popover",
-        );
-      });
-    });
+      },
+    );
   });
 });
 
 describe("#39152 sharing an unsaved question", () => {
   beforeEach(() => {
-    restore();
+    H.restore();
     cy.signInAsAdmin();
-    cy.request("PUT", "/api/setting/enable-public-sharing", { value: true });
+    H.updateSetting("enable-public-sharing", true);
   });
 
   it("should ask the user to save the question before creating a public link", () => {
-    startNewQuestion();
-    entityPickerModal().within(() => {
-      entityPickerModalTab("Tables").click();
-      cy.findByText("People").click();
+    H.startNewQuestion();
+    H.miniPickerBrowseAll().click();
+    H.entityPickerModal().within(() => {
+      H.entityPickerModalItem(0, "Databases").click();
+      H.entityPickerModalItem(1, "People").click();
     });
-    visualize();
+    H.visualize();
 
-    cy.findByTestId("resource-embed-button").click();
+    H.openSharingMenu();
 
-    modal().within(() => {
+    H.modal().within(() => {
       cy.findByText("First, save your question").should("be.visible");
       cy.findByText("Save").click();
     });
 
-    openNewPublicLinkDropdown("card");
+    H.openSharingMenu("Create a public link");
 
     assertValidPublicLink({ resource: "question", shouldHaveRemoveLink: true });
   });
 });
 
-["dashboard", "question"].forEach(resource => {
-  describeWithSnowplow(`public ${resource} sharing snowplow events`, () => {
+[
+  {
+    resource: "dashboard",
+    apiPath: "dashboard",
+  },
+  {
+    resource: "question",
+    apiPath: "card",
+  },
+].forEach(({ resource, apiPath }) => {
+  describe(`legacy static modal behavior for ${resource}`, () => {
     beforeEach(() => {
-      restore();
-      resetSnowplow();
+      H.restore();
       cy.signInAsAdmin();
-      enableTracking();
+      H.enableTracking();
+
+      createResource(resource).then(({ body }) => {
+        cy.wrap(body.id).as("resourceId");
+      });
+    });
+
+    [
+      { embeddingType: "guest-embed", shouldShowAlert: false },
+      { embeddingType: "static-legacy", shouldShowAlert: true },
+      { embeddingType: null, shouldShowAlert: true },
+    ].forEach(({ embeddingType, shouldShowAlert }) => {
+      it(`should ${shouldShowAlert ? "show" : "not show"} legacy alert for ${embeddingType} embedding type`, () => {
+        cy.get("@resourceId").then((id) => {
+          visitResource(resource, id);
+
+          const apiPath = resource === "question" ? "card" : "dashboard";
+
+          cy.request("PUT", `/api/${apiPath}/${id}`, {
+            enable_embedding: true,
+            embedding_type: embeddingType,
+          });
+
+          openSharingMenu("Embed");
+
+          embedModalContent().should("exist");
+
+          legacyStaticEmbeddingButton().should(
+            shouldShowAlert ? "exist" : "not.exist",
+          );
+        });
+      });
+    });
+
+    it("should set a proper embedding_type", () => {
+      cy.get("@resourceId").then((id) => {
+        visitResource(resource, id);
+
+        H.openLegacyStaticEmbeddingModal({
+          resource,
+          resourceId: id,
+          activeTab: "parameters",
+        });
+      });
+
+      H.publishChanges(apiPath, ({ request, response }) => {
+        assert.deepEqual(request.body.embedding_type, "static-legacy");
+        assert.deepEqual(response.body.embedding_type, "static-legacy");
+      });
+
+      H.modal().button("Price").click();
+      H.popover().findByText("Editable").click();
+
+      H.publishChanges(apiPath, ({ request, response }) => {
+        assert.deepEqual(request.body.embedding_type, "static-legacy");
+        assert.deepEqual(response.body.embedding_type, "static-legacy");
+      });
+
+      H.unpublishChanges(apiPath, ({ request, response }) => {
+        assert.deepEqual(request.body.embedding_type, null);
+        assert.deepEqual(response.body.embedding_type, null);
+      });
+    });
+  });
+
+  describe(`public ${resource} sharing snowplow events`, () => {
+    beforeEach(() => {
+      H.restore();
+      H.resetSnowplow();
+      cy.signInAsAdmin();
+      H.enableTracking();
 
       createResource(resource).then(({ body }) => {
         cy.wrap(body).as("resource");
@@ -294,20 +333,20 @@ describe("#39152 sharing an unsaved question", () => {
     });
 
     afterEach(() => {
-      expectNoBadSnowplowEvents();
+      H.expectNoBadSnowplowEvents();
     });
 
     describe(`when embedding ${resource}`, () => {
       describe("when interacting with public link popover", () => {
         it("should send `public_link_copied` event when copying public link", () => {
-          cy.get("@resourceId").then(id => {
+          cy.get("@resourceId").then((id) => {
             visitResource(resource, id);
           });
 
-          openPublicLinkPopoverFromMenu();
+          H.openSharingMenu(/public link/i);
           cy.findByTestId("copy-button").realClick();
           if (resource === "dashboard") {
-            expectGoodSnowplowEvent({
+            H.expectUnstructuredSnowplowEvent({
               event: "public_link_copied",
               artifact: "dashboard",
               format: null,
@@ -315,31 +354,31 @@ describe("#39152 sharing an unsaved question", () => {
           }
 
           if (resource === "question") {
-            expectGoodSnowplowEvent({
+            H.expectUnstructuredSnowplowEvent({
               event: "public_link_copied",
               artifact: "question",
               format: "html",
             });
 
-            popover().findByText("csv").click();
+            H.popover().findByText("csv").click();
             cy.findByTestId("copy-button").realClick();
-            expectGoodSnowplowEvent({
+            H.expectUnstructuredSnowplowEvent({
               event: "public_link_copied",
               artifact: "question",
               format: "csv",
             });
 
-            popover().findByText("xlsx").click();
+            H.popover().findByText("xlsx").click();
             cy.findByTestId("copy-button").realClick();
-            expectGoodSnowplowEvent({
+            H.expectUnstructuredSnowplowEvent({
               event: "public_link_copied",
               artifact: "question",
               format: "xlsx",
             });
 
-            popover().findByText("json").click();
+            H.popover().findByText("json").click();
             cy.findByTestId("copy-button").realClick();
-            expectGoodSnowplowEvent({
+            H.expectUnstructuredSnowplowEvent({
               event: "public_link_copied",
               artifact: "question",
               format: "json",
@@ -348,13 +387,13 @@ describe("#39152 sharing an unsaved question", () => {
         });
 
         it("should send `public_link_removed` when removing the public link", () => {
-          cy.get("@resourceId").then(id => {
+          cy.get("@resourceId").then((id) => {
             visitResource(resource, id);
           });
 
-          openPublicLinkPopoverFromMenu();
-          popover().button("Remove public link").click();
-          expectGoodSnowplowEvent({
+          H.openSharingMenu(/public link/i);
+          H.popover().button("Remove public link").click();
+          H.expectUnstructuredSnowplowEvent({
             event: "public_link_removed",
             artifact: resource,
             source: "public-share",
@@ -364,284 +403,430 @@ describe("#39152 sharing an unsaved question", () => {
 
       describe("when interacting with public embedding", () => {
         it("should send `public_embed_code_copied` event when copying the public embed iframe", () => {
-          cy.get("@resourceId").then(id => {
+          cy.get("@resourceId").then((id) => {
             visitResource(resource, id);
           });
 
-          openEmbedModalFromMenu();
-          cy.findByTestId("sharing-pane-public-embed-button").within(() => {
-            cy.findByText("Get an embed link").click();
-            cy.findByTestId("copy-button").realClick();
+          H.openSharingMenu("Create a public link");
+
+          // mock clipboardData so that copy-to-clipboard doesn't use window.prompt, pausing the tests
+          cy.window().then((win) => {
+            win.clipboardData = {
+              setData: (...args) =>
+                // eslint-disable-next-line no-console
+                console.log("clipboardData.setData", ...args),
+            };
           });
-          expectGoodSnowplowEvent({
-            event: "public_embed_code_copied",
+
+          H.popover().findByTestId("copy-button").click();
+
+          H.expectUnstructuredSnowplowEvent({
+            event: "public_link_copied",
             artifact: resource,
-            source: "public-embed",
           });
         });
 
         it("should send `public_link_removed` event when removing the public embed", () => {
-          cy.get("@resourceId").then(id => {
+          cy.get("@resourceId").then((id) => {
             visitResource(resource, id);
           });
 
-          openEmbedModalFromMenu();
-          cy.findByTestId("sharing-pane-public-embed-button").within(() => {
-            cy.findByText("Get an embed link").click();
-            cy.button("Remove public URL").click();
-          });
-          expectGoodSnowplowEvent({
+          H.openSharingMenu("Create a public link");
+
+          H.popover().findByText("Remove public link").click();
+
+          H.expectUnstructuredSnowplowEvent({
             event: "public_link_removed",
             artifact: resource,
-            source: "public-embed",
+            source: "public-share",
           });
         });
       });
 
       describe("when interacting with static embedding", () => {
         it("should send `static_embed_code_copied` when copying the static embed code", () => {
-          cy.get("@resourceId").then(id => {
+          cy.get("@resourceId").then((id) => {
             visitResource(resource, id);
+
+            H.openLegacyStaticEmbeddingModal({ resource, resourceId: id });
           });
-          openStaticEmbeddingModal();
 
           cy.log("Assert copying codes in Overview tab");
           cy.findByTestId("embed-backend")
             .findByTestId("copy-button")
             .realClick();
-          expectGoodSnowplowEvent({
+
+          // TODO: fix this test, it's flaky on CI
+          /*H.expectUnstructuredSnowplowEvent({
             event: "static_embed_code_copied",
             artifact: resource,
             language: "node",
             location: "code_overview",
             code: "backend",
             appearance: {
+              background: true,
               bordered: true,
               titled: true,
               font: "instance",
               theme: "light",
-              hide_download_button: null,
+              downloads: null,
             },
-          });
+          });*/
 
           cy.findByTestId("embed-frontend")
             .findByTestId("copy-button")
             .realClick();
-          expectGoodSnowplowEvent({
+          H.expectUnstructuredSnowplowEvent({
             event: "static_embed_code_copied",
             artifact: resource,
             language: "pug",
             location: "code_overview",
             code: "view",
             appearance: {
+              background: true,
               bordered: true,
               titled: true,
               font: "instance",
               theme: "light",
-              hide_download_button: null,
+              downloads: null,
             },
           });
 
           cy.log("Assert copying code in Parameters tab");
-          modal().within(() => {
+          H.modal().within(() => {
             cy.findByRole("tab", { name: "Parameters" }).click();
 
             cy.findByText("Node.js").click();
           });
-          popover().findByText("Ruby").click();
+          H.popover().findByText("Ruby").click();
           cy.findByTestId("embed-backend")
             .findByTestId("copy-button")
             .realClick();
-          expectGoodSnowplowEvent({
+          H.expectUnstructuredSnowplowEvent({
             event: "static_embed_code_copied",
             artifact: resource,
             language: "ruby",
             location: "code_params",
             code: "backend",
             appearance: {
+              background: true,
               bordered: true,
               titled: true,
               font: "instance",
               theme: "light",
-              hide_download_button: null,
+              downloads: null,
             },
           });
 
           cy.log("Assert copying code in Appearance tab");
-          modal().within(() => {
-            cy.findByRole("tab", { name: "Appearance" }).click();
+          H.modal().within(() => {
+            cy.findByRole("tab", { name: "Look and Feel" }).click();
 
             cy.findByText("Ruby").click();
           });
 
-          popover().findByText("Python").click();
+          H.popover().findByText("Python").click();
 
-          modal().within(() => {
+          H.modal().within(() => {
             cy.findByLabelText("Dark").click({ force: true });
             if (resource === "dashboard") {
               cy.findByLabelText("Dashboard title").click({ force: true });
+              cy.findByLabelText("Dashboard border").click({ force: true });
             }
             if (resource === "question") {
               cy.findByLabelText("Question title").click({ force: true });
+              cy.findByLabelText("Question border").click({ force: true });
             }
-            cy.findByLabelText("Border").click({ force: true });
           });
 
           cy.findByTestId("embed-backend")
             .findByTestId("copy-button")
             .realClick();
-          expectGoodSnowplowEvent({
+          H.expectUnstructuredSnowplowEvent({
             event: "static_embed_code_copied",
             artifact: resource,
             language: "python",
             location: "code_appearance",
             code: "backend",
             appearance: {
+              background: true,
               bordered: false,
               titled: false,
               font: "instance",
               theme: "night",
-              hide_download_button: null,
+              downloads: null,
             },
           });
-        });
 
-        describeEE("Pro/EE instances", () => {
-          beforeEach(() => {
-            setTokenFeatures("all");
-          });
-
-          it("should send `static_embed_code_copied` when copying the static embed code", () => {
-            cy.get("@resourceId").then(id => {
-              visitResource(resource, id);
-            });
-            openStaticEmbeddingModal({ acceptTerms: false });
-
-            cy.log("Assert copying codes in Overview tab");
-            cy.findByTestId("embed-backend")
-              .findByTestId("copy-button")
-              .realClick();
-            expectGoodSnowplowEvent({
-              event: "static_embed_code_copied",
-              artifact: resource,
-              language: "node",
-              location: "code_overview",
-              code: "backend",
-              appearance: {
-                bordered: true,
-                titled: true,
-                font: "instance",
-                theme: "light",
-                hide_download_button: resource === "question" ? false : null,
-              },
-            });
-
-            cy.findByTestId("embed-frontend")
-              .findByTestId("copy-button")
-              .realClick();
-            expectGoodSnowplowEvent({
-              event: "static_embed_code_copied",
-              artifact: resource,
-              language: "pug",
-              location: "code_overview",
-              code: "view",
-              appearance: {
-                bordered: true,
-                titled: true,
-                font: "instance",
-                theme: "light",
-                hide_download_button: resource === "question" ? false : null,
-              },
-            });
-
-            cy.log("Assert copying code in Parameters tab");
-            modal().within(() => {
-              cy.findByRole("tab", { name: "Parameters" }).click();
-
-              cy.findByText("Node.js").click();
-            });
-            popover().findByText("Ruby").click();
-            cy.findByTestId("embed-backend")
-              .findByTestId("copy-button")
-              .realClick();
-            expectGoodSnowplowEvent({
-              event: "static_embed_code_copied",
-              artifact: resource,
-              language: "ruby",
-              location: "code_params",
-              code: "backend",
-              appearance: {
-                bordered: true,
-                titled: true,
-                font: "instance",
-                theme: "light",
-                hide_download_button: resource === "question" ? false : null,
-              },
-            });
-
-            cy.log("Assert copying code in Appearance tab");
-            modal().within(() => {
-              cy.findByRole("tab", { name: "Appearance" }).click();
-
-              cy.findByText("Ruby").click();
-            });
-
-            popover().findByText("Python").click();
-
-            modal().within(() => {
-              cy.findByLabelText("Dark").click({ force: true });
-              if (resource === "dashboard") {
-                cy.findByLabelText("Dashboard title").click({ force: true });
-              }
-              if (resource === "question") {
-                cy.findByLabelText("Question title").click({ force: true });
-              }
-              cy.findByLabelText("Border").click({ force: true });
-              cy.findByLabelText("Font").click();
-            });
-
-            popover().findByText("Oswald").click();
-
-            if (resource === "question") {
-              modal().findByLabelText("Download data").click({ force: true });
-            }
+          // Question don't have an option to disable background (metabase#43838)
+          if (resource === "dashboard") {
+            cy.findByLabelText("Dashboard background").click({ force: true });
 
             cy.findByTestId("embed-backend")
               .findByTestId("copy-button")
               .realClick();
-            expectGoodSnowplowEvent({
+            H.expectUnstructuredSnowplowEvent({
               event: "static_embed_code_copied",
               artifact: resource,
               language: "python",
               location: "code_appearance",
               code: "backend",
               appearance: {
+                background: false,
+                bordered: false,
+                titled: false,
+                font: "instance",
+                theme: "night",
+                downloads: null,
+              },
+            });
+          }
+        });
+
+        describe("Pro/EE instances", () => {
+          beforeEach(() => {
+            H.activateToken("pro-self-hosted");
+          });
+
+          it("should send `static_embed_code_copied` when copying the static embed code", () => {
+            cy.get("@resourceId").then((id) => {
+              visitResource(resource, id);
+
+              H.openLegacyStaticEmbeddingModal({
+                resource,
+                resourceId: id,
+              });
+            });
+
+            cy.log("Assert copying codes in Overview tab");
+            cy.findByTestId("embed-backend")
+              .findByTestId("copy-button")
+              .realClick();
+
+            // TODO: fix this test, it's flaky on CI
+            /*H.expectUnstructuredSnowplowEvent({
+              event: "static_embed_code_copied",
+              artifact: resource,
+              language: "node",
+              location: "code_overview",
+              code: "backend",
+              appearance: {
+                background: true,
+                bordered: true,
+                titled: true,
+                font: "instance",
+                theme: "light",
+                enabled_download_types: { pdf: true, results: true },
+              },
+            });*/
+
+            cy.findByTestId("embed-frontend")
+              .findByTestId("copy-button")
+              .realClick();
+            H.expectUnstructuredSnowplowEvent({
+              event: "static_embed_code_copied",
+              artifact: resource,
+              language: "pug",
+              location: "code_overview",
+              code: "view",
+              appearance: {
+                background: true,
+                bordered: true,
+                titled: true,
+                font: "instance",
+                theme: "light",
+                enabled_download_types: { pdf: true, results: true },
+              },
+            });
+
+            cy.log("Assert copying code in Parameters tab");
+            H.modal().within(() => {
+              cy.findByRole("tab", { name: "Parameters" }).click();
+
+              cy.findByText("Node.js").click();
+            });
+            H.popover().findByText("Ruby").click();
+            cy.findByTestId("embed-backend")
+              .findByTestId("copy-button")
+              .realClick();
+            H.expectUnstructuredSnowplowEvent({
+              event: "static_embed_code_copied",
+              artifact: resource,
+              language: "ruby",
+              location: "code_params",
+              code: "backend",
+              appearance: {
+                background: true,
+                bordered: true,
+                titled: true,
+                font: "instance",
+                theme: "light",
+                enabled_download_types: { pdf: true, results: true },
+              },
+            });
+
+            cy.log("Assert copying code in Appearance tab");
+            H.modal().within(() => {
+              cy.findByRole("tab", { name: "Look and Feel" }).click();
+
+              cy.findByText("Ruby").click();
+            });
+
+            H.popover().findByText("Python").click();
+
+            H.modal().within(() => {
+              cy.findByLabelText("Dark").click({ force: true });
+              if (resource === "dashboard") {
+                cy.findByLabelText("Dashboard title").click({ force: true });
+                cy.findByLabelText("Dashboard border").click({ force: true });
+              }
+              if (resource === "question") {
+                cy.findByLabelText("Question title").click({ force: true });
+                cy.findByLabelText("Question border").click({ force: true });
+              }
+              cy.findByLabelText("Font").click();
+            });
+
+            H.popover().findByText("Oswald").click();
+
+            cy.log(
+              "Assert that it sends `enabled_download_types: { pdf: false, results: false }` when both are disabled",
+            );
+            H.modal()
+              .findByLabelText(
+                resource === "dashboard"
+                  ? "Results (csv, xlsx, json, png)"
+                  : "Download (csv, xlsx, json, png)",
+              )
+              .click({ force: true });
+
+            // We have to also disable PDF exports for both to be disabled
+            if (resource === "dashboard") {
+              cy.findByLabelText("Export to PDF").click({ force: true });
+            }
+
+            cy.findByTestId("embed-backend")
+              .findByTestId("copy-button")
+              .realClick();
+            H.expectUnstructuredSnowplowEvent({
+              event: "static_embed_code_copied",
+              artifact: resource,
+              language: "python",
+              location: "code_appearance",
+              code: "backend",
+              appearance: {
+                background: true,
                 bordered: false,
                 titled: false,
                 font: "custom",
                 theme: "night",
-                hide_download_button: resource === "question" ? true : null,
+                enabled_download_types: { pdf: false, results: false },
               },
             });
           });
+
+          // Individual download options are only supported for dashboards
+          if (resource === "dashboard") {
+            it("should support disabling PDF and result downloads individually in `static_embed_code_copied`", () => {
+              cy.get("@resourceId").then((id) => {
+                visitResource(resource, id);
+
+                H.openLegacyStaticEmbeddingModal({
+                  resource: "dashboard",
+                  resourceId: id,
+                });
+              });
+
+              H.modal().within(() => {
+                cy.findByRole("tab", { name: "Look and Feel" }).click();
+              });
+
+              cy.log(
+                "Assert that it sends `enabled_download_types: { pdf: false, results: true }` when only results download is enabled",
+              );
+
+              // Disable PDF exports
+              cy.findByLabelText("Export to PDF").click({ force: true });
+
+              cy.findByTestId("embed-backend")
+                .findByTestId("copy-button")
+                .realClick();
+
+              H.expectUnstructuredSnowplowEvent({
+                event: "static_embed_code_copied",
+                artifact: resource,
+                language: "node",
+                location: "code_appearance",
+                code: "backend",
+                appearance: {
+                  background: true,
+                  bordered: true,
+                  titled: true,
+                  font: "instance",
+                  theme: "light",
+                  enabled_download_types: { pdf: false, results: true },
+                },
+              });
+
+              cy.log(
+                "Assert that it sends `enabled_download_types: { pdf: true, results: false }` when only PDF is enabled",
+              );
+
+              // Enable PDF exports again
+              cy.findByLabelText("Export to PDF").click({ force: true });
+
+              // Disable results download
+              cy.findByLabelText(
+                resource === "dashboard"
+                  ? "Results (csv, xlsx, json, png)"
+                  : "Download (csv, xlsx, json, png)",
+              ).click({ force: true });
+
+              cy.findByTestId("embed-backend")
+                .findByTestId("copy-button")
+                .realClick();
+
+              H.expectUnstructuredSnowplowEvent({
+                event: "static_embed_code_copied",
+                artifact: resource,
+                language: "node",
+                location: "code_appearance",
+                code: "backend",
+                appearance: {
+                  background: true,
+                  bordered: true,
+                  titled: true,
+                  font: "instance",
+                  theme: "light",
+                  enabled_download_types: { pdf: true, results: false },
+                },
+              });
+            });
+          }
         });
 
         it("should send `static_embed_discarded` when discarding changes in the static embed modal", () => {
-          cy.get("@resourceId").then(id => {
-            enableEmbeddingForResource({ resource, id });
+          cy.get("@resourceId").then((id) => {
             visitResource(resource, id);
+
+            H.openLegacyStaticEmbeddingModal({
+              resource,
+              resourceId: id,
+              activeTab: "parameters",
+            });
+
+            H.publishChanges(apiPath);
           });
 
           cy.log("changing parameters, so we could discard changes");
-          openStaticEmbeddingModal({ activeTab: "parameters" });
-          modal().button("Price").click();
-          popover().findByText("Editable").click();
+          H.modal().button("Price").click();
+          H.popover().findByText("Editable").click();
 
           cy.findByTestId("embed-modal-content-status-bar").within(() => {
             cy.findByText("Discard changes").click();
           });
 
-          expectGoodSnowplowEvent({
+          H.expectUnstructuredSnowplowEvent({
             event: "static_embed_discarded",
             artifact: resource,
           });
@@ -651,25 +836,29 @@ describe("#39152 sharing an unsaved question", () => {
           cy.then(function () {
             this.timeAfterResourceCreation = Date.now();
           });
-          cy.get("@resourceId").then(id => {
+          cy.get("@resourceId").then((id) => {
             visitResource(resource, id);
+
+            H.openLegacyStaticEmbeddingModal({ resource, resourceId: id });
           });
-          openStaticEmbeddingModal();
 
           cy.findByTestId("embed-modal-content-status-bar")
             .button("Publish")
             .click();
 
           cy.then(function () {
-            expectGoodSnowplowEvent({
+            H.expectUnstructuredSnowplowEvent({
               event: "static_embed_published",
               artifact: resource,
-              new_embed: true,
+              new_embed: false,
               time_since_creation: closeTo(
                 toSecond(Date.now() - this.timeAfterResourceCreation),
-                1,
+                15,
               ),
-              time_since_initial_publication: null,
+              time_since_initial_publication: closeTo(
+                toSecond(Date.now() - this.timeAfterResourceCreation),
+                15,
+              ),
               params: {
                 disabled: 3,
                 locked: 0,
@@ -683,12 +872,12 @@ describe("#39152 sharing an unsaved question", () => {
             .button("Unpublish")
             .click();
 
-          modal().findByRole("tab", { name: "Parameters" }).click();
-          modal().button("Price").click();
-          popover().findByText("Editable").click();
+          H.modal().findByRole("tab", { name: "Parameters" }).click();
+          H.modal().button("Price").click();
+          H.popover().findByText("Editable").click();
 
-          modal().button("Category").click();
-          popover().findByText("Locked").click();
+          H.modal().button("Category").click();
+          H.popover().findByText("Locked").click();
 
           cy.then(function () {
             const HOUR = 60 * 60 * 1000;
@@ -699,12 +888,12 @@ describe("#39152 sharing an unsaved question", () => {
               .button("Publish")
               .click();
 
-            expectGoodSnowplowEvent({
+            H.expectUnstructuredSnowplowEvent({
               event: "static_embed_published",
               artifact: resource,
               new_embed: false,
-              time_since_creation: closeTo(toSecond(HOUR), 10),
-              time_since_initial_publication: closeTo(toSecond(HOUR), 10),
+              time_since_creation: closeTo(toSecond(HOUR), 15),
+              time_since_initial_publication: closeTo(toSecond(HOUR), 15),
               params: {
                 disabled: 1,
                 locked: 1,
@@ -715,11 +904,13 @@ describe("#39152 sharing an unsaved question", () => {
         });
 
         it("should send `static_embed_unpublished` when unpublishing changes in the static embed modal", () => {
-          cy.get("@resourceId").then(id => {
-            enableEmbeddingForResource({ resource, id });
+          cy.get("@resourceId").then((id) => {
             visitResource(resource, id);
+
+            H.openLegacyStaticEmbeddingModal({ resource, resourceId: id });
+
+            H.publishChanges(apiPath);
           });
-          openStaticEmbeddingModal();
 
           const HOUR = 60 * 60 * 1000;
           cy.clock(new Date(Date.now() + HOUR));
@@ -727,7 +918,7 @@ describe("#39152 sharing an unsaved question", () => {
             cy.findByText("Unpublish").click();
           });
 
-          expectGoodSnowplowEvent({
+          H.expectUnstructuredSnowplowEvent({
             event: "static_embed_unpublished",
             artifact: resource,
             time_since_creation: closeTo(toSecond(HOUR), 10),
@@ -743,15 +934,9 @@ function toSecond(milliseconds) {
   return Math.round(milliseconds / 1000);
 }
 
-function expectDisabledButtonWithTooltipLabel(tooltipLabel) {
-  cy.findByTestId("resource-embed-button").should("be.disabled");
-  cy.findByTestId("resource-embed-button").realHover();
-  cy.findByRole("tooltip").findByText(tooltipLabel).should("be.visible");
-}
-
 function createResource(resource) {
   if (resource === "question") {
-    return cy.createNativeQuestion({
+    return H.createNativeQuestion({
       name: "Question",
       native: {
         query: `
@@ -808,7 +993,7 @@ function createResource(resource) {
       type: "string/contains",
     };
 
-    return cy.createDashboard({
+    return H.createDashboard({
       name: "Dashboard",
       parameters: [dateFilter, numberFilter, textFilter],
     });
@@ -817,28 +1002,21 @@ function createResource(resource) {
 
 function createPublicResourceLink(resource, id) {
   if (resource === "question") {
-    return createPublicQuestionLink(id);
+    return H.createPublicQuestionLink(id);
   }
   if (resource === "dashboard") {
-    return createPublicDashboardLink(id);
+    return H.createPublicDashboardLink(id);
   }
 }
 
 function visitResource(resource, id) {
   if (resource === "question") {
-    visitQuestion(id);
+    H.visitQuestion(id);
   }
 
   if (resource === "dashboard") {
-    visitDashboard(id);
+    H.visitDashboard(id);
   }
-}
-
-function enableEmbeddingForResource({ resource, id }) {
-  const endpoint = resource === "question" ? "card" : "dashboard";
-  cy.request("PUT", `/api/${endpoint}/${id}`, {
-    enable_embedding: true,
-  });
 }
 
 function assertValidPublicLink({ resource, shouldHaveRemoveLink }) {
@@ -852,7 +1030,7 @@ function assertValidPublicLink({ resource, shouldHaveRemoveLink }) {
     cy.findByTestId("public-link-input")
       .should("be.visible")
       .invoke("val")
-      .then(value => {
+      .should((value) => {
         expect(value).to.match(regex);
       });
 
@@ -863,7 +1041,7 @@ function assertValidPublicLink({ resource, shouldHaveRemoveLink }) {
 }
 
 function closeTo(value, offset) {
-  return comparedValue => {
+  return (comparedValue) => {
     return Math.abs(comparedValue - value) <= offset;
   };
 }

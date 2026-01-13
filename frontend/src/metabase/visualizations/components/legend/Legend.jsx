@@ -1,9 +1,8 @@
 import PropTypes from "prop-types";
-import { useCallback, useRef, useState } from "react";
 import { t } from "ttag";
 import _ from "underscore";
 
-import Popover from "metabase/components/Popover";
+import { Popover } from "metabase/ui";
 
 import {
   LegendLink,
@@ -24,14 +23,13 @@ const propTypes = {
   visibleIndex: PropTypes.number,
   visibleLength: PropTypes.number,
   isVertical: PropTypes.bool,
+  isInsidePopover: PropTypes.bool,
+  isQueryBuilder: PropTypes.bool,
   onHoverChange: PropTypes.func,
   onSelectSeries: PropTypes.func,
-  onRemoveSeries: PropTypes.func,
+  onToggleSeriesVisibility: PropTypes.func,
   isReversed: PropTypes.bool,
-  canRemoveSeries: PropTypes.func,
 };
-
-const alwaysTrue = () => true;
 
 const Legend = ({
   className,
@@ -40,26 +38,13 @@ const Legend = ({
   visibleIndex = 0,
   visibleLength = originalItems.length,
   isVertical,
+  isInsidePopover,
   onHoverChange,
   onSelectSeries,
-  onRemoveSeries,
+  onToggleSeriesVisibility,
   isReversed,
-  canRemoveSeries = alwaysTrue,
+  isQueryBuilder,
 }) => {
-  const targetRef = useRef();
-  const [isOpened, setIsOpened] = useState(null);
-  const [maxWidth, setMaxWidth] = useState(0);
-
-  const handleOpen = useCallback(() => {
-    setIsOpened(true);
-    setMaxWidth(targetRef.current.offsetWidth);
-  }, []);
-
-  const handleClose = useCallback(() => {
-    setIsOpened(false);
-    setMaxWidth(0);
-  }, []);
-
   const items = isReversed ? _.clone(originalItems).reverse() : originalItems;
 
   const overflowIndex = visibleIndex + visibleLength;
@@ -84,45 +69,40 @@ const Legend = ({
             item={item}
             index={itemIndex}
             isMuted={hovered && itemIndex !== hovered.index}
+            dotSize={isQueryBuilder ? "12px" : "8px"}
             isVertical={isVertical}
+            isInsidePopover={isInsidePopover}
             isReversed={isReversed}
             onHoverChange={onHoverChange}
             onSelectSeries={onSelectSeries}
-            onRemoveSeries={
-              canRemoveSeries(itemIndex) ? onRemoveSeries : undefined
-            }
+            onToggleSeriesVisibility={onToggleSeriesVisibility}
           />
         );
       })}
       {overflowLength > 0 && (
-        <LegendLinkContainer ref={targetRef} isVertical={isVertical}>
-          <LegendLink onMouseDown={handleOpen}>
-            {t`And ${overflowLength} more`}
-          </LegendLink>
-        </LegendLinkContainer>
-      )}
-      {isOpened && (
-        <Popover
-          target={targetRef.current}
-          targetOffsetX={POPOVER_OFFSET}
-          horizontalAttachments={["left"]}
-          verticalAttachments={["top", "bottom"]}
-          sizeToFit
-          onClose={handleClose}
-        >
-          <LegendPopoverContainer style={{ maxWidth }}>
-            <Legend
-              items={originalItems}
-              hovered={hovered}
-              visibleIndex={overflowIndex}
-              visibleLength={overflowLength}
-              isVertical={isVertical}
-              onHoverChange={onHoverChange}
-              onSelectSeries={onSelectSeries}
-              onRemoveSeries={onRemoveSeries}
-              isReversed={isReversed}
-            />
-          </LegendPopoverContainer>
+        <Popover width="target" offset={POPOVER_OFFSET} placement="top-start">
+          <Popover.Target>
+            <LegendLinkContainer isVertical={isVertical}>
+              <LegendLink>{t`And ${overflowLength} more`}</LegendLink>
+            </LegendLinkContainer>
+          </Popover.Target>
+          <Popover.Dropdown>
+            <LegendPopoverContainer>
+              <Legend
+                items={originalItems}
+                hovered={hovered}
+                dotSize={isQueryBuilder ? "12px" : "8px"}
+                visibleIndex={overflowIndex}
+                visibleLength={overflowLength}
+                isVertical={isVertical}
+                isInsidePopover
+                onHoverChange={onHoverChange}
+                onSelectSeries={onSelectSeries}
+                onToggleSeriesVisibility={onToggleSeriesVisibility}
+                isReversed={isReversed}
+              />
+            </LegendPopoverContainer>
+          </Popover.Dropdown>
         </Popover>
       )}
     </LegendRoot>

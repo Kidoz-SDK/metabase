@@ -37,13 +37,13 @@
                                      column-ref
                                      (lib.order-by/orderable-columns query stage-number)))
 
-(mu/defn ^:private existing-order-by-clause :- [:maybe ::lib.schema.order-by/order-by]
+(mu/defn- existing-order-by-clause :- [:maybe ::lib.schema.order-by/order-by]
   [query stage-number column]
   (m/find-first (fn [[_direction _opts expr, :as _asc-or-desc-clause]]
                   (lib.equality/find-matching-column query stage-number expr [column]))
                 (lib.order-by/order-bys query stage-number)))
 
-(mu/defn ^:private existing-order-by-direction :- [:maybe ::lib.schema.order-by/direction]
+(mu/defn- existing-order-by-direction :- [:maybe ::lib.schema.order-by/direction]
   [query stage-number column]
   (when-let [[direction _opts _expr] (existing-order-by-clause query stage-number column)]
     direction))
@@ -80,10 +80,11 @@
     stage-number                 :- :int
     {:keys [column], :as _drill} :- ::lib.schema.drill-thru/drill-thru.sort
     direction                    :- ::lib.schema.order-by/direction]
-   (-> query
-       ;; remove all existing order bys (see #37633), then add the new one.
-       (lib.order-by/remove-all-order-bys stage-number)
-       (lib.order-by/order-by stage-number column (keyword direction)))))
+   (let [resolved-column (lib.drill-thru.common/breakout->resolved-column query stage-number column)]
+     (-> query
+         ;; remove all existing order bys (see #37633), then add the new one.
+         (lib.order-by/remove-all-order-bys stage-number)
+         (lib.order-by/order-by stage-number resolved-column (keyword direction))))))
 
 (defmethod lib.drill-thru.common/drill-thru-info-method :drill-thru/sort
   [_query _stage-number {directions :sort-directions}]

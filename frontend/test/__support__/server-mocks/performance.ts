@@ -1,8 +1,8 @@
 import fetchMock from "fetch-mock";
 
-import type { Config as CacheConfig } from "metabase-types/api";
+import type { CacheConfig } from "metabase-types/api";
 export function setupPerformanceEndpoints(cacheConfigs: CacheConfig[]) {
-  fetchMock.get({ url: "path:/api/cache" }, { data: cacheConfigs });
-  fetchMock.put({ url: "path:/api/cache" }, {});
-  fetchMock.delete({ url: "path:/api/cache" }, {});
+  fetchMock.get("path:/api/cache", { data: cacheConfigs });
+  fetchMock.put("path:/api/cache", {});
+  fetchMock.delete("path:/api/cache", {});
 }

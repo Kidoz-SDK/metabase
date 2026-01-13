@@ -1,7 +1,8 @@
 import { t } from "ttag";
 
 import { formatNullable } from "metabase/lib/formatting/nullable";
-import { sumMetric } from "metabase/visualizations/echarts/cartesian/model/dataset";
+import { getColumnScaling } from "metabase/visualizations/echarts/cartesian/model/util";
+import { sumMetric } from "metabase/visualizations/lib/dataset";
 import type {
   CartesianChartColumns,
   ColumnDescriptor,
@@ -16,17 +17,27 @@ import type {
 } from "metabase/visualizations/shared/types/data";
 import type { ColumnFormatter } from "metabase/visualizations/shared/types/format";
 import type {
+  ComputedVisualizationSettings,
+  RemappingHydratedDatasetColumn,
+} from "metabase/visualizations/types";
+import type {
+  DatasetData,
   RowValue,
   RowValues,
   SeriesOrderSetting,
-  DatasetData,
 } from "metabase-types/api";
 
 import { getChartMetrics } from "./series";
 
-const getMetricValue = (value: RowValue): MetricValue => {
+const getMetricValue = (
+  value: RowValue,
+  metric: RemappingHydratedDatasetColumn,
+  settings: ComputedVisualizationSettings,
+): MetricValue => {
+  const scale = getColumnScaling(metric, settings);
+
   if (typeof value === "number") {
-    return value;
+    return scale * value;
   }
 
   return null;
@@ -43,6 +54,7 @@ const sumMetrics = (left: MetricDatum, right: MetricDatum): MetricDatum => {
 export const getGroupedDataset = (
   rows: RowValues[],
   chartColumns: CartesianChartColumns,
+  settings: ComputedVisualizationSettings,
   columnFormatter: ColumnFormatter,
 ): GroupedDataset => {
   const { dimension } = chartColumns;
@@ -61,7 +73,11 @@ export const getGroupedDataset = (
 
     const rowMetrics = getChartMetrics(chartColumns).reduce<MetricDatum>(
       (datum, metric) => {
-        datum[metric.column.name] = getMetricValue(row[metric.index]);
+        datum[metric.column.name] = getMetricValue(
+          row[metric.index],
+          metric.column,
+          settings,
+        );
         return datum;
       },
       {},
@@ -124,7 +140,7 @@ export const trimData = (
         currentValue.metrics,
       );
 
-      Object.keys(currentValue.breakout ?? {}).map(breakoutName => {
+      Object.keys(currentValue.breakout ?? {}).map((breakoutName) => {
         groupedValue.breakout ??= {};
         groupedValue.breakout[breakoutName] = {
           metrics: sumMetrics(
@@ -157,20 +173,20 @@ const getBreakoutDistinctValues = (
   data: DatasetData,
   breakout: ColumnDescriptor,
   columnFormatter: ColumnFormatter,
-) => {
+): string[] => {
   const formattedDistinctValues: string[] = [];
   const usedRawValues = new Set<RowValue>();
 
-  data.rows.forEach(row => {
+  for (const row of data.rows) {
     const rawValue = row[breakout.index];
 
     if (usedRawValues.has(rawValue)) {
-      return;
+      continue;
     }
 
     usedRawValues.add(rawValue);
     formattedDistinctValues.push(columnFormatter(rawValue, breakout.column));
-  });
+  }
 
   return formattedDistinctValues;
 };
@@ -179,13 +195,20 @@ const getBreakoutSeries = (
   breakoutValues: RowValue[],
   metric: ColumnDescriptor,
   dimension: ColumnDescriptor,
+  settings: ComputedVisualizationSettings,
 ): Series<GroupedDatum, SeriesInfo>[] => {
-  return breakoutValues.map(breakoutValue => {
+  return breakoutValues.map((breakoutValue) => {
     const breakoutName = String(breakoutValue);
+    const customName = settings?.series_settings?.[breakoutName]?.title;
     return {
       seriesKey: breakoutName,
-      seriesName: breakoutName,
-      yAccessor: (datum: GroupedDatum) => formatNullable(datum.dimensionValue),
+      seriesName: customName ?? breakoutName,
+      yAccessor: (datum: GroupedDatum) =>
+        formatNullable(
+          typeof datum.dimensionValue === "object"
+            ? JSON.stringify(datum.dimensionValue)
+            : datum.dimensionValue,
+        ),
       xAccessor: (datum: GroupedDatum) =>
         datum.breakout?.[breakoutName]?.metrics[metric.column.name] ?? null,
       seriesInfo: {
@@ -200,12 +223,19 @@ const getBreakoutSeries = (
 const getMultipleMetricSeries = (
   dimension: ColumnDescriptor,
   metrics: ColumnDescriptor[],
+  settings: ComputedVisualizationSettings,
 ): Series<GroupedDatum, SeriesInfo>[] => {
-  return metrics.map(metric => {
+  return metrics.map((metric) => {
+    const seriesKey = metric.column.name;
+    const customName = settings?.series_settings?.[seriesKey]?.title;
+    const defaultName = metric.column.display_name ?? metric.column.name;
     return {
-      seriesKey: metric.column.name,
-      seriesName: metric.column.display_name ?? metric.column.name,
-      yAccessor: (datum: GroupedDatum) => datum.dimensionValue,
+      seriesKey,
+      seriesName: customName ?? defaultName,
+      yAccessor: (datum: GroupedDatum) =>
+        typeof datum.dimensionValue === "object"
+          ? JSON.stringify(datum.dimensionValue)
+          : datum.dimensionValue,
       xAccessor: (datum: GroupedDatum) => datum.metrics[metric.column.name],
       seriesInfo: {
         dimensionColumn: dimension.column,
@@ -219,6 +249,7 @@ export const getSeries = (
   data: DatasetData,
   chartColumns: CartesianChartColumns,
   columnFormatter: ColumnFormatter,
+  settings: ComputedVisualizationSettings,
 ): Series<GroupedDatum, SeriesInfo>[] => {
   if ("breakout" in chartColumns) {
     const breakoutValues = getBreakoutDistinctValues(
@@ -231,10 +262,15 @@ export const getSeries = (
       breakoutValues,
       chartColumns.metric,
       chartColumns.dimension,
+      settings,
     );
   }
 
-  return getMultipleMetricSeries(chartColumns.dimension, chartColumns.metrics);
+  return getMultipleMetricSeries(
+    chartColumns.dimension,
+    chartColumns.metrics,
+    settings,
+  );
 };
 
 export const getOrderedSeries = (
@@ -246,10 +282,10 @@ export const getOrderedSeries = (
   }
 
   return seriesOrder
-    .filter(orderSetting => orderSetting.enabled)
-    .map(orderSetting => {
+    .filter((orderSetting) => orderSetting.enabled)
+    .map((orderSetting) => {
       const foundSeries = series.find(
-        singleSeries => singleSeries.seriesKey === orderSetting.key,
+        (singleSeries) => singleSeries.seriesKey === orderSetting.key,
       );
       if (foundSeries === undefined) {
         throw new TypeError("Series not found");
@@ -261,6 +297,6 @@ export const getOrderedSeries = (
 export const sanatizeResultData = (data: DatasetData) => {
   return {
     ...data,
-    cols: data.cols.filter(col => col.expression_name !== "pivot-grouping"),
+    cols: data.cols.filter((col) => col.name !== "pivot-grouping"),
   };
 };

@@ -2,20 +2,20 @@ import { useMemo } from "react";
 import { t } from "ttag";
 import * as Yup from "yup";
 
-import Alert from "metabase/core/components/Alert";
-import Button from "metabase/core/components/Button";
-import ExternalLink from "metabase/core/components/ExternalLink/ExternalLink";
-import FormErrorMessage from "metabase/core/components/FormErrorMessage";
-import FormFooter from "metabase/core/components/FormFooter";
-import FormSelect from "metabase/core/components/FormSelect";
-import FormSubmitButton from "metabase/core/components/FormSubmitButton";
-import Link from "metabase/core/components/Link/Link";
+import Alert from "metabase/common/components/Alert";
+import Button from "metabase/common/components/Button";
+import ExternalLink from "metabase/common/components/ExternalLink/ExternalLink";
+import FormErrorMessage from "metabase/common/components/FormErrorMessage";
+import { FormFooter } from "metabase/common/components/FormFooter";
+import FormSubmitButton from "metabase/common/components/FormSubmitButton";
+import Link from "metabase/common/components/Link/Link";
+import { useDocsUrl } from "metabase/common/hooks";
 import CS from "metabase/css/core/index.css";
-import { Form, FormProvider } from "metabase/forms";
+import { Form, FormProvider, FormSelect } from "metabase/forms";
 import * as Errors from "metabase/lib/errors";
-import MetabaseSettings from "metabase/lib/settings";
+import { renderUserAttributesForSelect } from "metabase-enterprise/sandboxes/utils";
 import type Database from "metabase-lib/v1/metadata/Database";
-import type { UserAttribute } from "metabase-types/api";
+import type { UserAttributeKey } from "metabase-types/api";
 
 import { ImpersonationWarning } from "../ImpersonationWarning";
 
@@ -29,10 +29,10 @@ const ROLE_ATTRIBUTION_MAPPING_SCHEMA = Yup.object({
 });
 
 type ImpersonationModalViewProps = {
-  attributes: UserAttribute[];
-  selectedAttribute?: UserAttribute;
+  attributes: UserAttributeKey[];
+  selectedAttribute?: UserAttributeKey;
   database: Database;
-  onSave: (attribute: UserAttribute) => void;
+  onSave: (attribute: UserAttributeKey) => void;
   onCancel: () => void;
 };
 
@@ -55,15 +55,12 @@ export const ImpersonationModalView = ({
         ? [selectedAttribute, ...attributes]
         : attributes;
 
-    return selectableAttributes.map(attribute => ({
-      name: attribute,
-      value: attribute,
-    }));
+    return selectableAttributes;
   }, [attributes, selectedAttribute]);
 
   const hasAttributes = attributeOptions.length > 0;
 
-  const handleSubmit = ({ attribute }: { attribute?: UserAttribute }) => {
+  const handleSubmit = ({ attribute }: { attribute?: UserAttributeKey }) => {
     if (attribute != null) {
       onSave(attribute);
     }
@@ -71,11 +68,13 @@ export const ImpersonationModalView = ({
 
   // Does the "role" field need to first be filled out on the DB details page?
   const roleRequired =
-    database.features.includes("connection-impersonation-requires-role") &&
-    database.details["role"] == null;
+    database.features?.includes("connection-impersonation-requires-role") &&
+    (!database.details || database.details["role"] == null);
 
   // for redshift, we impersonate using users, not roles
   const impersonationUsesUsers = database.engine === "redshift";
+  // eslint-disable-next-line no-unconditional-metabase-links-render -- Only shows for admins.
+  const { url: permsDocsUrl } = useDocsUrl("permissions/data");
 
   const modalTitle = impersonationUsesUsers
     ? // eslint-disable-next-line no-literal-metabase-strings -- Metabase settings
@@ -95,8 +94,7 @@ export const ImpersonationModalView = ({
         {modalMessage}{" "}
         <ExternalLink
           className={CS.link}
-          // eslint-disable-next-line no-unconditional-metabase-links-render -- Admin settings
-          href={MetabaseSettings.docsUrl("permissions/data")}
+          href={permsDocsUrl}
         >{t`Learn More`}</ExternalLink>
       </ImpersonationDescription>
       {roleRequired ? (
@@ -125,8 +123,10 @@ export const ImpersonationModalView = ({
               <FormSelect
                 name="attribute"
                 placeholder={t`Pick a user attribute`}
-                title={t`User attribute`}
-                options={attributeOptions}
+                label={t`User attribute`}
+                data={attributeOptions}
+                mb="1.25rem"
+                renderOption={renderUserAttributesForSelect}
               />
 
               <ImpersonationWarning database={database} />

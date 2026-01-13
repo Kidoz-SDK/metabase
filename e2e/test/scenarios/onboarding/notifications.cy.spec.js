@@ -1,6 +1,5 @@
+const { H } = cy;
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
-import { restore } from "e2e/support/helpers/e2e-setup-helpers";
-import { modal } from "e2e/support/helpers/e2e-ui-elements-helpers";
 
 const { ORDERS_ID } = SAMPLE_DATABASE;
 
@@ -9,29 +8,6 @@ const getQuestionDetails = () => ({
   query: {
     "source-table": ORDERS_ID,
   },
-});
-
-const getAlertDetails = ({ card_id, user_id, admin_id }) => ({
-  card: {
-    id: card_id,
-    include_csv: false,
-    include_xls: false,
-  },
-  channels: [
-    {
-      enabled: true,
-      channel_type: "email",
-      schedule_type: "hourly",
-      recipients: [
-        {
-          id: user_id,
-        },
-        {
-          id: admin_id,
-        },
-      ],
-    },
-  ],
 });
 
 const getPulseDetails = ({ card_id, dashboard_id }) => ({
@@ -55,20 +31,44 @@ const getPulseDetails = ({ card_id, dashboard_id }) => ({
 
 describe("scenarios > account > notifications", () => {
   beforeEach(() => {
-    restore();
+    H.restore();
   });
 
-  describe("alerts", () => {
+  describe("notifications", () => {
     beforeEach(() => {
       cy.signInAsAdmin().then(() => {
-        cy.getCurrentUser().then(({ body: { id: admin_id } }) => {
+        H.getCurrentUser().then(({ body: { id: admin_id } }) => {
+          cy.wrap(admin_id).as("admin_id");
+
           cy.signInAsNormalUser().then(() => {
-            cy.getCurrentUser().then(({ body: { id: user_id } }) => {
-              cy.createQuestion(getQuestionDetails()).then(
+            H.getCurrentUser().then(({ body: { id: user_id } }) => {
+              cy.wrap(user_id).as("user_id");
+
+              H.createQuestion(getQuestionDetails()).then(
                 ({ body: { id: card_id } }) => {
-                  cy.createAlert(
-                    getAlertDetails({ card_id, user_id, admin_id }),
-                  );
+                  cy.wrap(card_id).as("card_id");
+
+                  H.createQuestionAlert({
+                    user_id: admin_id,
+                    card_id,
+                    handlers: [
+                      {
+                        channel_type: "channel/email",
+                        recipients: [
+                          {
+                            type: "notification-recipient/user",
+                            user_id,
+                            details: null,
+                          },
+                          {
+                            type: "notification-recipient/user",
+                            user_id: admin_id,
+                            details: null,
+                          },
+                        ],
+                      },
+                    ],
+                  });
                 },
               );
             });
@@ -83,44 +83,60 @@ describe("scenarios > account > notifications", () => {
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText("Not seeing one here?").click();
 
-      modal().within(() => {
+      H.modal().within(() => {
         cy.findByText("Not seeing something listed here?");
         cy.findByText("Got it").click();
       });
 
-      modal().should("not.exist");
+      H.modal().should("not.exist");
     });
 
     it("should be able to see alerts notifications", () => {
       openUserNotifications();
 
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Question");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Emailed hourly", { exact: false });
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Created by you", { exact: false });
+      cy.findByTestId("notifications-list").within(() => {
+        cy.findByText("Question");
+        cy.findByText("Daily at 9:00 am", { exact: false });
+        cy.findByText("Created by you", { exact: false });
+      });
     });
 
-    it("should be able to unsubscribe and delete an alert when the user created it", () => {
+    it("should be able to delete an alert when the user created it and he is a single recipient", () => {
       openUserNotifications();
 
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Question");
+      cy.intercept("GET", "/api/notification/*").as("getAlert");
+      cy.intercept("POST", "/api/notification/*/unsubscribe").as(
+        "alertUnsubscribe",
+      );
+      cy.intercept("PUT", "/api/notification/*").as("alertDelete");
+
+      cy.findByTestId("notifications-list").findByText("Question");
+
       clickUnsubscribe();
 
-      modal().within(() => {
+      cy.wait("@getAlert");
+
+      cy.findByTestId("alert-unsubscribe").within(() => {
         cy.findByText("Confirm you want to unsubscribe");
         cy.findByText("Unsubscribe").click();
-        cy.findByText("Unsubscribe").should("not.exist");
       });
 
-      modal().within(() => {
+      cy.wait("@alertUnsubscribe");
+      H.undoToastList()
+        .findByText("Successfully unsubscribed.")
+        .should("exist");
+
+      cy.findByTestId("alert-delete").within(() => {
         cy.findByText("You’re unsubscribed. Delete this alert as well?");
-        cy.findByText("Delete this alert").click();
+        cy.findByText("Delete it").click();
       });
 
-      modal().should("not.exist");
+      cy.wait("@alertDelete");
+      H.notificationList()
+        .findByText("The alert was successfully deleted.")
+        .should("exist");
+
+      H.modal().should("not.exist");
       cy.findByTestId("notification-list").should("not.exist");
     });
 
@@ -129,27 +145,73 @@ describe("scenarios > account > notifications", () => {
       cy.signInAsAdmin();
       openUserNotifications();
 
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Question");
+      cy.findByTestId("notifications-list")
+        .findByText("Created by Robert Tableton", { exact: false })
+        .should("exist");
+
       clickUnsubscribe();
 
-      modal().within(() => {
+      H.modal().within(() => {
         cy.findByText("Confirm you want to unsubscribe");
         cy.findByText("Unsubscribe").click();
       });
 
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Question").should("not.exist");
+      cy.findByTestId("notifications-list")
+        .findByText("Created by Robert Tableton", { exact: false })
+        .should("not.exist");
+    });
+
+    it("should be able to see created notifications that a user is not subscribed to", () => {
+      cy.get("@admin_id").then((admin_id) =>
+        cy.get("@card_id").then((card_id) => {
+          H.createQuestionAlert({
+            admin_id,
+            card_id,
+            cron_schedule: "0 0 2 * * ?",
+            handlers: [
+              {
+                channel_type: "channel/email",
+                recipients: [
+                  {
+                    type: "notification-recipient/user",
+                    user_id: admin_id,
+                    details: null,
+                  },
+                ],
+              },
+            ],
+          });
+        }),
+      );
+
+      openUserNotifications();
+
+      cy.findByTestId("notifications-list").within(() => {
+        cy.findByText("Check daily at 2:00 AM").should("exist");
+
+        const notificationCard = () =>
+          cy
+            .findByText("Check daily at 2:00 AM")
+            .closest("[data-testid=notification-alert-item]")
+            .should("exist");
+
+        notificationCard().within(() => {
+          cy.findByText("Created by you", { exact: false }).should("exist");
+          cy.icon("close").should("exist").click();
+        });
+      });
+
+      H.modal().findByText("Delete this alert?").should("exist");
     });
   });
 
   describe("pulses", () => {
     beforeEach(() => {
       cy.signInAsNormalUser().then(() => {
-        cy.createQuestionAndDashboard({
+        H.createQuestionAndDashboard({
           questionDetails: getQuestionDetails(),
         }).then(({ body: { card_id, dashboard_id } }) => {
-          cy.createPulse(getPulseDetails({ card_id, dashboard_id }));
+          H.createPulse(getPulseDetails({ card_id, dashboard_id }));
         });
       });
     });
@@ -160,12 +222,12 @@ describe("scenarios > account > notifications", () => {
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText("Not seeing one here?").click();
 
-      modal().within(() => {
+      H.modal().within(() => {
         cy.findByText("Not seeing something listed here?");
         cy.findByText("Got it").click();
       });
 
-      modal().should("not.exist");
+      H.modal().should("not.exist");
     });
 
     it("should be able to see pulses notifications", () => {
@@ -186,7 +248,7 @@ describe("scenarios > account > notifications", () => {
       cy.findByText("Subscription");
       clickUnsubscribe();
 
-      modal().within(() => {
+      H.modal().within(() => {
         cy.findByText("Delete this subscription?");
         cy.findByText("Yes, delete this subscription").click();
       });

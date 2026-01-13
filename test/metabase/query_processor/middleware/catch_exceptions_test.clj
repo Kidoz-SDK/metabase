@@ -1,10 +1,10 @@
 (ns metabase.query-processor.middleware.catch-exceptions-test
-  "There are additional tests in [[metabase.query-processor-test.failure-test]]."
+  "There are additional tests in [[metabase.query-processor.failure-test]]."
   (:require
    [clojure.test :refer :all]
    [metabase.driver :as driver]
-   [metabase.models.data-permissions :as data-perms]
-   [metabase.models.permissions-group :as perms-group]
+   [metabase.permissions.models.data-permissions :as data-perms]
+   [metabase.permissions.models.permissions-group :as perms-group]
    [metabase.query-processor :as qp]
    [metabase.query-processor.compile :as qp.compile]
    [metabase.query-processor.error-type :as qp.error-type]
@@ -14,7 +14,9 @@
    [metabase.query-processor.preprocess :as qp.preprocess]
    [metabase.query-processor.reducible :as qp.reducible]
    [metabase.test :as mt]
-   [metabase.test.data.users :as test.users]))
+   [metabase.test.data.users :as test.users])
+  (:import
+   (java.sql SQLException)))
 
 (deftest ^:parallel exception-chain-test
   (testing "Should be able to get a sequence of exceptions by following causes, with the top-level Exception first"
@@ -28,7 +30,7 @@
   (testing "Should nicely format a chain of exceptions, with the top-level Exception appearing first"
     (testing "lowest-level error `:type` should be pulled up to the top-level"
       (let [e1 (ex-info "1" {:level 1})
-            e2 (ex-info "2" {:level 2, :type qp.error-type/qp} e1)
+            e2 (ex-info "2" {:level 2, :type qp.error-type/qp :is-curated true} e1)
             e3 (ex-info "3" {:level 3} e2)]
         (is (= {:status     :failed
                 :class      clojure.lang.ExceptionInfo
@@ -36,12 +38,13 @@
                 :stacktrace true
                 :error_type :qp
                 :ex-data    {:level 1}
-                :via        [{:status     :failed
-                              :class      clojure.lang.ExceptionInfo
-                              :error      "2"
-                              :stacktrace true
-                              :ex-data    {:level 2, :type :qp}
-                              :error_type :qp}
+                :via        [{:status        :failed
+                              :class         clojure.lang.ExceptionInfo
+                              :error         "2"
+                              :stacktrace    true
+                              :ex-data       {:level 2, :type :qp, :is-curated true}
+                              :error_type    :qp
+                              :error_is_curated true}
                              {:status     :failed
                               :class      clojure.lang.ExceptionInfo
                               :error      "3"
@@ -51,15 +54,38 @@
                    (update :stacktrace sequential?)
                    (update :via (fn [causes]
                                   (for [cause causes]
-                                    (update cause :stacktrace sequential?)))))))))))
-
+                                    (update cause :stacktrace sequential?))))))))))
+  (testing "SQLExceptions that include stack traces should have them removed"
+    (let [e1 (ex-info "mock databricks jdbc driver exception" {:level 1})
+          e2 (SQLException. "mock sql exception\n\tat line1\n\tat line2\n\tat line3" e1)
+          e3 (ex-info "mock exception" {:level 3} e2)]
+      (is (= {:status     :failed
+              :class      clojure.lang.ExceptionInfo
+              :error      "mock sql exception"
+              :stacktrace true
+              :ex-data    {:level 1}
+              :via        [{:status        :failed
+                            :class         java.sql.SQLException,
+                            :error         "mock sql exception\n\tat line1\n\tat line2\n\tat line3",
+                            :stacktrace    true
+                            :state nil}
+                           {:status     :failed
+                            :class      clojure.lang.ExceptionInfo
+                            :error      "mock exception"
+                            :stacktrace true
+                            :ex-data    {:level 3}}]}
+             (-> (#'catch-exceptions/exception-response e3)
+                 (update :stacktrace sequential?)
+                 (update :via (fn [causes]
+                                (for [cause causes]
+                                  (update cause :stacktrace sequential?))))))))))
 
 (defn catch-exceptions
   ([run]
    (catch-exceptions run {}))
 
   ([run query]
-   (let [query    (merge {:type :query} query)
+   (let [query    (merge {:type :query, :database 1} query)
          metadata {}
          rows     []
          qp       (fn [query rff]

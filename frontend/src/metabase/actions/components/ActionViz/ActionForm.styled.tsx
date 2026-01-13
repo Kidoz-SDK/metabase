@@ -1,13 +1,11 @@
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
-
-import { color } from "metabase/lib/colors";
-import { space } from "metabase/styled-components/theme";
 
 export const FormWrapper = styled.div`
   padding: 1.5rem;
-  background-color: ${color("white")};
-  border-radius: ${space(1)};
-  border: 1px solid ${color("border")};
+  background-color: var(--mb-color-bg-white);
+  border-radius: var(--mantine-spacing-sm);
+  border: 1px solid var(--mb-color-border);
   overflow-y: auto;
 `;
 

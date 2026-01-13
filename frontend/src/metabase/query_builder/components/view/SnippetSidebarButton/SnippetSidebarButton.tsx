@@ -1,26 +1,35 @@
+import cx from "classnames";
 import { t } from "ttag";
 
-import Tooltip from "metabase/core/components/Tooltip";
-import { Icon } from "metabase/ui";
+import { Box, Icon, Tooltip } from "metabase/ui";
 
-import { ButtonRoot } from "./SnippetSidebarButton.styled";
+import SnippetSidebarButtonS from "./SnippetSidebarButton.module.css";
 
 interface SnippetSidebarButtonProps {
   className?: string;
   isShowingSnippetSidebar: boolean;
+  toggleSnippetSidebar?: () => void;
   size: number;
-  toggleSnippetSidebar: () => void;
 }
 
 export const SnippetSidebarButton = ({
   className,
   isShowingSnippetSidebar,
-  size,
   toggleSnippetSidebar,
-}: SnippetSidebarButtonProps) => (
-  <Tooltip tooltip={t`SQL Snippets`}>
-    <ButtonRoot className={className} isSelected={isShowingSnippetSidebar}>
-      <Icon name="snippet" size={size} onClick={toggleSnippetSidebar} />
-    </ButtonRoot>
-  </Tooltip>
-);
+  size,
+}: SnippetSidebarButtonProps) => {
+  return (
+    <Tooltip label={t`SQL Snippets`}>
+      <Box
+        aria-label={t`SQL Snippets`}
+        component="a"
+        h={size}
+        className={cx(className, SnippetSidebarButtonS.ButtonRoot, {
+          [SnippetSidebarButtonS.isSelected]: isShowingSnippetSidebar,
+        })}
+      >
+        <Icon name="snippet" size={size} onClick={toggleSnippetSidebar} />
+      </Box>
+    </Tooltip>
+  );
+};

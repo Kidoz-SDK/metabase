@@ -3,8 +3,9 @@ import {
   DataPermissionValue,
 } from "metabase/admin/permissions/types";
 import Database from "metabase-lib/v1/metadata/Database";
+import Schema from "metabase-lib/v1/metadata/Schema";
 import type { SchemasPermissions } from "metabase-types/api";
-import { createMockDatabase } from "metabase-types/api/mocks";
+import { createMockDatabase, createMockSchema } from "metabase-types/api/mocks";
 
 import { upgradeViewPermissionsIfNeeded } from "./graph";
 
@@ -19,6 +20,16 @@ const database = new Database({
   schemas: [schema],
   tables: [tableId],
 });
+
+// mock out schemas as real Schema
+database.schemas = [
+  new Schema(
+    createMockSchema({
+      id: "100",
+      name: schema,
+    }),
+  ),
+];
 
 const createGraph = (viewPermissions: SchemasPermissions) => ({
   [groupId]: {
@@ -37,7 +48,7 @@ describe("upgradeViewPermissionsIfNeeded", () => {
     createGraph({ [schema]: { [tableId]: DataPermissionValue.SANDBOXED } }),
   ])(
     "should upgrade data access permission if it is not fully granted except impersonated",
-    graph => {
+    (graph) => {
       const updatedGraph = upgradeViewPermissionsIfNeeded(
         graph,
         groupId,

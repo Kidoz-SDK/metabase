@@ -4,8 +4,8 @@
    [clojure.string :as str]
    [clojure.test :refer :all]
    [clojure.tools.namespace.find :as ns.find]
-   [metabase.cmd.copy :as copy]
-   [metabase.plugins.classloader :as classloader]))
+   [metabase.classloader.core :as classloader]
+   [metabase.cmd.copy :as copy]))
 
 (deftest ^:parallel sql-for-selecting-instances-from-source-db-test
   (is (= "SELECT * FROM metabase_field ORDER BY id ASC"
@@ -29,13 +29,33 @@
     :model/CacheConfig
     :model/CardFavorite
     :model/CloudMigration
+    :model/ContentTranslation
     :model/DashboardFavorite
-    :model/FieldUsage
+    :model/DatabaseRouter
+    :model/Dependency
+    :model/PythonLibrary
     :model/Query
     :model/QueryCache
     :model/QueryExecution
     :model/QueryField
-    :model/TaskHistory})
+    :model/QueryTable
+    :model/RemoteSyncObject
+    :model/RemoteSyncTask
+    :model/SearchIndexMetadata
+    :model/SemanticSearchTokenTracking
+    :model/SupportAccessGrantLog
+    :model/TaskHistory
+    ;; TODO we should remove these models from here once serialization is supported
+    :model/Transform
+    :model/TransformRun
+    :model/TransformRunCancelation
+    :model/TransformJob
+    :model/TransformJobRun
+    :model/TransformJobTransformTag
+    :model/TransformTag
+    :model/TransformTransformTag
+    :model/Undo
+    :model/UserKeyValue})
 
 (defn- all-model-names []
   (into (sorted-set)
@@ -43,7 +63,7 @@
               (remove models-to-exclude))
         (descendants :metabase/model)))
 
-(deftest ^:paralell all-models-accounted-for-test
+(deftest ^:parallel all-models-accounted-for-test
   ;; make sure the entire system is loaded before running this test, to make sure we account for all the models.
   (doseq [ns-symb (ns.find/find-namespaces (classpath/system-classpath))
           :when   (and (str/starts-with? ns-symb "metabase")

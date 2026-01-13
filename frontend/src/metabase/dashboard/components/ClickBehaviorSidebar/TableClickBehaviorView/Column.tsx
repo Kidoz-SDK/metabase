@@ -1,9 +1,8 @@
 import type * as React from "react";
-import { t, jt, ngettext, msgid } from "ttag";
+import { jt, msgid, ngettext, t } from "ttag";
 
-import Dashboards from "metabase/entities/dashboards";
-import Questions from "metabase/entities/questions";
-import { color } from "metabase/lib/colors";
+import { Dashboards } from "metabase/entities/dashboards";
+import { Questions } from "metabase/entities/questions";
 import type { IconName } from "metabase/ui";
 import { getIconForField } from "metabase-lib/v1/metadata/utils/fields";
 import type {
@@ -32,14 +31,14 @@ const getLinkTargetName = (clickBehavior: CustomDestinationClickBehavior) => {
   }
   if (clickBehavior.linkType === "question") {
     return (
-      <Quoted>
+      <Quoted key="link-question">
         <Questions.Name id={targetId} />
       </Quoted>
     );
   }
   if (clickBehavior.linkType === "dashboard") {
     return (
-      <Quoted>
+      <Quoted key="link-dashboard">
         <Dashboards.Name id={targetId} />
       </Quoted>
     );
@@ -60,7 +59,7 @@ function getClickBehaviorDescription({
 
   if (clickBehavior.type === "crossfilter") {
     const parameters = Object.keys(clickBehavior.parameterMapping || {});
-    return (n =>
+    return ((n) =>
       ngettext(
         msgid`${column.display_name} updates ${n} filter`,
         `${column.display_name} updates ${n} filters`,
@@ -87,7 +86,7 @@ export const Column = ({ column, clickBehavior, onClick }: ColumnProps) => (
   <SidebarItem onClick={onClick}>
     <SidebarItem.Icon
       name={getIconForField(column) as unknown as IconName}
-      color={color("brand")}
+      c="brand"
       size={18}
     />
     <div>

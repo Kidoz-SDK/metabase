@@ -1,26 +1,34 @@
+import type { PieRow } from "metabase/visualizations/echarts/pie/model/types";
 import type {
-  ModerationReview,
   Card,
-  UnsavedCard,
-  VisualizationSettings,
-  SeriesOrderSetting,
-  StructuredDatasetQuery,
+  CardQueryMetadata,
+  ColumnRangeFormattingSetting,
+  ColumnSingleFormattingSetting,
+  ModerationReview,
   NativeDatasetQuery,
   PublicCard,
+  SeriesOrderSetting,
+  StructuredDatasetQuery,
   TableColumnOrderSetting,
+  UnsavedCard,
+  VisualizationSettings,
 } from "metabase-types/api";
 
+import { createMockEntityId } from "./entity-id";
 import {
   createMockNativeDatasetQuery,
   createMockStructuredDatasetQuery,
 } from "./query";
+import { createMockUser } from "./user";
 
+const MOCK_CARD_ENTITY_ID = createMockEntityId();
 export const createMockCard = (opts?: Partial<Card>): Card => ({
   id: 1,
+  entity_id: MOCK_CARD_ENTITY_ID,
   created_at: "2024-01-01T00:00:00Z",
   updated_at: "2024-01-01T00:00:00Z",
   name: "Question",
-  description: null,
+  description: "",
   display: "table",
   public_uuid: null,
   dataset_query: createMockStructuredDatasetQuery(),
@@ -29,10 +37,12 @@ export const createMockCard = (opts?: Partial<Card>): Card => ({
   type: "question",
   can_write: true,
   can_restore: false,
+  can_delete: false,
   cache_ttl: null,
   collection: null,
   collection_id: null,
   collection_position: null,
+  dashboard: null,
   last_query_start: null,
   average_query_time: null,
   based_on_upload: null,
@@ -40,6 +50,9 @@ export const createMockCard = (opts?: Partial<Card>): Card => ({
   enable_embedding: false,
   embedding_params: null,
   initially_published_at: null,
+  can_manage_db: true,
+  dashboard_id: null,
+  dashboard_count: null,
   ...opts,
 });
 
@@ -78,6 +91,15 @@ export const createMockUnsavedCard = (
   ...opts,
 });
 
+export const createMockCardQueryMetadata = (
+  opts?: Partial<CardQueryMetadata>,
+): CardQueryMetadata => ({
+  databases: [],
+  tables: [],
+  fields: [],
+  ...opts,
+});
+
 export const createMockVisualizationSettings = (
   opts?: Partial<VisualizationSettings>,
 ): VisualizationSettings => ({
@@ -103,6 +125,7 @@ export const createMockModerationReview = (
   status: "verified",
   created_at: "2015-01-01T20:10:30.200",
   most_recent: true,
+  user: createMockUser({ id: 1 }),
   ...opts,
 });
 
@@ -110,7 +133,44 @@ export const createMockTableColumnOrderSetting = (
   opts?: Partial<TableColumnOrderSetting>,
 ): TableColumnOrderSetting => ({
   name: "Column",
-  key: '["ref",["field",1,null]]',
   enabled: true,
+  ...opts,
+});
+
+export const createMockColumnSingleFormattingSetting = (
+  opts?: Partial<ColumnSingleFormattingSetting>,
+): ColumnSingleFormattingSetting => ({
+  type: "single",
+  columns: [],
+  operator: "=",
+  color: "red",
+  highlight_row: false,
+  value: 0,
+  ...opts,
+});
+
+export const createMockColumnRangeFormattingSetting = (
+  opts?: Partial<ColumnRangeFormattingSetting>,
+): ColumnRangeFormattingSetting => ({
+  type: "range",
+  columns: [],
+  colors: ["red", "green"],
+  min_type: "all",
+  max_type: "all",
+  min_value: 0,
+  max_value: 1,
+  ...opts,
+});
+
+export const createMockPieRow = (opts?: Partial<PieRow>): PieRow => ({
+  // eslint-disable-next-line no-color-literals
+  color: "#7172AD",
+  defaultColor: false,
+  enabled: true,
+  hidden: false,
+  isOther: false,
+  key: "Doohickey",
+  name: "Doohickey",
+  originalName: "Doohickey",
   ...opts,
 });

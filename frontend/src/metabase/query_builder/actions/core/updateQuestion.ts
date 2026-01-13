@@ -1,16 +1,11 @@
-import { assocIn } from "icepick";
 import _ from "underscore";
 
-import { getTrashUndoMessage } from "metabase/archive/utils";
-import Questions from "metabase/entities/questions";
 import { createThunkAction } from "metabase/lib/redux";
 import { loadMetadataForCard } from "metabase/questions/actions";
-import { addUndo } from "metabase/redux/undo";
 import * as Lib from "metabase-lib";
 import type Question from "metabase-lib/v1/Question";
-import { getTemplateTagParametersFromCard } from "metabase-lib/v1/parameters/utils/template-tags";
 import type NativeQuery from "metabase-lib/v1/queries/NativeQuery";
-import type { Card, Series } from "metabase-types/api";
+import type { Series } from "metabase-types/api";
 import type {
   Dispatch,
   GetState,
@@ -18,48 +13,18 @@ import type {
 } from "metabase-types/store";
 
 import {
-  getFirstQueryResult,
   getIsShowingTemplateTagsEditor,
   getQueryBuilderMode,
   getQuestion,
   getRawSeries,
 } from "../../selectors";
-import { setIsShowingTemplateTagsEditor } from "../native";
-import { updateUrl } from "../navigation";
 import { runQuestionQuery } from "../querying";
 import { onCloseQuestionInfo, setQueryBuilderMode, setUIControls } from "../ui";
+import { updateUrl } from "../url";
 
-import { getQuestionWithDefaultVisualizationSettings } from "./utils";
-
-function checkShouldRerunPivotTableQuestion({
-  isPivot,
-  wasPivot,
-  hasBreakouts,
-  currentQuestion,
-  newQuestion,
-}: {
-  isPivot: boolean;
-  wasPivot: boolean;
-  hasBreakouts: boolean;
-  currentQuestion?: Question;
-  newQuestion: Question;
-}) {
-  const isValidPivotTable = isPivot && hasBreakouts;
-  const displayChange =
-    (!wasPivot && isValidPivotTable) || (wasPivot && !isPivot);
-
-  if (displayChange) {
-    return true;
-  }
-
-  const currentPivotSettings = currentQuestion?.setting(
-    "pivot_table.column_split",
-  );
-  const newPivotSettings = newQuestion.setting("pivot_table.column_split");
-  return (
-    isValidPivotTable && !_.isEqual(currentPivotSettings, newPivotSettings)
-  );
-}
+import { setIsShowingTemplateTagsEditor } from "./native";
+import { computeQuestionPivotTable } from "./pivot-table";
+import { getAdHocQuestionWithVizSettings } from "./utils";
 
 function shouldTemplateTagEditorBeVisible({
   currentQuestion,
@@ -83,10 +48,12 @@ function shouldTemplateTagEditorBeVisible({
   ).isNative;
 
   const previousTags = isCurrentQuestionNative
-    ? (currentQuestion.legacyQuery() as NativeQuery).variableTemplateTags()
+    ? (
+        currentQuestion.legacyNativeQuery() as NativeQuery
+      ).variableTemplateTags()
     : [];
   const nextTags = isNewQuestionNative
-    ? (newQuestion.legacyQuery() as NativeQuery).variableTemplateTags()
+    ? (newQuestion.legacyNativeQuery() as NativeQuery).variableTemplateTags()
     : [];
   if (nextTags.length > previousTags.length) {
     return true;
@@ -117,69 +84,36 @@ export const updateQuestion = (
   return async (dispatch: Dispatch, getState: GetState) => {
     const currentQuestion = getQuestion(getState());
     const queryBuilderMode = getQueryBuilderMode(getState());
-    const { isEditable } = Lib.queryDisplayInfo(newQuestion.query());
 
-    const shouldTurnIntoAdHoc =
-      shouldStartAdHocQuestion &&
-      newQuestion.isSaved() &&
-      isEditable &&
-      queryBuilderMode !== "dataset";
-
-    if (shouldTurnIntoAdHoc) {
-      newQuestion = newQuestion.withoutNameAndId();
-
-      // When the dataset query changes, we should change the question type,
-      // to start building a new ad-hoc question based on a dataset
-      if (newQuestion.type() === "model" || newQuestion.type() === "metric") {
-        newQuestion = newQuestion.setType("question");
-        dispatch(onCloseQuestionInfo());
-      }
-    }
-
-    const queryResult = getFirstQueryResult(getState());
-    newQuestion = newQuestion.syncColumnsAndSettings(queryResult);
+    newQuestion = getAdHocQuestionWithVizSettings({
+      question: newQuestion,
+      currentQuestion,
+      onCloseQuestionInfo: () => dispatch(onCloseQuestionInfo()),
+      shouldStartAdHocQuestion:
+        shouldStartAdHocQuestion && queryBuilderMode !== "dataset",
+    });
 
     if (!newQuestion.canAutoRun()) {
       run = false;
     }
 
-    const isPivot = newQuestion.display() === "pivot";
-    const wasPivot = currentQuestion?.display() === "pivot";
+    const rawSeries = getRawSeries(getState()) as Series;
 
-    const isCurrentQuestionNative =
-      currentQuestion && Lib.queryDisplayInfo(currentQuestion.query()).isNative;
+    const computedPivotQuestion = computeQuestionPivotTable({
+      question: newQuestion,
+      currentQuestion,
+      rawSeries,
+    });
+
+    newQuestion = computedPivotQuestion.question;
+
+    if (computedPivotQuestion.shouldRun !== null) {
+      run = computedPivotQuestion.shouldRun;
+    }
+
     const isNewQuestionNative = Lib.queryDisplayInfo(
       newQuestion.query(),
     ).isNative;
-
-    if (wasPivot || isPivot) {
-      const hasBreakouts =
-        !isNewQuestionNative &&
-        Lib.breakouts(newQuestion.query(), -1).length > 0;
-
-      // compute the pivot setting now so we can query the appropriate data
-      if (isPivot && hasBreakouts) {
-        const key = "pivot_table.column_split";
-        const rawSeries = getRawSeries(getState()) as Series;
-
-        if (rawSeries) {
-          const series = assocIn(rawSeries, [0, "card"], newQuestion.card());
-          const setting = getQuestionWithDefaultVisualizationSettings(
-            newQuestion,
-            series,
-          ).setting(key);
-          newQuestion = newQuestion.updateSettings({ [key]: setting });
-        }
-      }
-
-      run = checkShouldRerunPivotTableQuestion({
-        isPivot,
-        wasPivot,
-        hasBreakouts,
-        currentQuestion,
-        newQuestion,
-      });
-    }
 
     // Native query should never be in notebook mode (metabase#12651)
     if (queryBuilderMode === "notebook" && isNewQuestionNative) {
@@ -190,11 +124,7 @@ export const updateQuestion = (
       );
     }
 
-    // Sync card's parameters with the template tags;
-    if (isNewQuestionNative) {
-      const parameters = getTemplateTagParametersFromCard(newQuestion.card());
-      newQuestion = newQuestion.setParameters(parameters);
-    }
+    newQuestion = newQuestion.applyTemplateTagParameters();
 
     await dispatch({
       type: UPDATE_QUESTION,
@@ -204,6 +134,9 @@ export const updateQuestion = (
     if (shouldUpdateUrl) {
       dispatch(updateUrl(null, { dirty: true }));
     }
+
+    const isCurrentQuestionNative =
+      currentQuestion && Lib.queryDisplayInfo(currentQuestion.query()).isNative;
 
     if (isCurrentQuestionNative || isNewQuestionNative) {
       const isVisible = getIsShowingTemplateTagsEditor(getState());
@@ -230,13 +163,8 @@ export const updateQuestion = (
       newQuestion.id(),
       newQuestion.type(),
     );
-    try {
-      if (!_.isEqual(currentDependencies, nextDependencies)) {
-        await dispatch(loadMetadataForCard(newQuestion.card()));
-      }
-    } catch (e) {
-      // this will fail if user doesn't have data permissions but thats ok
-      console.warn("Couldn't load metadata", e);
+    if (!_.isEqual(currentDependencies, nextDependencies)) {
+      await dispatch(loadMetadataForCard(newQuestion.card()));
     }
 
     if (run) {
@@ -250,14 +178,10 @@ export const updateQuestion = (
 export const SET_ARCHIVED_QUESTION = "metabase/question/SET_ARCHIVED_QUESTION";
 export const setArchivedQuestion = createThunkAction(
   SET_ARCHIVED_QUESTION,
-  function (question, archived = true, undoing = false) {
+  function (question, archived = true) {
     return async function (dispatch) {
-      const result = (await dispatch(
-        Questions.actions.update({ id: question.card().id }, { archived }),
-      )) as { payload: { object: Card } };
-
       await dispatch(
-        updateQuestion(question.setCard(result.payload.object), {
+        updateQuestion(question.setArchived(archived), {
           shouldUpdateUrl: false,
           shouldStartAdHocQuestion: false,
           // results can change after entering/leaving the trash
@@ -268,16 +192,6 @@ export const setArchivedQuestion = createThunkAction(
 
       if (archived) {
         dispatch(setUIControls({ isNativeEditorOpen: false }));
-      }
-
-      if (!undoing) {
-        dispatch(
-          addUndo({
-            message: getTrashUndoMessage(question.card().name, archived),
-            action: () =>
-              dispatch(setArchivedQuestion(question, !archived, true)),
-          }),
-        );
       }
     };
   },

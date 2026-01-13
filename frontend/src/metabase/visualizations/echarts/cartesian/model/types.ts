@@ -2,10 +2,10 @@ import type { Dayjs } from "dayjs";
 import type { OptionAxisType } from "echarts/types/src/coord/axisCommonTypes";
 
 import type {
-  X_AXIS_DATA_KEY,
+  INDEX_KEY,
   NEGATIVE_STACK_TOTAL_DATA_KEY,
   POSITIVE_STACK_TOTAL_DATA_KEY,
-  ORIGINAL_INDEX_DATA_KEY,
+  X_AXIS_DATA_KEY,
 } from "metabase/visualizations/echarts/cartesian/constants/dataset";
 import type {
   CardId,
@@ -14,7 +14,7 @@ import type {
   RowValue,
 } from "metabase-types/api";
 
-export type BreakoutValue = RowValue;
+export type BreakoutValue = Exclude<RowValue, object>;
 export type ColumnName = string;
 
 export type SeriesDataKey =
@@ -27,7 +27,8 @@ export type DataKey =
   | SeriesDataKey
   | StackTotalDataKey
   | string
-  | typeof X_AXIS_DATA_KEY;
+  | typeof X_AXIS_DATA_KEY
+  | typeof INDEX_KEY;
 
 export type VizSettingsKey = string;
 
@@ -41,6 +42,9 @@ export type BaseSeriesModel = {
   name: string;
   color: string;
   dataKey: DataKey;
+  visible: boolean;
+  column: DatasetColumn;
+  columnIndex: number;
 };
 
 export type RegularSeriesModel = BaseSeriesModel & {
@@ -53,9 +57,6 @@ export type RegularSeriesModel = BaseSeriesModel & {
 
   cardId?: number;
   tooltipName: string;
-
-  column: DatasetColumn;
-  columnIndex: number;
 };
 
 export type BreakoutSeriesModel = RegularSeriesModel & {
@@ -88,7 +89,7 @@ export type DimensionModel = {
 
 export type Datum = Record<DataKey, RowValue> & {
   [X_AXIS_DATA_KEY]: RowValue;
-  [ORIGINAL_INDEX_DATA_KEY]?: number;
+  [INDEX_KEY]?: number;
 };
 export type ChartDataset<D extends Datum = Datum> = D[];
 export type Extent = [number, number];
@@ -100,7 +101,7 @@ export type TimeSeriesAxisFormatter = (
   value: RowValue,
   unit?: DateTimeAbsoluteUnit,
 ) => string;
-export type SeriesFormatters = Record<DataKey, LabelFormatter>;
+export type SeriesFormatters = Record<DataKey, LabelFormatter | undefined>;
 export type StackedSeriesFormatters = { [T in StackDisplay]?: LabelFormatter };
 
 export type DateRange = [Dayjs, Dayjs];
@@ -155,7 +156,8 @@ export type TimeSeriesXAxisModel = BaseXAxisModel &
   TimeSeriesAxisScaleTransforms & {
     axisType: "time";
     columnUnit?: DateTimeAbsoluteUnit;
-    timezone: string;
+    timezone?: string;
+    offsetMinutes?: number;
     interval: TimeSeriesInterval;
     intervalsCount: number;
     range: DateRange;
@@ -177,6 +179,8 @@ export type YAxisModel = {
   column: DatasetColumn;
   label?: string;
   formatter: AxisFormatter;
+  formatGoal: AxisFormatter;
+  splitNumber?: number;
   isNormalized?: boolean;
 };
 
@@ -192,7 +196,28 @@ export type StackModel = {
   seriesKeys: DataKey[];
 };
 
-export type CartesianChartModel = {
+type BaseChartDataDensity = {
+  type: string;
+  averageLabelWidth: number;
+  totalNumberOfLabels: number;
+};
+
+export type ChartDataDensity =
+  | WaterFallChartDataDensity
+  | ComboChartDataDensity;
+
+export type WaterFallChartDataDensity = BaseChartDataDensity & {
+  type: "waterfall";
+};
+
+export type ComboChartDataDensity = BaseChartDataDensity & {
+  type: "combo";
+  seriesDataKeysWithLabels: DataKey[];
+  stackedDisplayWithLabels: StackDisplay[];
+  totalNumberOfDots: number;
+};
+
+export type BaseCartesianChartModel = {
   dimensionModel: DimensionModel;
   seriesModels: SeriesModel[];
   dataset: ChartDataset;
@@ -211,22 +236,29 @@ export type CartesianChartModel = {
   seriesIdToDataKey?: Record<string, DataKey>;
 
   trendLinesModel?: TrendLinesModel;
-  seriesLabelsFormatters?: SeriesFormatters;
-  stackedLabelsFormatters?: StackedSeriesFormatters;
+  seriesLabelsFormatters: SeriesFormatters;
+
+  // For `graph.max_categories` setting
+  groupedSeriesModels?: SeriesModel[];
 };
 
-export type ScatterPlotModel = CartesianChartModel & {
+export type CartesianChartModel = BaseCartesianChartModel & {
+  stackedLabelsFormatters: StackedSeriesFormatters;
+  dataDensity: ComboChartDataDensity;
+};
+
+export type ScatterPlotModel = BaseCartesianChartModel & {
   bubbleSizeDomain: Extent | null;
 };
 
-export type WaterfallChartModel = CartesianChartModel & {
+export type WaterfallChartModel = BaseCartesianChartModel & {
   waterfallLabelFormatter: LabelFormatter | undefined;
+  dataDensity: WaterFallChartDataDensity;
 };
-
-export type ShowWarning = (warning: string) => void;
 
 export type LegendItem = {
   key: string;
   name: string;
   color: string;
+  percent?: string;
 };

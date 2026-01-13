@@ -1,23 +1,26 @@
 (ns metabase.driver.mongo.execute
+  (:refer-clojure :exclude [every? mapv])
   (:require
    [clojure.core.async :as a]
    [clojure.set :as set]
    [clojure.string :as str]
+   [metabase.driver-api.core :as driver-api]
    [metabase.driver.mongo.connection :as mongo.connection]
    [metabase.driver.mongo.conversion :as mongo.conversion]
    [metabase.driver.mongo.database :as mongo.db]
    [metabase.driver.mongo.query-processor :as mongo.qp]
    [metabase.driver.mongo.util :as mongo.util]
-   [metabase.lib.metadata :as lib.metadata]
-   [metabase.query-processor.error-type :as qp.error-type]
-   [metabase.query-processor.pipeline :as qp.pipeline]
-   [metabase.query-processor.reducible :as qp.reducible]
-   [metabase.query-processor.store :as qp.store]
+   [metabase.driver.settings :as driver.settings]
    [metabase.util.i18n :refer [tru]]
    [metabase.util.log :as log]
-   [metabase.util.malli :as mu])
+   [metabase.util.malli :as mu]
+   [metabase.util.performance :refer [every? mapv]])
   (:import
-   (com.mongodb.client AggregateIterable ClientSession MongoCursor MongoDatabase)
+   (com.mongodb.client
+    AggregateIterable
+    ClientSession
+    MongoCursor
+    MongoDatabase)
    (java.util ArrayList Collection)
    (java.util.concurrent TimeUnit)
    (org.bson BsonBoolean BsonInt32)))
@@ -27,7 +30,7 @@
 ;;; ---------------------------------------------------- Metadata ----------------------------------------------------
 
 ;; projections will be something like `[:_id :date~~~default :user_id :venue_id]`
-(mu/defn ^:private result-columns-unescape-map :- [:map-of :string :string]
+(mu/defn- result-columns-unescape-map :- [:map-of :string :string]
   "Returns a map of column name in result row -> unescaped column name to return in metadata e.g.
 
     {\"date_field~~~month\" \"date_field\"}"
@@ -51,7 +54,7 @@
           not-in-expected (set/difference actual-cols expected-cols)]
       (when (seq not-in-expected)
         (throw (ex-info (tru "Unexpected columns in results: {0}" (sort not-in-expected))
-                        {:type     qp.error-type/driver
+                        {:type     driver-api/qp.error-type.driver
                          :actual   actual-cols
                          :expected expected-cols}))))))
 
@@ -74,9 +77,9 @@
                              (cons "_id")))]
     (into projected-vec (remove (conj projected-set "_id")) first-row-col-names)))
 
-(mu/defn ^:private result-col-names :- [:map
-                                        [:row [:maybe [:sequential :string]]]
-                                        [:unescaped [:maybe [:sequential :string]]]]
+(mu/defn- result-col-names :- [:map
+                               [:row [:maybe [:sequential :string]]]
+                               [:unescaped [:maybe [:sequential :string]]]]
   "Return column names we can expect in each `:row` of the results, and the `:unescaped` versions we should return in
   thr query result metadata."
   [{:keys [mbql? projections]} :- :map
@@ -104,26 +107,40 @@
                  {:name col-name})
                unescaped-col-names)})
 
-
 ;;; ------------------------------------------------------ Rows ------------------------------------------------------
+
+(defn- get-dbref-part [dbref part-name]
+  (case part-name
+    "$ref" (.getCollectionName ^com.mongodb.DBRef dbref)
+    "$id" (.getId ^com.mongodb.DBRef dbref)
+    "$db" (.getDatabaseName ^com.mongodb.DBRef dbref)
+    nil))
 
 (defn- row->vec [row-col-names]
   (fn [^org.bson.Document row]
     (mapv (fn [col-name]
-            (let [col-parts (str/split col-name #"\.")
-                  val       (reduce
-                             (fn [^org.bson.Document object ^String part-name]
-                               (when object
-                                 (.get object part-name)))
-                             row
-                             col-parts)]
+            (let [val (if (str/includes? col-name ".")
+                        (reduce
+                         (fn [^org.bson.Document object ^String part-name]
+                           (when object
+                             (cond
+                               (instance? org.bson.Document object)
+                               (.get ^org.bson.Document object part-name)
+
+                               (instance? com.mongodb.DBRef object)
+                               (get-dbref-part object part-name)
+
+                               :else
+                               nil)))
+                         row
+                         (str/split col-name #"\."))
+                        (.get row col-name))]
               (mongo.conversion/from-document val {:keywordize true})))
           row-col-names)))
 
 (defn- post-process-row [row-col-names]
   ;; if we formed the query using MBQL then we apply a couple post processing functions
   (row->vec row-col-names))
-
 
 ;;; +----------------------------------------------------------------------------------------------------------------+
 ;;; |                                                      Run                                                       |
@@ -142,6 +159,15 @@
     ;; TODO - consider what the best batch size option is here. Not sure what the default is.
     (.batchSize 100)
     (.maxTime timeout-ms TimeUnit/MILLISECONDS)))
+
+(defn aggregate-database
+  "Used in testing to enable aggregate on pipelines sourced with $documents stage."
+  [^MongoDatabase db
+   ^ClientSession session
+   stages timeout-ms]
+  (let [pipe      (ArrayList. ^Collection (mongo.conversion/to-document stages))
+        aggregate (.aggregate db session pipe)]
+    (init-aggregate! aggregate timeout-ms)))
 
 (defn- ^:dynamic *aggregate*
   [^MongoDatabase db
@@ -166,7 +192,7 @@
                 (do (vreset! has-returned-first-row? true)
                     (first-row-thunk))
                 (remaining-rows-thunk)))]
-      (qp.reducible/reducible-rows row-thunk qp.pipeline/*canceled-chan*))))
+      (driver-api/reducible-rows row-thunk (driver-api/canceled-chan)))))
 
 (defn- reduce-results [native-query query ^MongoCursor cursor respond]
   (let [first-row (when (.hasNext cursor)
@@ -185,23 +211,24 @@
   {:pre [(string? collection-name) (fn? respond)]}
   (let [query  (cond-> query
                  (string? query) mongo.qp/parse-query-string)
-        database (lib.metadata/database (qp.store/metadata-provider))
+        database (driver-api/database (driver-api/metadata-provider))
         db-name (mongo.db/db-name database)
         client-database (mongo.util/database mongo.connection/*mongo-client* db-name)]
     (with-open [session ^ClientSession (mongo.util/start-session! mongo.connection/*mongo-client*)]
-      (a/go
-        (when (a/<! qp.pipeline/*canceled-chan*)
-          (mongo.util/kill-session! client-database session)))
+      (when-let [cancel-chan (driver-api/canceled-chan)]
+        (a/go
+          (when (a/<! cancel-chan)
+            (mongo.util/kill-session! client-database session))))
       (let [aggregate ^AggregateIterable (*aggregate* client-database
                                                       collection-name
                                                       session
                                                       query
-                                                      qp.pipeline/*query-timeout-ms*)]
+                                                      driver.settings/*query-timeout-ms*)]
         (with-open [^MongoCursor cursor (try (.cursor aggregate)
                                              (catch Throwable e
                                                (throw (ex-info (tru "Error executing query: {0}" (ex-message e))
                                                                {:driver :mongo
                                                                 :native native-query
-                                                                :type   qp.error-type/invalid-query}
+                                                                :type   driver-api/qp.error-type.invalid-query}
                                                                e))))]
           (reduce-results native-query query cursor respond))))))

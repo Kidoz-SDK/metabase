@@ -2,36 +2,43 @@ import type { Dispatch, SetStateAction } from "react";
 import { useCallback } from "react";
 import _ from "underscore";
 
+import { PLUGIN_CACHING } from "metabase/plugins";
 import { CacheConfigApi } from "metabase/services";
-import type { Config, CacheableModel, Strategy } from "metabase-types/api";
+import type {
+  CacheConfig,
+  CacheStrategy,
+  CacheableModel,
+} from "metabase-types/api";
 
+import { rootId } from "../constants/simple";
 import {
   getFieldsForStrategyType,
-  rootId,
-  Strategies,
+  getStrategyValidationSchema,
+  populateMinDurationSeconds,
   translateConfigToAPI,
-} from "../strategies";
+} from "../utils";
 
 export const useSaveStrategy = (
   targetId: number | null,
-  configs: Config[],
-  setConfigs: Dispatch<SetStateAction<Config[]>>,
-  model: CacheableModel,
+  configs: CacheConfig[],
+  setConfigs: Dispatch<SetStateAction<CacheConfig[]>>,
+  model: CacheableModel | null,
 ) => {
   const saveStrategy = useCallback(
-    async (values: Strategy) => {
-      if (targetId === null) {
+    async (values: CacheStrategy) => {
+      if (targetId === null || model === null) {
         return;
       }
+      const { strategies } = PLUGIN_CACHING;
 
       const isRoot = targetId === rootId;
-      const baseConfig: Pick<Config, "model" | "model_id"> = {
+      const baseConfig: Pick<CacheConfig, "model" | "model_id"> = {
         model: isRoot ? "root" : model,
         model_id: targetId,
       };
 
       const otherConfigs = configs.filter(
-        config => config.model_id !== targetId,
+        (config) => config.model_id !== targetId,
       );
       const shouldDeleteStrategy =
         values.type === "inherit" ||
@@ -45,18 +52,24 @@ export const useSaveStrategy = (
         // for fields that are not in the new strategy,
         // so let's remove these fields
         const validFields = getFieldsForStrategyType(values.type);
-        const newStrategy = _.pick(values, validFields) as Strategy;
+        const newStrategy = _.pick(values, validFields) as CacheStrategy;
 
-        const validatedStrategy =
-          Strategies[values.type].validateWith.validateSync(newStrategy);
+        const strategyData = strategies[values.type];
+        const strategySchema = getStrategyValidationSchema(strategyData);
+        const validatedStrategy = strategySchema.validateSync(newStrategy);
 
-        const newConfig = {
+        const newConfig: CacheConfig = {
           ...baseConfig,
           strategy: validatedStrategy,
         };
 
         const translatedConfig = translateConfigToAPI(newConfig);
         await CacheConfigApi.update(translatedConfig);
+
+        if (newConfig.strategy.type === "ttl") {
+          newConfig.strategy = populateMinDurationSeconds(newConfig.strategy);
+        }
+
         setConfigs([...otherConfigs, newConfig]);
       }
     },

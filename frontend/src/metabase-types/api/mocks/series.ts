@@ -1,5 +1,5 @@
 import type { Card } from "../card";
-import type { SingleSeries, Series } from "../dataset";
+import type { Series, SingleSeries } from "../dataset";
 
 import { createMockCard } from "./card";
 import type { MockDatasetOpts } from "./dataset";
@@ -15,6 +15,8 @@ export const createMockSingleSeries = (
   };
 };
 
-export const createMockSeries = (opts: { name: string }[]): Series => {
-  return opts.map(opt => createMockSingleSeries({ name: opt.name }));
+export const createMockSeries = (
+  opts: { name: string }[] = [{ name: "Series" }],
+): Series => {
+  return opts.map((opt) => createMockSingleSeries({ name: opt.name }));
 };

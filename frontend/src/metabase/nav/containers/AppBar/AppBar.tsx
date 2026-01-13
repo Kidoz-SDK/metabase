@@ -1,22 +1,27 @@
-import { connect } from "react-redux";
 import { withRouter } from "react-router";
 import _ from "underscore";
 
-import { logout } from "metabase/auth/actions";
-import Collections from "metabase/entities/collections";
+import {
+  getCommentSidebarOpen,
+  getSidebarOpen,
+} from "metabase/documents/selectors";
+import { Collections } from "metabase/entities/collections";
+import { connect } from "metabase/lib/redux";
+import { PLUGIN_METABOT } from "metabase/plugins";
 import { closeNavbar, toggleNavbar } from "metabase/redux/app";
 import type { RouterProps } from "metabase/selectors/app";
 import {
-  getIsNavbarOpen,
+  getDetailViewState,
   getIsCollectionPathVisible,
   getIsLogoVisible,
   getIsNavBarEnabled,
+  getIsNavbarOpen,
   getIsNewButtonVisible,
   getIsProfileLinkVisible,
   getIsQuestionLineageVisible,
   getIsSearchVisible,
 } from "metabase/selectors/app";
-import { getIsEmbedded } from "metabase/selectors/embed";
+import { getIsEmbeddingIframe } from "metabase/selectors/embed";
 import { getUser } from "metabase/selectors/user";
 import type { State } from "metabase-types/store";
 
@@ -27,19 +32,22 @@ const mapStateToProps = (state: State, props: RouterProps) => ({
   collectionId: Collections.selectors.getInitialCollectionId(state, props),
   isNavBarOpen: getIsNavbarOpen(state),
   isNavBarEnabled: getIsNavBarEnabled(state, props),
+  isMetabotVisible: PLUGIN_METABOT.getMetabotVisible(state, "omnibot"),
+  isDocumentSidebarOpen: getSidebarOpen(state),
+  isCommentSidebarOpen: getCommentSidebarOpen(state),
   isLogoVisible: getIsLogoVisible(state),
   isSearchVisible: getIsSearchVisible(state),
-  isEmbedded: getIsEmbedded(state),
+  isEmbeddingIframe: getIsEmbeddingIframe(state),
   isNewButtonVisible: getIsNewButtonVisible(state),
   isProfileLinkVisible: getIsProfileLinkVisible(state),
   isCollectionPathVisible: getIsCollectionPathVisible(state, props),
   isQuestionLineageVisible: getIsQuestionLineageVisible(state, props),
+  detailView: getDetailViewState(state),
 });
 
 const mapDispatchToProps = {
   onToggleNavbar: toggleNavbar,
   onCloseNavbar: closeNavbar,
-  onLogout: logout,
 };
 
 // eslint-disable-next-line import/no-default-export -- deprecated usage

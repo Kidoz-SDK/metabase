@@ -1,24 +1,26 @@
 (ns metabase.query-processor.middleware.fetch-source-query
+  (:refer-clojure :exclude [some get-in])
   (:require
    [metabase.driver :as driver]
    [metabase.driver.ddl.interface :as ddl.i]
+   [metabase.lib-be.core :as lib-be]
    [metabase.lib.card :as lib.card]
    [metabase.lib.metadata :as lib.metadata]
-   [metabase.lib.metadata.protocols :as lib.metadata.protocols]
    [metabase.lib.query :as lib.query]
    [metabase.lib.schema :as lib.schema]
    [metabase.lib.schema.common :as lib.schema.common]
    [metabase.lib.schema.id :as lib.schema.id]
    [metabase.lib.schema.metadata :as lib.schema.metadata]
+   [metabase.lib.util :as lib.util]
    [metabase.lib.walk :as lib.walk]
-   [metabase.public-settings :as public-settings]
    [metabase.query-processor.error-type :as qp.error-type]
-   [metabase.query-processor.store :as qp.store]
    [metabase.query-processor.util.persisted-cache :as qp.persisted]
+   [metabase.system.core :as system]
    [metabase.util :as u]
    [metabase.util.i18n :refer [trs tru]]
    [metabase.util.log :as log]
    [metabase.util.malli :as mu]
+   [metabase.util.performance :refer [some get-in]]
    [weavejester.dependency :as dep]))
 
 ;;; TODO -- consider whether [[normalize-card-query]] should be moved into [[metabase.lib.card]], seems like it would
@@ -41,7 +43,7 @@
     (cons first-stage more)))
 
 (mu/defn normalize-card-query :- ::lib.schema.metadata/card
-  "Convert Card's query (`:datasaet-query`) to pMBQL as needed; splice in stage metadata and some extra keys."
+  "Convert Card's query (`:dataset-query`) to pMBQL as needed; splice in stage metadata and some extra keys."
   [metadata-providerable   :- ::lib.schema.metadata/metadata-providerable
    {card-id :id, :as card} :- ::lib.schema.metadata/card]
   (let [persisted-info (:lib/persisted-info card)
@@ -49,16 +51,18 @@
     (when persisted?
       (log/infof "Found substitute cached query for card %s from %s.%s"
                  card-id
-                 (ddl.i/schema-name {:id (:database-id card)} (public-settings/site-uuid))
+                 (ddl.i/schema-name {:id (:database-id card)} (system/site-uuid))
                  (:table-name persisted-info)))
     (letfn [(update-stages [stages]
               (let [stages        (fix-mongodb-first-stage stages)
                     stages        (for [stage stages]
-                                    ;; this is for detecting circular refs below.
+                                    ;; This is for detecting circular refs below, and is later used as part of
+                                    ;; permissions enforcement
                                     (assoc stage :qp/stage-is-from-source-card card-id))
-                    card-metadata (lib.card/card-metadata-columns metadata-providerable card)
+                    card-metadata (into [] (remove :remapped-from)
+                                        (lib.card/card-returned-columns metadata-providerable card))
                     last-stage    (cond-> (last stages)
-                                    (seq card-metadata) (assoc-in [:lib/stage-metadata :columns] card-metadata)
+                                    (seq card-metadata) (assoc :lib/stage-metadata {:lib/type :metadata/results, :columns card-metadata})
                                     ;; This will be applied, if still appropriate, by
                                     ;; the [[metabase.query-processor.middleware.persistence]] middleware
                                     ;;
@@ -70,10 +74,14 @@
                 (conj (vec (butlast stages)) last-stage)))
             (update-query [query]
               (-> (lib.query/query metadata-providerable query)
+                  ;; Now that cards' queries can come out of the AppDB already in MBQL 5, complete with `:lib/uuid`s,
+                  ;; a card getting joined twice creates duplicate UUID errors!
+                  ;; This safely re-rolls all the `:lib/uuid`s on the card's query so they won't collide.
+                  lib.util/fresh-uuids-preserving-aggregation-refs
                   (update :stages update-stages)))]
       (update card :dataset-query update-query))))
 
-(mu/defn ^:private card :- ::lib.schema.metadata/card
+(mu/defn- card :- ::lib.schema.metadata/card
   [metadata-providerable :- ::lib.schema.metadata/metadata-providerable
    card-id               :- ::lib.schema.id/card]
   (let [card (or (lib.metadata/card metadata-providerable card-id)
@@ -92,14 +100,14 @@
                          :card-database-id   (:database-id card)}))))
     (normalize-card-query metadata-providerable card)))
 
-(mu/defn ^:private resolve-source-cards-in-stage :- [:maybe ::lib.schema/stages]
+(mu/defn- resolve-source-cards-in-stage :- [:maybe ::lib.schema/stages]
   [query     :- ::lib.schema/query
    stage     :- ::lib.schema/stage
    dep-graph :- (lib.schema.common/instance-of-class clojure.lang.Volatile)]
   (when (and (= (:lib/type stage) :mbql.stage/mbql)
              (:source-card stage))
     ;; make sure nested queries are enabled before resolving them.
-    (when-not (public-settings/enable-nested-queries)
+    (when-not (lib-be/enable-nested-queries)
       (throw (ex-info (trs "Nested queries are disabled")
                       {:type qp.error-type/disabled-feature, :card-id (:source-card stage)})))
     ;; If the first stage came from a different source card (i.e., we are doing recursive resolution) record the
@@ -112,15 +120,22 @@
                        (tru "Card {0}" (:source-card stage)))
         ;; This will throw if there's a cycle
         (dep/topo-sort <>)))
-    (let [card         (card query (:source-card stage))
-          card-stages  (get-in card [:dataset-query :stages])
-          ;; this information is used by [[metabase.query-processor.middleware.annotate/col-info-for-field-clause*]]
+    (let [card          (card query (:source-card stage))
+          card-stages   (get-in card [:dataset-query :stages])
+          model?        (= (:type card) :model)
+          native-model? (when model?
+                          (-> (lib.card/card->underlying-query query card)
+                              (lib.util/native-stage? -1)))
+          ;; TODO this information WAS used
+          ;; by [[metabase.query-processor.middleware.annotate/col-info-for-field-clause*]] which doesn't exist anymore
+          ;; -- do we still need it? -- Cam
           stage'        (-> stage
                             ;; these keys are used by the [[metabase.query-processor.middleware.annotate]] middleware to
                             ;; decide whether to "flow" the Card's metadata or not (whether to use it preferentially over
                             ;; the metadata associated with Fields themselves)
                             (assoc :qp/stage-had-source-card (:id card)
-                                   :source-query/model?      (= (:type card) :model))
+                                   :source-query/model? model?)
+                            (cond-> model? (assoc :source-query/native-model? native-model?))
                             (dissoc :source-card))]
       (into (vec card-stages) [stage']))))
 
@@ -160,9 +175,9 @@
 
   TODO -- we should remove remove the `:dataset` key and make sure nothing breaks, and make sure everything is looking
   at `:model` instead."
-  [{:qp/keys [source-card-id], :as _preprocessed-query} rff]
+  [{:qp/keys [source-card-id], :as preprocessed-query} rff]
   (if-not source-card-id
     rff
-    (let [model? (= (:type (lib.metadata.protocols/card (qp.store/metadata-provider) source-card-id)) :model)]
+    (let [model? (= (:type (lib.metadata/card preprocessed-query source-card-id)) :model)]
       (fn rff' [metadata]
         (rff (cond-> metadata model? (assoc :dataset model?, :model model?)))))))

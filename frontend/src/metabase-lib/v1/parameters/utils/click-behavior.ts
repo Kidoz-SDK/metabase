@@ -5,7 +5,7 @@ import {
   formatDateToRangeForParameter,
 } from "metabase/lib/formatting/date";
 import type { ValueAndColumnForColumnNameDate } from "metabase/lib/formatting/link";
-import { parseTimestamp } from "metabase/lib/time";
+import { parseTimestamp } from "metabase/lib/time-dayjs";
 import { checkNotNull } from "metabase/lib/types";
 import type { ClickObjectDimension as DimensionType } from "metabase-lib";
 import * as Lib from "metabase-lib";
@@ -16,25 +16,28 @@ import {
   dimensionFilterForParameter,
   variableFilterForParameter,
 } from "metabase-lib/v1/parameters/utils/filters";
+import { getParameterColumns } from "metabase-lib/v1/parameters/utils/targets";
 import type NativeQuery from "metabase-lib/v1/queries/NativeQuery";
 import type { ClickObjectDataRow } from "metabase-lib/v1/queries/drills/types";
 import { TYPE } from "metabase-lib/v1/types/constants";
-import { isa, isDate } from "metabase-lib/v1/types/utils/isa";
+import { isDate, isa } from "metabase-lib/v1/types/utils/isa";
 import type {
   ClickBehavior,
   ClickBehaviorDimensionTarget,
   ClickBehaviorSource,
   ClickBehaviorTarget,
   Dashboard,
-  QuestionDashboardCard,
   DashboardId,
   DatasetColumn,
   DatetimeUnit,
   Parameter,
   ParameterValueOrArray,
-  UserAttribute,
+  QuestionDashboardCard,
+  UserAttributeMap,
 } from "metabase-types/api";
 import { isImplicitActionClickBehavior } from "metabase-types/guards";
+
+import { parseParameterValue } from "./parameter-parsing";
 
 interface Target {
   id: Parameter["id"];
@@ -51,6 +54,7 @@ interface SourceFilters {
 
 interface ExtraData {
   dashboard?: Dashboard;
+  parameters?: Parameter[];
   dashboards?: Record<Dashboard["id"], Dashboard>;
 }
 
@@ -62,7 +66,7 @@ export function getDataFromClicked({
   extraData?: {
     dashboard?: Dashboard;
     parameterValuesBySlug?: Record<string, ParameterValueOrArray>;
-    userAttributes?: Record<UserAttribute, UserAttribute> | null;
+    userAttributes?: UserAttributeMap | null;
   };
   dimensions?: DimensionType[];
   data?: (ClickObjectDataRow & {
@@ -71,13 +75,13 @@ export function getDataFromClicked({
 }): ValueAndColumnForColumnNameDate {
   const column = [
     ...dimensions,
-    ...data.map(d => ({
+    ...data.map((d) => ({
       column: d.col,
       // When the data is changed to a display value for use in tooltips, we can set clickBehaviorValue to the raw value for filtering.
       value: d.clickBehaviorValue || d.value,
     })),
   ]
-    .filter(d => d.column != null)
+    .filter((d) => d.column != null)
     .reduce<ValueAndColumnForColumnNameDate["column"]>(
       (acc, { column, value }) => {
         if (!column) {
@@ -106,7 +110,7 @@ export function getDataFromClicked({
     ]),
   );
 
-  const parameterBySlug = _.mapObject(parameterValuesBySlug, value => ({
+  const parameterBySlug = _.mapObject(parameterValuesBySlug, (value) => ({
     value,
   }));
 
@@ -142,14 +146,13 @@ export function getTargetsForQuestion(question: Question): Target[] {
 }
 
 function getTargetsForStructuredQuestion(question: Question): Target[] {
-  const query = question.query();
-  const stageIndex = -1;
-  const visibleColumns = Lib.visibleColumns(query, stageIndex);
+  const { query, columns } = getParameterColumns(question);
 
-  return visibleColumns.map(targetColumn => {
+  return columns.map(({ column: targetColumn, stageIndex }) => {
     const dimension: ClickBehaviorDimensionTarget["dimension"] = [
       "dimension",
       Lib.legacyRef(query, stageIndex, targetColumn),
+      { "stage-number": stageIndex },
     ];
     const id = JSON.stringify(dimension);
     const target: ClickBehaviorTarget = { type: "dimension", id, dimension };
@@ -159,48 +162,51 @@ function getTargetsForStructuredQuestion(question: Question): Target[] {
       target,
       name: Lib.displayInfo(query, stageIndex, targetColumn).longDisplayName,
       sourceFilters: {
-        column: (sourceColumn, sourceQuestion) => {
-          const sourceQuery = sourceQuestion.query();
-
-          return Lib.isAssignableType(
-            Lib.fromLegacyColumn(sourceQuery, stageIndex, sourceColumn),
+        column: (sourceColumn) =>
+          Lib.isAssignableType(
+            Lib.legacyColumnTypeInfo(sourceColumn),
             targetColumn,
-          );
-        },
-        parameter: parameter =>
-          columnFilterForParameter(parameter)(targetColumn),
-        userAttribute: () => Lib.isString(targetColumn),
+          ),
+        parameter: (parameter) =>
+          columnFilterForParameter(query, stageIndex, parameter)(targetColumn),
+        userAttribute: () =>
+          Lib.isStringOrStringLike(targetColumn) ||
+          Lib.isNumeric(targetColumn) ||
+          Lib.isBoolean(targetColumn) ||
+          Lib.isDateOrDateTime(targetColumn),
       },
     };
   });
 }
 
 function getTargetsForNativeQuestion(question: Question): Target[] {
-  const legacyQuery = question.legacyQuery() as NativeQuery;
+  const legacyNativeQuery = question.legacyNativeQuery() as NativeQuery;
 
   return [
-    ...getTargetsForDimensionOptions(legacyQuery),
-    ...getTargetsForVariables(legacyQuery),
+    ...getTargetsForDimensionOptions(legacyNativeQuery),
+    ...getTargetsForVariables(legacyNativeQuery),
   ];
 }
 
-function getTargetsForDimensionOptions(legacyQuery: NativeQuery): Target[] {
-  return legacyQuery
+function getTargetsForDimensionOptions(
+  legacyNativeQuery: NativeQuery,
+): Target[] {
+  return legacyNativeQuery
     .dimensionOptions()
     .all()
-    .map(templateTagDimension => {
+    .map((templateTagDimension) => {
       const { name, id } = (
         templateTagDimension as unknown as TemplateTagDimension
       ).tag();
       const target: ClickBehaviorTarget = { type: "variable", id: name };
 
       const field = templateTagDimension.field();
-      const { base_type } = field;
+      const effectiveType = field?.effective_type;
 
       const parentType =
-        [TYPE.Temporal, TYPE.Number, TYPE.Text].find(
-          t => typeof base_type === "string" && isa(base_type, t),
-        ) || base_type;
+        [TYPE.Temporal, TYPE.Number, TYPE.Text, TYPE.Boolean].find(
+          (t) => typeof effectiveType === "string" && isa(effectiveType, t),
+        ) || effectiveType;
 
       return {
         id,
@@ -209,11 +215,11 @@ function getTargetsForDimensionOptions(legacyQuery: NativeQuery): Target[] {
         sourceFilters: {
           column: (column: DatasetColumn) =>
             Boolean(
-              column.base_type &&
+              column.effective_type &&
                 parentType &&
-                isa(column.base_type, parentType),
+                isa(column.effective_type, parentType),
             ),
-          parameter: parameter =>
+          parameter: (parameter) =>
             dimensionFilterForParameter(parameter)(templateTagDimension),
           userAttribute: () => parentType === TYPE.Text,
         },
@@ -221,8 +227,8 @@ function getTargetsForDimensionOptions(legacyQuery: NativeQuery): Target[] {
     });
 }
 
-function getTargetsForVariables(legacyQuery: NativeQuery): Target[] {
-  return legacyQuery.variables().map(templateTagVariable => {
+function getTargetsForVariables(legacyNativeQuery: NativeQuery): Target[] {
+  return legacyNativeQuery.variables().map((templateTagVariable) => {
     const { name, id, type } = checkNotNull(templateTagVariable.tag());
     const target: ClickBehaviorTarget = { type: "variable", id: name };
     const parentType = type
@@ -230,9 +236,11 @@ function getTargetsForVariables(legacyQuery: NativeQuery): Target[] {
           card: undefined,
           dimension: undefined,
           snippet: undefined,
+          "temporal-unit": undefined,
           text: TYPE.Text,
           number: TYPE.Number,
           date: TYPE.Temporal,
+          boolean: TYPE.Boolean,
         }[type]
       : undefined;
 
@@ -243,9 +251,11 @@ function getTargetsForVariables(legacyQuery: NativeQuery): Target[] {
       sourceFilters: {
         column: (column: DatasetColumn) =>
           Boolean(
-            column.base_type && parentType && isa(column.base_type, parentType),
+            column.effective_type &&
+              parentType &&
+              isa(column.effective_type, parentType),
           ),
-        parameter: parameter =>
+        parameter: (parameter) =>
           variableFilterForParameter(parameter)(templateTagVariable),
         userAttribute: () => parentType === TYPE.Text,
       },
@@ -261,7 +271,7 @@ export function getTargetsForDashboard(
     return [];
   }
 
-  return dashboard.parameters.map(parameter => {
+  return dashboard.parameters.map((parameter) => {
     const { type, id, name } = parameter;
     const filter = baseTypeFilterForParameterType(type);
     return {
@@ -270,8 +280,8 @@ export function getTargetsForDashboard(
       target: { type: "parameter", id },
       sourceFilters: {
         column: (c: DatasetColumn) =>
-          notRelativeDateOrRange(parameter) && filter(c.base_type),
-        parameter: sourceParam => {
+          notRelativeDateOrRange(parameter) && filter(c.effective_type),
+        parameter: (sourceParam) => {
           // parameter IDs are generated client-side, so they might not be unique
           // if dashboard is a clone, it will have identical parameter IDs to the original
           const isSameParameter =
@@ -292,6 +302,8 @@ function baseTypeFilterForParameterType(parameterType: string) {
     id: [TYPE.Integer, TYPE.UUID],
     category: [TYPE.Text, TYPE.Integer],
     location: [TYPE.Text],
+    "temporal-unit": [TYPE.Text, TYPE.TextLike],
+    boolean: [TYPE.Boolean],
   }[typePrefix];
   if (allowedTypes === undefined) {
     // default to showing everything
@@ -301,7 +313,7 @@ function baseTypeFilterForParameterType(parameterType: string) {
     if (typeof baseType === "undefined") {
       return false;
     }
-    return allowedTypes.some(allowedType => isa(baseType, allowedType));
+    return allowedTypes.some((allowedType) => isa(baseType, allowedType));
   };
 }
 
@@ -346,7 +358,9 @@ export function canSaveClickBehavior(
     clickBehavior.linkType === "dashboard"
   ) {
     const tabs = targetDashboard?.tabs || [];
-    const dashboardTabExists = tabs.some(tab => tab.id === clickBehavior.tabId);
+    const dashboardTabExists = tabs.some(
+      (tab) => tab.id === clickBehavior.tabId,
+    );
 
     if (tabs.length > 1 && !dashboardTabExists) {
       // If the target dashboard tab has been deleted, and there are other tabs
@@ -373,6 +387,12 @@ export function formatSourceForTarget(
   },
 ) {
   const datum = data[source.type][source.id.toLowerCase()] || {};
+  const parameter = getParameter(target, { extraData, clickBehavior });
+
+  if (parameter?.type === "temporal-unit") {
+    return parseParameterValue(datum.value, parameter);
+  }
+
   if (
     "column" in datum &&
     datum.column &&
@@ -383,7 +403,6 @@ export function formatSourceForTarget(
 
     if (target.type === "parameter") {
       // we should serialize differently based on the target parameter type
-      const parameter = getParameter(target, { extraData, clickBehavior });
       if (parameter) {
         return formatDateForParameterType(
           datum.value,
@@ -396,7 +415,9 @@ export function formatSourceForTarget(
 
       if (
         typeof sourceDateUnit === "string" &&
-        ["week", "month", "quarter", "year"].includes(sourceDateUnit)
+        ["week", "month", "quarter", "year", "hour", "minute"].includes(
+          sourceDateUnit,
+        )
       ) {
         return formatDateToRangeForParameter(datum.value, sourceDateUnit);
       }
@@ -409,7 +430,16 @@ export function formatSourceForTarget(
     }
   }
 
-  return datum.value;
+  if (parameter?.type === "number/between" && "column" in datum) {
+    const value = datum.value;
+    const binWidth = datum.column?.binning_info?.bin_width;
+
+    if (binWidth != null && typeof value === "number") {
+      return [value, value + binWidth];
+    }
+  }
+
+  return parameter ? parseParameterValue(datum.value, parameter) : datum.value;
 }
 
 function formatDateForParameterType(
@@ -427,6 +457,9 @@ function formatDateForParameterType(
   } else if (parameterType === "date/quarter-year") {
     return m.format("[Q]Q-YYYY");
   } else if (parameterType === "date/single") {
+    if (unit === "hour" || unit === "minute") {
+      return m.format("YYYY-MM-DDTHH:mm");
+    }
     return m.format("YYYY-MM-DD");
   } else if (parameterType === "date/all-options") {
     return formatDateTimeForParameter(value, unit);
@@ -463,8 +496,8 @@ function getParameter(
   },
 ): Parameter | undefined {
   if (clickBehavior.type === "crossfilter") {
-    const parameters = extraData.dashboard?.parameters || [];
-    return parameters.find(parameter => parameter.id === target.id);
+    const parameters = extraData.parameters ?? [];
+    return parameters.find((parameter) => parameter.id === target.id);
   }
 
   if (
@@ -473,10 +506,12 @@ function getParameter(
     (clickBehavior.linkType === "dashboard" ||
       clickBehavior.linkType === "question")
   ) {
-    const dashboard =
-      extraData.dashboards?.[clickBehavior.targetId as DashboardId];
-    const parameters = dashboard?.parameters || [];
-    return parameters.find(parameter => parameter.id === target.id);
+    const dashboardId = clickBehavior.targetId as DashboardId;
+    const parameters =
+      extraData.dashboard?.id === dashboardId
+        ? (extraData.parameters ?? [])
+        : (extraData.dashboards?.[dashboardId]?.parameters ?? []);
+    return parameters.find((parameter) => parameter.id === target.id);
   }
 
   return undefined;

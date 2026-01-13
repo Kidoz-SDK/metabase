@@ -4,7 +4,7 @@ import type { SetupOpts } from "./setup";
 import { setup as baseSetup } from "./setup";
 
 function setup(opts: SetupOpts) {
-  baseSetup({ hasEnterprisePlugins: true, ...opts });
+  baseSetup({ ...opts });
 }
 
 describe("PreviewQueryModal (EE without token)", () => {
@@ -13,7 +13,7 @@ describe("PreviewQueryModal (EE without token)", () => {
 
     expect(await screen.findByText("Query preview")).toBeInTheDocument();
     expect(
-      screen.getByText("Learn how to debug SQL errors"),
+      await screen.findByText("Learn how to debug SQL errors"),
     ).toBeInTheDocument();
   });
 
@@ -22,7 +22,7 @@ describe("PreviewQueryModal (EE without token)", () => {
 
     expect(await screen.findByText("Query preview")).toBeInTheDocument();
     expect(
-      screen.getByText("Learn how to debug SQL errors"),
+      await screen.findByText("Learn how to debug SQL errors"),
     ).toBeInTheDocument();
   });
 });

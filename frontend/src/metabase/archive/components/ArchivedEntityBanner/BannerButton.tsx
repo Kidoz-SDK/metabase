@@ -1,5 +1,5 @@
 import type { IconName } from "metabase/ui";
-import { Button, Flex, FixedSizeIcon, Text } from "metabase/ui";
+import { Button, FixedSizeIcon, Flex, Text } from "metabase/ui";
 
 interface BannerButtonProps {
   iconName: IconName;
@@ -13,16 +13,16 @@ export const BannerButton = ({
   onClick,
 }: BannerButtonProps) => (
   <Button
-    compact
+    size="compact-md"
     variant="outline"
-    color="white"
+    color="text-white"
     miw="2rem"
     h="2rem"
     onClick={onClick}
   >
     <Flex align="center" gap="sm">
       <FixedSizeIcon size={12} name={iconName} />
-      <Text color="white" display={{ base: "none", sm: "inline" }}>
+      <Text color="text-white" display={{ base: "none", sm: "inline" }}>
         {children}
       </Text>
     </Flex>

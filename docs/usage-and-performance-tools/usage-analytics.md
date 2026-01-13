@@ -2,13 +2,15 @@
 title: Usage analytics
 ---
 
-## Usage analytics
+# Usage analytics
 
-{% include plans-blockquote.html feature="Metabase analytics" %}
+{% include plans-blockquote.html feature="Usage analytics" %}
 
-The **Metabase Analytics** collection is a special collection that contains view-only questions, dashboards, and models that help you understand how people are using your Metabase.
+The **Usage analytics** collection is a special collection that contains view-only questions, dashboards, and models that help you understand how people are using your Metabase.
 
-![Metabase analytics collection](./images/metabase-analytics.png)
+![Usage analytics collection](./images/metabase-analytics.png)
+
+You can find the **Usage analytics** collection under **collections** in the left navigation sidebar. You can also create custom reports.
 
 These resources are useful for:
 
@@ -16,46 +18,49 @@ These resources are useful for:
 - **Auditing activity**: Know who viewed or did what and when, including tracking dashboard and question views, queries, downloads, and other activity like changing settings or inviting people to your Metabase.
 - **Improving operations**: Know the slowest dashboards and questions, how your database's are performing, who's consuming the most resources, and so on.
 
-Some things to keep in mind with this special Metabase analytics collection:
+> Metabase creates some default user accounts that you might see in your usage analytics, like `internal@metabase.com`. See [Default accounts](../people-and-groups/managing.md#default-user-accounts).
 
-- Metabase analytics is a view-only collection. Even admins can't curate it. It is eternal.
-- By default, only admins can view the Metabase analytics collection (though admins can grant other groups view access to it). If you're upgrading from a version older than 48, people in groups with [monitoring access](../usage-and-performance-tools/usage-analytics.md) will also get access to the Metabase analytics collection. But after that initial grandfathering in, the monitoring access privilege is unrelated to the Metabase analytics collection; you'll need to specifically grant groups access to the Metabase analytics collection.
-- You can duplicate any item in the Metabase analytics collection, modify the item to your liking, and save the item to another collection.
-- Metabase creates some default user accounts that you might see in your usage analytics, like `internal@metabase.com`. See [Default accounts](../people-and-groups/managing.md#default-user-accounts) for more information.
+## Access to Usage analytics
 
-## Permissions
+You can find the **Usage analytics** collection under **collections** in the navigation sidebar. By default, only admins can see the Usage analytics collection, but admins can grant other groups view access to it. You can manage permissions for the collection in **Admin settings** > **Permissions** > **Collections**.
 
-By default, only admins can see the Metabase analytics collection. You can manage permissions for the collection in **Admin settings** > **Permissions** > **Collections**.
+There are only two access types for the Usage analytics collection: **View** and **No access**. Even admins can't curate Usage analytics.
 
-There are only two access types for the Metabase analytics collection: **View** and **No access**.
+Additionally, this Usage analytics collection has a default sub-collection called "Custom reports" which you can use to save duplicated/modified questions, dashboards, and models. This sub-collection inherits the same permissions, but it's not view-only; admins have curate access by default, and can grant other groups view access.
 
-Additionally, this Metabase analytics collection has a default sub-collection called "Custom reports" which you can use to save duplicated/modified questions, dashboards, and models. This sub-collection inherits the same permissions, but it's not view-only; admins have curate access by default, and can grant other groups view access.
+> If you're upgrading from a version older than 48, people in groups with monitoring access will also get access to the Usage analytics collection. But after that initial grandfathering in, the monitoring access privilege is unrelated to the Usage analytics collection; you'll need to specifically grant groups access to the Usage analytics collection.
 
 ## Viewing usage insights for a question, dashboard, or model
 
-> Only people in groups with view access to the Metabase analytics collection will see this Usage insights option.
+> Only people in groups with view access to the Usage analytics collection will see this Usage insights option.
 
 To view usage analytics for a question, dashboard, or model:
 
 - Visit the item.
-- Click on the dot menu (**...**).
-- Select **Usage insights**.
+- Click on the info button in the upper right.
+- Click **Insights**.
 
 Metabase will take you to the relevant usage dashboard and plug in the item's ID.
 
+## How long Metabase keeps usage data
+
+By default, Metabase will keep the data about [activity](#activity-log-model), [views](#view-log-model), and [query execution](#query-log-model) for **720 days**. Twice a day, Metabase will delete rows older than this threshold. You can change this limit by adjusting the environment variable [`MB_AUDIT_MAX_RETENTION_DAYS`](../configuring-metabase/environment-variables.md#mb_audit_max_retention_days).
+
+If you're on the Metabase Open Source Edition, or on the [Metabase Cloud Starter plan](https://www.metabase.com/pricing/), Metabase doesn't collect [Activity](#activity-log-model) and [View](#view-log-model) data. If you upgrade to a Pro or Enterprise plan, either self-hosted or Cloud, you'll only see View and Activity data in Usage Analytics _starting from the time when you upgraded_.
+
 ## Creating custom reports
 
-You can duplicate any of the questions, dashboards and models in the Metabase analytics collection and tweak them to your liking, but you'll need to save them to a different collection.
+You can duplicate any of the questions, dashboards and models in the Usage analytics collection and tweak them to your liking, but you'll need to save them to a different collection.
 
 ### Custom reports collection
 
-While you _can_ save custom questions, models, and dashboards wherever you like (except for the Metabase analytics collection), we recommend that you save your custom Metabase analytics reports in the conveniently named "Custom reports" sub-collection. That way these items inherit the same permissions as the parent Metabase analytics collection.
+While you _can_ save custom questions, models, and dashboards wherever you like (except for the Usage analytics collection), we recommend that you save your custom Usage analytics reports in the conveniently named "Custom reports" sub-collection. That way these items inherit the same permissions as the parent Usage analytics collection.
 
 There is one thing to know about the Custom reports collection: its metadata resets whenever Metabase restarts. While you are able to temporarily rename the Custom reports collection, or give it a description or an Official badge, Metabase will drop this collection's metadata when it restarts. But rest assured that Metabase will preserve any questions, models, events, or dashboards that you add to the Custom reports collection.
 
 ## Dashboards
 
-The Metabase Analytics collection includes a set of read-only dashboards.
+The Usage analytics collection includes a set of read-only dashboards.
 
 ### Metabase metrics dashboard
 
@@ -134,6 +139,8 @@ Question, dashboard and database performance. Cards include:
 - Dashboards with more questions in the same tab
 - Users consuming the most resources
 
+> If you're using MySQL or MariaDB as your application database, the Performance overview dashboard won't display results for the cards displaying the 50th and 90th percentile query running times, because MySQL and MariaDB don't support the [Percentile aggregation](../questions/query-builder/expressions-list.md#percentile). We recommend using PostgreSQL as your application database.
+
 ### Content with cobwebs dashboard
 
 Dashboards and questions that you could consider archiving. Cards include:
@@ -144,7 +151,7 @@ Dashboards and questions that you could consider archiving. Cards include:
 
 ## Models
 
-The Metabase analytics collection includes a bunch of useful models based on Metabase's application database.
+The Usage analytics collection includes a bunch of useful models based on Metabase's application database.
 
 ## Activity log model
 

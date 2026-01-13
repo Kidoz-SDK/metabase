@@ -1,9 +1,10 @@
-import { useCallback, useState, useMemo } from "react";
-import { connect } from "react-redux";
+import { useDisclosure } from "@mantine/hooks";
+import { useCallback, useMemo } from "react";
 import { push } from "react-router-redux";
 import { t } from "ttag";
 
 import { HACK_getParentCollectionFromEntityUpdateAction } from "metabase/archive/utils";
+import { trackCollectionItemBookmarked } from "metabase/collections/analytics";
 import type {
   CreateBookmark,
   DeleteBookmark,
@@ -12,21 +13,20 @@ import type {
 } from "metabase/collections/types";
 import {
   canArchiveItem,
+  canBookmarkItem,
   canCopyItem,
   canMoveItem,
   canPinItem,
   canPreviewItem,
   isItemPinned,
   isPreviewEnabled,
-  canDeleteItem,
 } from "metabase/collections/utils";
-import { ConfirmDeleteModal } from "metabase/components/ConfirmDeleteModal";
-import EventSandbox from "metabase/components/EventSandbox";
-import { useDispatch } from "metabase/lib/redux";
+import { ConfirmModal } from "metabase/common/components/ConfirmModal";
+import { useToast } from "metabase/common/hooks/use-toast";
+import { bookmarks as BookmarkEntity } from "metabase/entities";
+import { connect, useDispatch } from "metabase/lib/redux";
 import { entityForObject } from "metabase/lib/schema";
 import * as Urls from "metabase/lib/urls";
-import { canUseMetabotOnDatabase } from "metabase/metabot/utils";
-import { addUndo } from "metabase/redux/undo";
 import { getSetting } from "metabase/selectors/settings";
 import type Database from "metabase-lib/v1/metadata/Database";
 import type { Bookmark, Collection, CollectionItem } from "metabase-types/api";
@@ -48,14 +48,13 @@ export interface ActionMenuProps {
 
 interface ActionMenuStateProps {
   isXrayEnabled: boolean;
-  isMetabotEnabled: boolean;
 }
 
 function getIsBookmarked(item: CollectionItem, bookmarks: Bookmark[]) {
   const normalizedItemModel = normalizeItemModel(item);
 
   return bookmarks.some(
-    bookmark =>
+    (bookmark) =>
       bookmark.type === normalizedItemModel && bookmark.item_id === item.id,
   );
 }
@@ -71,39 +70,32 @@ function normalizeItemModel(item: CollectionItem) {
 function mapStateToProps(state: State): ActionMenuStateProps {
   return {
     isXrayEnabled: getSetting(state, "enable-xrays"),
-    isMetabotEnabled: getSetting(state, "is-metabot-enabled"),
   };
 }
 
 function ActionMenu({
   className,
   item,
-  databases,
   bookmarks,
   collection,
   isXrayEnabled,
-  isMetabotEnabled,
   onCopy,
   onMove,
   createBookmark,
   deleteBookmark,
 }: ActionMenuProps & ActionMenuStateProps) {
   const dispatch = useDispatch();
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-
-  const database = databases?.find(({ id }) => id === item.database_id);
-
+  const [sendToast] = useToast();
+  const [modalOpened, { open: openModal, close: closeModal }] = useDisclosure();
   const isBookmarked = bookmarks && getIsBookmarked(item, bookmarks);
-
+  const canBookmark = canBookmarkItem(item);
   const canPin = canPinItem(item, collection);
   const canPreview = canPreviewItem(item, collection);
   const canMove = canMoveItem(item, collection);
   const canArchive = canArchiveItem(item, collection);
   const canRestore = item.can_restore;
-  const canDelete = canDeleteItem(item, collection);
-  const canCopy = canCopyItem(item);
-  const canUseMetabot =
-    database != null && canUseMetabotOnDatabase(database) && isMetabotEnabled;
+  const canDelete = item.can_delete;
+  const canCopy = onCopy && canCopyItem(item);
 
   const handlePin = useCallback(() => {
     item.setPinned?.(!isItemPinned(item));
@@ -118,15 +110,20 @@ function ActionMenu({
   }, [item, onMove]);
 
   const handleArchive = useCallback(() => {
-    item.setArchived?.(true);
+    return item.setArchived ? item.setArchived(true) : Promise.resolve();
   }, [item]);
 
   const handleToggleBookmark = useMemo(() => {
     if (!createBookmark && !deleteBookmark) {
       return undefined;
     }
+
     const handler = () => {
       const toggleBookmark = isBookmarked ? deleteBookmark : createBookmark;
+
+      if (!isBookmarked) {
+        trackCollectionItemBookmarked(item);
+      }
       toggleBookmark?.(item.id.toString(), normalizeItemModel(item));
     };
     return handler;
@@ -141,62 +138,74 @@ function ActionMenu({
     const result = await dispatch(
       Entity.actions.update({ id: item.id, archived: false }),
     );
-    const parent = HACK_getParentCollectionFromEntityUpdateAction(item, result);
-    const redirect = parent ? Urls.collection(parent) : `/collection/root`;
+    await dispatch(BookmarkEntity.actions.invalidateLists());
 
-    dispatch(
-      addUndo({
-        icon: "check",
-        message: t`${item.name} has been restored.`,
-        actionLabel: t`View in collection`,
-        action: () => dispatch(push(redirect)),
-        undo: false,
-      }),
+    const entity = Entity.HACK_getObjectFromAction(result);
+    const parentCollection = HACK_getParentCollectionFromEntityUpdateAction(
+      item,
+      result,
     );
-  }, [item, dispatch]);
+    const redirect = getParentEntityLink(entity, parentCollection);
 
-  const handleStartDeletePermanently = useCallback(() => {
-    setShowDeleteModal(true);
-  }, []);
+    sendToast({
+      message: t`${item.name} has been restored.`,
+      actionLabel: t`View`, // could be collection or dashboard
+      action: () => dispatch(push(redirect)),
+    });
+  }, [item, dispatch, sendToast]);
 
   const handleDeletePermanently = useCallback(() => {
     const Entity = entityForObject(item);
     dispatch(Entity.actions.delete(item));
-    dispatch(addUndo({ message: t`This item has been permanently deleted.` }));
-  }, [item, dispatch]);
+    sendToast({ message: t`This item has been permanently deleted.` });
+  }, [item, dispatch, sendToast]);
 
   return (
-    // this component is used within a `<Link>` component,
-    // so we must prevent events from triggering the activation of the link
-    <EventSandbox preventDefault>
-      <>
-        <EntityItemMenu
-          className={className}
-          item={item}
-          isBookmarked={isBookmarked}
-          isXrayEnabled={!item.archived && isXrayEnabled}
-          canUseMetabot={canUseMetabot}
-          onPin={canPin ? handlePin : undefined}
-          onMove={canMove ? handleMove : undefined}
-          onCopy={canCopy ? handleCopy : undefined}
-          onArchive={canArchive ? handleArchive : undefined}
-          onToggleBookmark={!item.archived ? handleToggleBookmark : undefined}
-          onTogglePreview={canPreview ? handleTogglePreview : undefined}
-          onRestore={canRestore ? handleRestore : undefined}
-          onDeletePermanently={
-            canDelete ? handleStartDeletePermanently : undefined
-          }
-        />
-        {showDeleteModal && (
-          <ConfirmDeleteModal
-            name={item.name}
-            onClose={() => setShowDeleteModal(false)}
-            onDelete={handleDeletePermanently}
-          />
-        )}
-      </>
-    </EventSandbox>
+    <>
+      <EntityItemMenu
+        className={className}
+        item={item}
+        isBookmarked={isBookmarked}
+        isXrayEnabled={!item.archived && isXrayEnabled}
+        onPin={canPin ? handlePin : undefined}
+        onMove={canMove ? handleMove : undefined}
+        onCopy={canCopy ? handleCopy : undefined}
+        onArchive={canArchive ? handleArchive : undefined}
+        onToggleBookmark={canBookmark ? handleToggleBookmark : undefined}
+        onTogglePreview={canPreview ? handleTogglePreview : undefined}
+        onRestore={canRestore ? handleRestore : undefined}
+        onDeletePermanently={canDelete ? openModal : undefined}
+      />
+      <ConfirmModal
+        opened={modalOpened}
+        confirmButtonText={t`Delete permanently`}
+        data-testid="delete-confirmation"
+        message={t`This can't be undone.`}
+        title={t`Delete ${item.name} permanently?`}
+        onConfirm={handleDeletePermanently}
+        onClose={closeModal}
+      />
+    </>
   );
+}
+
+export function getParentEntityLink(
+  updatedEntity: any,
+  parentCollection: Pick<Collection, "id" | "name"> | undefined,
+) {
+  // get link for parent collection
+  const parentCollectionLink = parentCollection
+    ? Urls.collection(parentCollection)
+    : `/collection/root`;
+
+  // get link for parent dashboard if we're dealing with a dashboard question
+  const parentDashboardId =
+    updatedEntity.type === "question" ? updatedEntity.dashboard_id : undefined;
+  const parentDashboardLink = parentDashboardId
+    ? Urls.dashboard({ id: parentDashboardId, name: "" })
+    : undefined;
+
+  return parentDashboardLink ? parentDashboardLink : parentCollectionLink;
 }
 
 // eslint-disable-next-line import/no-default-export -- deprecated usage

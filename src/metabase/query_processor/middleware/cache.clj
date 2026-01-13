@@ -1,20 +1,19 @@
 (ns metabase.query-processor.middleware.cache
   "Middleware that returns cached results for queries when applicable.
 
-  If caching is enabled (`enable-query-caching` is `true`) cached results will be returned for Cards if possible.
-  There's a global default TTL defined by the setting `query-caching-default-ttl`, but individual Cards can override
-  this value with custom TTLs with a value for `:cache_ttl`.
-
-  For all other queries, caching is skipped.
+  If query caching is enabled, cache strategy has been passed and it's not a `{:type :nocache}`, THEN cached results
+  will be returned for Cards if available or stored if applicable. For all other queries, caching is skipped.
 
   The default backend is `db`, which uses the application database; this value can be changed by setting the env var
   `MB_QP_CACHE_BACKEND`. Refer to [[metabase.query-processor.middleware.cache-backend.interface]] for more details
   about how the cache backends themselves."
+  (:refer-clojure :exclude [get-in])
   (:require
    [java-time.api :as t]
    [medley.core :as m]
-   [metabase.config :as config]
-   [metabase.public-settings :as public-settings]
+   [metabase.cache.core :as cache]
+   [metabase.config.core :as config]
+   [metabase.lib.core :as lib]
    [metabase.query-processor.middleware.cache-backend.db :as backend.db]
    [metabase.query-processor.middleware.cache-backend.interface :as i]
    [metabase.query-processor.middleware.cache.impl :as impl]
@@ -23,7 +22,8 @@
    [metabase.query-processor.util :as qp.util]
    [metabase.util :as u]
    [metabase.util.log :as log]
-   [metabase.util.malli :as mu])
+   [metabase.util.malli :as mu]
+   [metabase.util.performance :refer [get-in]])
   (:import
    (org.eclipse.jetty.io EofException)))
 
@@ -41,13 +41,12 @@
   "Current cache backend. Dynamically rebindable primary for test purposes."
   (i/cache-backend (config/config-kw :mb-qp-cache-backend)))
 
-
 ;;; ------------------------------------------------------ Save ------------------------------------------------------
 
 (defn- purge! [backend]
   (try
-    (log/tracef "Purging cache entries older than %s" (u/format-seconds (public-settings/query-caching-max-ttl)))
-    (i/purge-old-entries! backend (public-settings/query-caching-max-ttl))
+    (log/tracef "Purging cache entries older than %s" (u/format-seconds (cache/query-caching-max-ttl)))
+    (i/purge-old-entries! backend (cache/query-caching-max-ttl))
     (log/trace "Successfully purged old cache entries.")
     :done
     (catch Throwable e
@@ -61,7 +60,9 @@
   "Add `object` (e.g. a result row or metadata) to the current cache entry."
   [object]
   (when *in-fn*
-    (*in-fn* object)))
+    (*in-fn* (cond-> object
+               (map? object) (-> (m/update-existing :json_query lib/prepare-for-serialization)
+                                 (m/update-existing :preprocessed_query lib/prepare-for-serialization))))))
 
 (def ^:private ^:dynamic *result-fn*
   "The `result-fn` provided by [[impl/do-with-serialization]]."
@@ -88,7 +89,7 @@
     :done
     (catch Throwable e
       (if (= (:type (ex-data e)) ::impl/max-bytes)
-        (log/debugf e "Not caching results: results are larger than %s KB" (public-settings/query-caching-max-kb))
+        (log/debugf e "Not caching results: results are larger than %s KB" (cache/query-caching-max-kb))
         (log/errorf e "Error saving query results to cache: %s" (ex-message e))))))
 
 (defn- save-results-xform [start-time-ns metadata query-hash strategy rf]
@@ -122,13 +123,13 @@
        (vreset! has-rows? true)
        (rf acc row)))))
 
-
 ;;; ----------------------------------------------------- Fetch ------------------------------------------------------
 
-(defn- cached-results-rff
+(mu/defn- cached-results-rff :- ::qp.schema/rff
   "Reducing function for cached results. Merges the final object in the cached results, the `final-metdata` map, with
   the reduced value assuming it is a normal metadata map."
-  [rff query-hash]
+  [rff        :- ::qp.schema/rff
+   query-hash :- bytes?]
   (fn [{:keys [last-ran], :as metadata}]
     (let [metadata       (dissoc metadata :last-ran :cache-version)
           rf             (rff metadata)
@@ -141,7 +142,7 @@
          (let [normal-format? (and (map? (unreduced result))
                                    (seq (get-in (unreduced result) [:data :cols])))
                result*        (-> (if normal-format?
-                                    (merge-with merge @final-metadata (unreduced result))
+                                    (m/deep-merge @final-metadata (unreduced result))
                                     (unreduced result))
                                   (assoc :cache/details {:hash query-hash :cached true :updated_at last-ran}))]
            (rf (cond-> result*
@@ -152,13 +153,16 @@
            (vreset! final-metadata row)
            (rf acc row)))))))
 
-(mu/defn ^:private maybe-reduce-cached-results :- [:tuple
-                                                   #_status
-                                                   [:enum ::ok ::miss ::canceled]
-                                                   #_result
-                                                   :any]
+(mu/defn- maybe-reduce-cached-results :- [:tuple
+                                          #_status
+                                          [:enum ::ok ::miss ::canceled]
+                                          #_result
+                                          :any]
   "Reduces cached results if there is a hit. Otherwise, returns `::miss` directly."
-  [ignore-cache? query-hash strategy rff]
+  [ignore-cache?
+   query-hash    :- bytes?
+   strategy      :- :map
+   rff           :- ::qp.schema/rff]
   (try
     (or (when-not ignore-cache?
           (log/debugf "Looking for cached results for query with hash '%s' satisfying %s"
@@ -185,11 +189,10 @@
                   (ex-message e))
       [::miss nil])))
 
-
 ;;; --------------------------------------------------- Middleware ---------------------------------------------------
 
-(mu/defn ^:private run-query-with-cache :- :some
-  [qp {:keys [cache-strategy middleware], :as query} :- ::qp.schema/query
+(mu/defn- run-query-with-cache :- :some
+  [qp {:keys [cache-strategy middleware], :as query} :- ::qp.schema/any-query
    rff                                               :- ::qp.schema/rff]
   ;; Query will already have `info.hash` if it's a userland query. It's not the same hash, because this is calculated
   ;; after normalization, instead of before. This is necessary to make caching work properly with sandboxed users, see
@@ -219,21 +222,24 @@
               (fn [metadata]
                 (save-results-xform start-time-ns metadata query-hash cache-strategy (rff metadata)))))))))
 
-(defn- is-cacheable? {:arglists '([query])} [{:keys [cache-strategy]}]
-  (some? cache-strategy))
+(defn- is-cacheable? [{:keys [cache-strategy], :as _query}]
+  (and (cache/enable-query-caching)
+       (some? cache-strategy)
+       (not= (:type cache-strategy) :nocache)))
 
-(defn maybe-return-cached-results
+(mu/defn maybe-return-cached-results :- ::qp.schema/qp
   "Middleware for caching results of a query if applicable.
   In order for a query to be eligible for caching:
 
      *  Caching (the `enable-query-caching` Setting) must be enabled
      *  The query must pass a `:cache-strategy` value
+     *  This strategy should not be of type `:nocache`
      *  The query must already be permissions-checked. Since the cache bypasses the normal
         query processor pipeline, the ad-hoc permissions-checking middleware isn't applied for cached results.
         (The various `/api/card/` endpoints that make use of caching do `can-read?` checks for the Card *before*
         running the query, satisfying this requirement.)
      *  The result *rows* of the query must be less than `query-caching-max-kb` when serialized (before compression)."
-  [qp]
+  [qp :- ::qp.schema/qp]
   (fn maybe-return-cached-results* [query rff]
     (let [cacheable? (is-cacheable? query)]
       (log/tracef "Query is cacheable? %s" (boolean cacheable?))

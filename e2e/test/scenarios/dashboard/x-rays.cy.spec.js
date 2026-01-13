@@ -1,25 +1,14 @@
+const { H } = cy;
 import { SAMPLE_DB_ID } from "e2e/support/cypress_data";
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import { ORDERS_BY_YEAR_QUESTION_ID } from "e2e/support/cypress_sample_instance_data";
-import {
-  restore,
-  visitQuestionAdhoc,
-  main,
-  addOrUpdateDashboardCard,
-  visitDashboardAndCreateTab,
-  popover,
-  getDashboardCards,
-  saveDashboard,
-  cartesianChartCircle,
-  chartPathWithFillColor,
-} from "e2e/support/helpers";
 
 const { ORDERS, ORDERS_ID, PRODUCTS, PRODUCTS_ID, PEOPLE, PEOPLE_ID } =
   SAMPLE_DATABASE;
 
 describe("scenarios > x-rays", { tags: "@slow" }, () => {
   beforeEach(() => {
-    restore();
+    H.restore();
     cy.signInAsAdmin();
   });
 
@@ -47,7 +36,7 @@ describe("scenarios > x-rays", { tags: "@slow" }, () => {
   it("should work on questions with explicit joins (metabase#13112)", () => {
     const PRODUCTS_ALIAS = "Products";
 
-    cy.createQuestion(
+    H.createQuestion(
       {
         name: "13112",
         query: {
@@ -77,7 +66,7 @@ describe("scenarios > x-rays", { tags: "@slow" }, () => {
 
     cy.intercept("POST", "/api/dataset").as("dataset");
 
-    cartesianChartCircle()
+    H.cartesianChartCircle()
       .eq(23) // Random dot
       .click({ force: true });
 
@@ -95,15 +84,21 @@ describe("scenarios > x-rays", { tags: "@slow" }, () => {
     cy.icon("warning").should("not.exist");
   });
 
-  ["X-ray", "Compare to the rest"].forEach(action => {
+  ["X-ray", "Compare to the rest"].forEach((action) => {
     it(`"${action.toUpperCase()}" should work on a nested question made from base native question (metabase#15655)`, () => {
+      if (action === "Compare to the rest") {
+        cy.log(
+          "Skipping Compare to the rest test because it takes 8 minutes in ci",
+        );
+        cy.skipOn(action === "Compare to the rest");
+      }
       cy.intercept("GET", "/api/automagic-dashboards/**").as("xray");
 
-      cy.createNativeQuestion({
+      H.createNativeQuestion({
         name: "15655",
         native: { query: "select * from people" },
       }).then(({ body: { id } }) => {
-        cy.createQuestion(
+        H.createQuestion(
           {
             name: "Count of 15655 by SOURCE",
             display: "bar",
@@ -116,9 +111,9 @@ describe("scenarios > x-rays", { tags: "@slow" }, () => {
           { visitQuestion: true },
         );
 
-        chartPathWithFillColor("#509EE3").first().click({ force: true });
+        H.chartPathWithFillColor("#509EE3").first().click({ force: true });
 
-        popover().within(() => {
+        H.popover().within(() => {
           cy.findByText("Automatic insights…").click();
           cy.findByText(action).click();
         });
@@ -131,12 +126,12 @@ describe("scenarios > x-rays", { tags: "@slow" }, () => {
           timeout: 15 * 1000,
         });
 
-        cy.wait("@xray").then(xhr => {
+        cy.wait("@xray").then((xhr) => {
           expect(xhr.response.body.cause).not.to.exist;
           expect(xhr.response.statusCode).not.to.eq(500);
         });
 
-        main().within(() => {
+        H.main().within(() => {
           cy.findByText("A look at the number of 15655").should("exist");
         });
 
@@ -146,7 +141,7 @@ describe("scenarios > x-rays", { tags: "@slow" }, () => {
 
     it(`"${action.toUpperCase()}" should not show NULL in titles of generated dashboard cards (metabase#15737)`, () => {
       cy.intercept("GET", "/api/automagic-dashboards/**").as("xray");
-      visitQuestionAdhoc({
+      H.visitQuestionAdhoc({
         name: "15737",
         dataset_query: {
           database: SAMPLE_DB_ID,
@@ -160,7 +155,7 @@ describe("scenarios > x-rays", { tags: "@slow" }, () => {
         display: "bar",
       });
 
-      chartPathWithFillColor("#509EE3").first().click();
+      H.chartPathWithFillColor("#509EE3").first().click();
 
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText("Automatic insights…").click();
@@ -182,16 +177,28 @@ describe("scenarios > x-rays", { tags: "@slow" }, () => {
 
     cy.button("Save this").click();
 
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-    cy.findByText("Your dashboard was saved");
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-    cy.findByText("See it").click();
+    cy.log(
+      "'See it' link should be displayed both in the header and in the toast",
+    );
+    H.undoToast()
+      .should("contain", "Your dashboard was saved")
+      .and("contain", "See it");
+
+    cy.findByTestId("automatic-dashboard-header").within(() => {
+      cy.findByRole("link", { name: "See it" }).should("be.visible").click();
+    });
 
     cy.url().should("contain", "a-look-at-orders");
 
     cy.findAllByTestId("dashcard").contains("18,760");
     // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
     cy.findByText("How these transactions are distributed");
+
+    H.openNavigationSidebar();
+
+    H.navigationSidebar()
+      .findByRole("link", { name: /Automatically generated dashboards/i })
+      .should("exist");
   });
 
   it("should start loading cards from top to bottom", () => {
@@ -218,9 +225,10 @@ describe("scenarios > x-rays", { tags: "@slow" }, () => {
     cy.wait("@dataset");
     cy.wait("@datasetFailed");
 
-    getDashboardCards().eq(1).contains("Total transactions");
+    H.getDashboardCards().eq(1).contains("Total transactions");
   });
 
+  // TODO - this is a legitimate failure because `param_fields` are not returned for x-ray dashboards
   it("should be able to click the title of an x-ray dashcard to see it in the query builder (metabase#19405)", () => {
     const timeout = { timeout: 10000 };
 
@@ -246,7 +254,7 @@ describe("scenarios > x-rays", { tags: "@slow" }, () => {
     cy.findByText("State", timeout).click();
 
     cy.findByPlaceholderText("Search the list").type("GA{enter}");
-    cy.findByTestId("GA-filter-value").should("be.visible").click();
+    cy.findByLabelText("GA").should("be.visible").click();
     cy.button("Add filter").click();
 
     // confirm results of "Total transactions" card were updated
@@ -277,9 +285,9 @@ describe("scenarios > x-rays", { tags: "@slow" }, () => {
       NUMBER_OF_DATASET_REQUESTS,
     );
 
-    getDashboardCards().contains("18,760").click();
+    H.getDashboardCards().contains("18,760").click();
 
-    popover().within(() => {
+    H.popover().within(() => {
       cy.findByText("Break out by…").click();
       cy.findByText("Category").click();
       cy.findByText("Source").click();
@@ -287,28 +295,33 @@ describe("scenarios > x-rays", { tags: "@slow" }, () => {
 
     cy.url().should("contain", "/question");
 
-    cy.findByTestId("viz-settings-button").click();
-    cy.findAllByTestId("chartsettings-field-picker")
-      .contains("User → Source")
-      .should("be.visible");
-
     // Bars
-    chartPathWithFillColor("#509EE3").should("have.length", 5);
-    chartPathWithFillColor("#509EE3").eq(0).realHover();
+    H.chartPathWithFillColor("#509EE3").should("have.length", 5);
+    H.chartPathWithFillColor("#509EE3").eq(0).realHover();
 
-    popover().within(() => {
-      cy.findByText("Affiliate").should("be.visible");
-      cy.findByText("3,520").should("be.visible");
+    H.assertEChartsTooltip({
+      header: "Affiliate",
+      rows: [
+        {
+          color: "#509EE3",
+          name: "Count",
+          value: "3,520",
+        },
+      ],
     });
+
+    H.openVizSettingsSidebar();
+    cy.findAllByTestId("chartsettings-field-picker")
+      .findByDisplayValue("User → Source")
+      .should("be.visible");
   });
 
   it("should be able to open x-ray on a dashcard from a dashboard with multiple tabs", () => {
     cy.intercept("POST", "/api/dataset").as("dataset");
 
-    return cy
-      .createDashboard({ name: "my dashboard" })
-      .then(({ body: { id: dashboard_id } }) => {
-        addOrUpdateDashboardCard({
+    return H.createDashboard({ name: "my dashboard" }).then(
+      ({ body: { id: dashboard_id } }) => {
+        H.addOrUpdateDashboardCard({
           card_id: ORDERS_BY_YEAR_QUESTION_ID,
           dashboard_id,
           card: {
@@ -319,18 +332,22 @@ describe("scenarios > x-rays", { tags: "@slow" }, () => {
             visualization_settings: {},
           },
         });
-        visitDashboardAndCreateTab({ dashboardId: dashboard_id, save: false });
+        H.visitDashboardAndCreateTab({
+          dashboardId: dashboard_id,
+          save: false,
+        });
         cy.findByRole("tab", { name: "Tab 1" }).click();
-        saveDashboard();
+        H.saveDashboard();
 
-        cartesianChartCircle().eq(0).click({ force: true });
-        popover().findByText("Automatic insights…").click();
-        popover().findByText("X-ray").click();
+        H.cartesianChartCircle().eq(0).click({ force: true });
+        H.popover().findByText("Automatic insights…").click();
+        H.popover().findByText("X-ray").click();
         cy.wait("@dataset", { timeout: 60000 });
 
         // Ensure charts actually got rendered
         cy.get("text").contains("Created At");
-      });
+      },
+    );
   });
 
   it("should default x-ray dashboard width to 'fixed'", () => {
@@ -351,6 +368,89 @@ describe("scenarios > x-rays", { tags: "@slow" }, () => {
     );
     cy.findByTestId("dashboard-grid").should("have.css", "max-width", "1048px");
   });
+
+  it("should render all cards without errors (metabase#48519)", () => {
+    cy.intercept("POST", "/api/dataset").as("dataset");
+
+    cy.visit(`/auto/dashboard/table/${ORDERS_ID}`);
+    // There're 8 questions on the Orders x-ray dashboard
+    cy.wait(Array(8).fill("@dataset"), { timeout: 60 * 1000 });
+
+    getDashcardByTitle("Total transactions")
+      .findByText("18,760")
+      .should("exist");
+    getDashcardByTitle("Transactions in the last 30 days")
+      .findByTestId("scalar-value")
+      .should("exist"); // not asserting a value as it's dynamic
+    getDashcardByTitle("Average quantity per month").within(() => {
+      cy.findByText("Average of Quantity").should("exist");
+      cy.findByText("Created At: Month").should("exist");
+    });
+    getDashcardByTitle("Sales per source").within(() => {
+      cy.findByText("Organic").should("exist");
+      cy.findByText("Affiliate").should("exist");
+      cy.findByText("Count").should("exist");
+      cy.findByText("Created At: Month").should("exist");
+    });
+    getDashcardByTitle("Sales per product").within(() => {
+      cy.findByText("Product → Title").should("exist");
+      cy.findByText("Aerodynamic Bronze Hat").should("exist");
+    });
+    getDashcardByTitle("Sales for each product category").within(() => {
+      cy.findByText("Product → Category").should("exist");
+      cy.findByText("Doohickey").should("exist");
+      cy.findByText("Count").should("exist");
+    });
+    getDashcardByTitle("Sales per state")
+      .findAllByTestId("choropleth-feature")
+      .should("have.length", 50); // 50 states
+    getDashcardByTitle("Sales by coordinates")
+      .findByText("Leaflet")
+      .should("exist");
+  });
+
+  it("should work on questions with breakout by day-of-week and null semantic type (metabase#23820)", () => {
+    cy.request("PUT", `/api/field/${ORDERS.CREATED_AT}`, {
+      semantic_type: null,
+    });
+    H.createQuestion(
+      {
+        name: "23820",
+        query: {
+          "source-table": ORDERS_ID,
+          aggregation: [["count"]],
+          breakout: [
+            ["field", ORDERS.CREATED_AT, { "temporal-unit": "day-of-week" }],
+          ],
+        },
+        display: "line",
+      },
+      { visitQuestion: true },
+    );
+
+    cy.intercept("POST", "/api/dataset").as("dataset");
+
+    H.cartesianChartCircle()
+      .eq(3) // Wednesday
+      .click();
+
+    H.popover().within(() => {
+      cy.findByText("Automatic insights…").click();
+      cy.findByText("X-ray").click();
+    });
+
+    cy.wait("@dataset");
+
+    H.main().within(() => {
+      cy.findByText(
+        "A closer look at number of Orders where day of week of Created At is Wednesday",
+      ).should("be.visible");
+    });
+
+    getDashcardByTitle("A look at Created At fields").should("exist");
+
+    getDashcardByTitle("A look at the number of Orders").should("exist");
+  });
 });
 
 function waitForSatisfyingResponse(
@@ -363,10 +463,16 @@ function waitForSatisfyingResponse(
     throw `${maxRequests} requests exceeded`; // fail the test
   }
 
-  cy.wait(alias).then(interception => {
+  cy.wait(alias).then((interception) => {
     const isMatch = Cypress._.isMatch(interception.response, partialResponse);
     if (!isMatch) {
       waitForSatisfyingResponse(alias, partialResponse, maxRequests, level + 1);
     }
   });
+}
+
+function getDashcardByTitle(title) {
+  return H.dashboardGrid()
+    .findByText(title)
+    .closest("[data-testid='dashcard']");
 }

@@ -1,25 +1,29 @@
-(ns metabase.driver.sql-jdbc.sync.describe-database-test
+(ns ^:mb/driver-tests metabase.driver.sql-jdbc.sync.describe-database-test
+  {:clj-kondo/config '{:linters
+                       ;; allowing this for now since sync doesn't work with Metadata Providers
+                       {:discouraged-var {metabase.test/with-temp {:level :off}}}}}
   (:require
    [clojure.java.jdbc :as jdbc]
+   [clojure.set :as set]
    [clojure.test :refer :all]
    [metabase.driver :as driver]
    [metabase.driver.sql-jdbc.execute :as sql-jdbc.execute]
-   [metabase.driver.sql-jdbc.sync.describe-database
-    :as sql-jdbc.describe-database]
+   [metabase.driver.sql-jdbc.sync :as sql-jdbc.sync]
+   [metabase.driver.sql-jdbc.sync.describe-database :as sql-jdbc.describe-database]
    [metabase.driver.sql-jdbc.sync.interface :as sql-jdbc.sync.interface]
    [metabase.driver.util :as driver.u]
-   [metabase.models :refer [Database Table]]
    [metabase.query-processor :as qp]
-   [metabase.query-processor.store :as qp.store]
-   [metabase.sync :as sync]
+   ^{:clj-kondo/ignore [:deprecated-namespace]} [metabase.query-processor.store :as qp.store]
+   [metabase.sync.core :as sync]
    [metabase.test :as mt]
+   [metabase.test.data.interface :as tx]
    [metabase.test.data.one-off-dbs :as one-off-dbs]
    [metabase.test.fixtures :as fixtures]
    [metabase.util :as u]
-   [toucan2.core :as t2]
-   [toucan2.tools.with-temp :as t2.with-temp])
+   [metabase.util.log :as log]
+   [toucan2.core :as t2])
   (:import
-   (java.sql ResultSet)))
+   (java.sql ResultSet Connection)))
 
 (set! *warn-on-reflection* true)
 
@@ -27,14 +31,20 @@
 
 (deftest ^:parallel simple-select-probe-query-test
   (is (= ["SELECT TRUE AS \"_\" FROM \"schema\".\"wow\" WHERE 1 <> 1 LIMIT 0"]
-         (sql-jdbc.describe-database/simple-select-probe-query :sql "schema" "wow")))
+         (sql-jdbc.describe-database/simple-select-probe-query :sql "schema" "wow"))))
+
+(deftest ^:parallel simple-select-probe-query-test-2
+  ;; this is mostly a sanity check against some of our known drivers so ok to hardcode driver names.
+  #_{:clj-kondo/ignore [:metabase/disallow-hardcoded-driver-names-in-tests]}
   (testing "real drivers produce correct query"
     (are [driver] (= ["SELECT TRUE AS \"_\" FROM \"schema\".\"wow\" WHERE 1 <> 1 LIMIT 0"]
                      (sql-jdbc.describe-database/simple-select-probe-query driver "schema" "wow"))
       :h2
-      :postgres))
+      :postgres)))
+
+(deftest ^:parallel simple-select-probe-query-test-3
   (testing "simple-select-probe-query shouldn't actually return any rows"
-    (let [{:keys [name schema]} (t2/select-one Table :id (mt/id :venues))]
+    (let [{:keys [name schema]} (t2/select-one :model/Table :id (mt/id :venues))]
       (is (= []
              (mt/rows
               (qp/process-query
@@ -47,7 +57,7 @@
   []
   (conj (set
          (filter
-          #(identical? (get-method driver/describe-database :sql-jdbc) (get-method driver/describe-database %))
+          #(identical? (get-method driver/describe-database* :sql-jdbc) (get-method driver/describe-database* %))
           (descendants driver/hierarchy :sql-jdbc)))
         ;; redshift wraps the default implementation, but additionally filters tables according to the database name
         :redshift))
@@ -58,7 +68,7 @@
           (or driver/*driver* :h2)
           (mt/db)
           nil
-          (fn [^java.sql.Connection conn]
+          (fn [^Connection conn]
             ;; We have to mock this to make it work with all DBs
             (with-redefs [sql-jdbc.describe-database/all-schemas (constantly #{"PUBLIC"})]
               (->> (into [] (sql-jdbc.describe-database/fast-active-tables (or driver/*driver* :h2) conn nil nil))
@@ -71,23 +81,23 @@
           :h2
           (mt/db)
           nil
-          (fn [^java.sql.Connection conn]
+          (fn [^Connection conn]
             (->> (into [] (sql-jdbc.describe-database/post-filtered-active-tables :h2 conn nil nil))
                  (map :name)
                  sort))))))
 
 (deftest describe-database-test
-  (is (= {:tables #{{:name "USERS", :schema "PUBLIC", :description nil}
-                    {:name "VENUES", :schema "PUBLIC", :description nil}
-                    {:name "CATEGORIES", :schema "PUBLIC", :description nil}
-                    {:name "CHECKINS", :schema "PUBLIC", :description nil}
-                    {:name "ORDERS", :schema "PUBLIC", :description nil}
-                    {:name "PEOPLE", :schema "PUBLIC", :description nil}
-                    {:name "PRODUCTS", :schema "PUBLIC", :description nil}
-                    {:name "REVIEWS", :schema "PUBLIC", :description nil}}}
+  (is (= {:tables #{{:name "USERS", :schema "PUBLIC", :description nil, :is_writable true}
+                    {:name "VENUES", :schema "PUBLIC", :description nil, :is_writable true}
+                    {:name "CATEGORIES", :schema "PUBLIC", :description nil, :is_writable true}
+                    {:name "CHECKINS", :schema "PUBLIC", :description nil, :is_writable true}
+                    {:name "ORDERS", :schema "PUBLIC", :description nil, :is_writable true}
+                    {:name "PEOPLE", :schema "PUBLIC", :description nil, :is_writable true}
+                    {:name "PRODUCTS", :schema "PUBLIC", :description nil, :is_writable true}
+                    {:name "REVIEWS", :schema "PUBLIC", :description nil, :is_writable true}}}
          (sql-jdbc.describe-database/describe-database :h2 (mt/id)))))
 
-(defn- describe-database-with-open-resultset-count
+(defn- describe-database-with-open-resultset-count!
   "Just like `describe-database`, but instead of returning the database description returns the number of ResultSet
   objects the sync process left open. Make sure you wrap ResultSets with `with-open`! Otherwise some JDBC drivers like
   Oracle and Redshift will keep open cursors indefinitely."
@@ -113,9 +123,9 @@
 
 (defn- count-active-tables-in-db
   [db-id]
-  (t2/count Table
-    :db_id  db-id
-    :active true))
+  (t2/count :model/Table
+            :db_id  db-id
+            :active true))
 
 (deftest sync-only-accessable
   (one-off-dbs/with-blank-db
@@ -136,12 +146,12 @@
     (testing (str "make sure that running the sync process doesn't leak cursors because it's not closing the ResultSets. "
                   "See issues #4389, #6028, and #6467 (Oracle) and #7609 (Redshift)")
       (is (= 0
-             (describe-database-with-open-resultset-count driver/*driver* (mt/db)))))))
+             (describe-database-with-open-resultset-count! driver/*driver* (mt/db)))))))
 
 (defn- sync-and-assert-filtered-tables [database assert-table-fn]
-  (t2.with-temp/with-temp [Database db-filtered database]
+  (mt/with-temp [:model/Database db-filtered database]
     (sync/sync-database! db-filtered {:scan :schema})
-    (let [tables (t2/select Table :db_id (u/the-id db-filtered))]
+    (let [tables (t2/select :model/Table :db_id (u/the-id db-filtered))]
       (doseq [table tables]
         (assert-table-fn table)))))
 
@@ -155,11 +165,43 @@
              :when  (driver.u/find-schema-filters-prop driver)]
          driver)))
 
+(defmethod driver/database-supports? [::driver/driver ::database-schema-filtering-test]
+  [_driver _feature _database]
+  true)
+
+;;; These drivers are tested separately because they take too long and flake in CI
+(doseq [driver [:bigquery-cloud-sdk :redshift :databricks]]
+  (defmethod driver/database-supports? [driver ::database-schema-filtering-test]
+    [_driver _feature _database]
+    false))
+
+(defmulti filtered-db-details
+  "Returns database details for the filtered database tests."
+  {:arglists '([driver filter-type-prop filter-type patterns-type-prop pattern])}
+  tx/dispatch-on-driver-with-test-extensions
+  :hierarchy #'driver/hierarchy)
+
+(defmethod filtered-db-details :default
+  [_driver filter-type-prop filter-type patterns-type-prop pattern]
+  (-> (mt/db)
+      :details
+      (assoc filter-type-prop filter-type
+             patterns-type-prop pattern)))
+
+(defmethod filtered-db-details :snowflake
+  [_driver filter-type-prop filter-type patterns-type-prop pattern]
+  (-> (mt/db)
+      :details
+      (assoc filter-type-prop filter-type
+             patterns-type-prop pattern)
+      (dissoc :private-key-id)
+      (assoc :private-key-options "uploaded"
+             :private-key-value (mt/priv-key->base64-uri (tx/db-test-env-var-or-throw :snowflake :private-key))
+             :use-password false)))
+
 (deftest database-schema-filtering-test
-  ;; BigQuery is tested separately in `metabase.driver.bigquery-cloud-sdk-test/dataset-filtering-test`, because
-  ;; otherwise this test takes too long and flakes intermittently
-  ;; Redshift is also tested separately because it flakes.
-  (mt/test-drivers (disj (schema-filtering-drivers) :bigquery-cloud-sdk :redshift)
+  (mt/test-drivers (set/intersection (schema-filtering-drivers)
+                                     (mt/normal-drivers-with-feature ::database-schema-filtering-test))
     (let [driver             (driver.u/database->driver (mt/db))
           schema-filter-prop (find-schema-filters-prop driver)
           filter-type-prop   (keyword (str (:name schema-filter-prop) "-type"))
@@ -169,10 +211,8 @@
           (sync-and-assert-filtered-tables
            {:name    (format "Test %s DB with dataset inclusion filters" driver)
             :engine  driver
-            :details (-> (mt/db)
-                         :details
-                         (assoc filter-type-prop "inclusion"
-                                patterns-type-prop "s*,v*,2*"))}
+            :details (filtered-db-details driver filter-type-prop "inclusion"
+                                          patterns-type-prop "public.s*,public.v*,public.2*")}
            (fn [{schema-name :schema}]
              (testing (format "schema name = %s" (pr-str schema-name))
                (is (contains? #{\s \v \2} (first schema-name)))))))
@@ -180,22 +220,19 @@
           (sync-and-assert-filtered-tables
            {:name    (format "Test %s DB with dataset exclusion filters" driver)
             :engine  driver
-            :details (-> (mt/db)
-                         :details
-                         (assoc filter-type-prop "exclusion"
-                                patterns-type-prop "v*"))}
+            :details (filtered-db-details driver filter-type-prop "exclusion"
+                                          patterns-type-prop "v*")}
            (fn [{schema-name :schema}]
              (testing (format "schema name = %s" (pr-str schema-name))
                (is (not= \v (first schema-name)))))))))))
 
 (deftest have-select-privilege?-test
-  (testing "cheking select privilege works with and without auto commit (#36040)"
-    (let [default-have-slect-privilege?
+  (testing "checking select privilege works with and without auto commit (#36040)"
+    (let [default-have-select-privilege?
           #(identical? (get-method sql-jdbc.sync.interface/have-select-privilege? :sql-jdbc)
                        (get-method sql-jdbc.sync.interface/have-select-privilege? %))]
-      (mt/test-drivers (into #{}
-                             (filter default-have-slect-privilege?)
-                             (descendants driver/hierarchy :sql-jdbc))
+      (mt/test-drivers (mt/normal-driver-select {:+parent :sql-jdbc
+                                                 :+fns [default-have-select-privilege?]})
         (let [{schema :schema, table-name :name} (t2/select-one :model/Table (mt/id :checkins))]
           (qp.store/with-metadata-provider (mt/id)
             (testing (sql-jdbc.describe-database/simple-select-probe-query driver/*driver* schema table-name)
@@ -205,15 +242,22 @@
                    driver/*driver*
                    (mt/db)
                    nil
-                   (fn [^java.sql.Connection conn]
-                     (.setAutoCommit conn auto-commit)
+                   (fn [^Connection conn]
+                     ;; Databricks does not support setting auto commit to false. Catching the setAutoCommit
+                     ;; exception results in testing the true value only.
+                     (try
+                       (.setAutoCommit conn auto-commit)
+                       (catch Exception _
+                         (log/trace "Failed to set auto commit.")))
                      (is (false? (sql-jdbc.sync.interface/have-select-privilege?
                                   driver/*driver* conn schema (str table-name "_should_not_exist"))))
                      (is (true? (sql-jdbc.sync.interface/have-select-privilege?
                                  driver/*driver* conn schema table-name))))))))))))))
 
+;;; TODO: fix and change this to test on (mt/sql-jdbc-drivers)
+#_{:clj-kondo/ignore [:metabase/disallow-hardcoded-driver-names-in-tests]}
 (deftest sync-table-with-backslash-test
-  (mt/test-drivers #{:postgres} ;; TODO: fix and change this to test on (mt/sql-jdbc-drivers)
+  (mt/test-drivers #{:postgres}
     (testing "table with backslash in name, PKs, FKS are correctly synced"
       (mt/with-temp-test-data [["human\\race"
                                 [{:field-name "humanraceid" :base-type :type/Integer :pk? true}
@@ -223,10 +267,74 @@
                                 [{:field-name "citizen\\id" :base-type :type/Integer :pk? true}
                                  {:field-name "race\\id" :base-type :type/Integer :fk "human\\race"}]
                                 [[1 1]]]]
-        (let [tables            (t2/select :model/Table :db_id (:id (mt/db)))
+        (let [tables            (t2/select :model/Table :db_id (mt/id))
               field-name->field (t2/select-fn->fn :name identity :model/Field :table_id [:in (map :id tables)])]
           (is (= #{"human\\race" "citizen"} (set (map :name tables))))
           (is (= #{"humanraceid" "citizen\\id" "race" "race\\id"}
                  (set (keys field-name->field))))
           (is (= (get-in field-name->field ["humanraceid" :id])
                  (get-in field-name->field ["race\\id" :fk_target_field_id]))))))))
+
+(deftest resilient-to-conn-close?-test
+  (testing "checking sync is resilient to connections being closed during [have-select-privilege?]"
+    (let [jdbc-describe-database #(identical? (get-method driver/describe-database* :sql-jdbc)
+                                              (get-method driver/describe-database* %))]
+      (mt/test-drivers (mt/normal-driver-select {:+parent :sql-jdbc
+                                                 :+fns [jdbc-describe-database]
+                                                 :-features [:table-privileges]})
+        (let [closed-first (volatile! false)
+              execute-select-probe-query @#'sql-jdbc.describe-database/execute-select-probe-query
+              all-tables (driver/describe-database driver/*driver* (mt/id))]
+          (with-redefs [sql-jdbc.describe-database/execute-select-probe-query
+                        (fn [driver ^Connection conn query]
+                          (when-not @closed-first
+                            (vreset! closed-first true)
+                            (.close conn))
+                          (execute-select-probe-query driver conn query))]
+            (let [table-names #(->> % :tables (map :name) set)
+                  all-tables-sans-one (table-names (driver/describe-database driver/*driver* (mt/id)))]
+              ;; there is at maximum one missing table
+              (is (>= 1 (count (set/difference all-tables all-tables-sans-one)))))))))))
+
+(defn- run-retry-have-select-privilege!
+  [probe-errors query-canceled probe-error-fn]
+  (let [{schema :schema, table-name :name} (t2/select-one :model/Table (mt/id :checkins))]
+    (sql-jdbc.execute/do-with-connection-with-options
+     driver/*driver* (mt/db) nil
+     (fn [^Connection conn]
+       (let [select-probes (atom 0)]
+         (with-redefs [sql-jdbc.describe-database/execute-select-probe-query
+                       (fn [_driver conn' [sql]]
+                         (let [n (swap! select-probes inc)]
+                           (when (< n probe-errors)
+                             (probe-error-fn conn' sql))))
+                       driver/query-canceled? (constantly query-canceled)]
+           [(sql-jdbc.sync/have-select-privilege? driver/*driver* conn schema table-name)
+            @select-probes]))))))
+
+(deftest retry-have-select-privilege-test
+  (mt/test-drivers (mt/normal-driver-select
+                    {:+parent :sql-jdbc
+                     :+fns [#(identical? (get-method sql-jdbc.sync/have-select-privilege? :sql-jdbc)
+                                         (get-method sql-jdbc.sync/have-select-privilege? %))]
+                     :-features [:table-privileges]})
+    (letfn [(probe-error-fn [conn sql]
+              (.close conn)
+              (.prepareStatement conn sql))]
+      (testing "we will retry syncing a table once if the connection is closed"
+        (let [[result probes] (run-retry-have-select-privilege! 2 false probe-error-fn)]
+          (is (true? result))
+          (is (= 2 probes))))
+      (testing "we will only retry syncing a table if the connection is closed"
+        (let [[result probes] (run-retry-have-select-privilege! 2 false (fn [_conn _sql]
+                                                                          (throw (ex-info "not connection closed error" {}))))]
+          (is (false? result))
+          (is (= 1 probes))))
+      (testing "we won't retry syncing a table more than once if the connection is closed"
+        (let [[result probes] (run-retry-have-select-privilege! 3 false probe-error-fn)]
+          (is (false? result))
+          (is (= 2 probes))))
+      (testing "we won't retry syncing a table if the probe query was canceled"
+        (let [[result probes] (run-retry-have-select-privilege! 3 true probe-error-fn)]
+          (is (true? result))
+          (is (= 1 probes)))))))

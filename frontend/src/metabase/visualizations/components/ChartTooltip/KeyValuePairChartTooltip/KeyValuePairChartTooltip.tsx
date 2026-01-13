@@ -2,7 +2,7 @@ import cx from "classnames";
 import { isValidElement, useMemo } from "react";
 
 import CS from "metabase/css/core/index.css";
-import { getFriendlyName } from "metabase/visualizations/lib/utils";
+import { NULL_DISPLAY_VALUE } from "metabase/lib/constants";
 import type {
   ComputedVisualizationSettings,
   DataPoint,
@@ -31,6 +31,7 @@ const KeyValuePairChartTooltip = ({
   settings,
 }: StackedDataTooltipProps) => {
   const rows = useMemo(() => getRows(hovered), [hovered]);
+  const { isAlreadyScaled } = hovered;
   const footerRows = hovered.footerData;
 
   const showFooter = footerRows && footerRows.length > 0;
@@ -45,6 +46,7 @@ const KeyValuePairChartTooltip = ({
             value={value}
             column={col}
             settings={settings}
+            isAlreadyScaled={isAlreadyScaled}
           />
         ))}
       </TableBody>
@@ -70,19 +72,28 @@ export interface TooltipRowProps {
   value?: any;
   column: RemappingHydratedDatasetColumn | DatasetColumn | null;
   settings: ComputedVisualizationSettings;
+  isAlreadyScaled?: boolean;
 }
 
-const TooltipRow = ({ name, value, column, settings }: TooltipRowProps) => (
+const TooltipRow = ({
+  name,
+  value,
+  column,
+  settings,
+  isAlreadyScaled,
+}: TooltipRowProps) => (
   <tr>
     {name ? (
-      <TableCell className={cx(CS.textLight, CS.textRight)}>{name}:</TableCell>
+      <TableCell className={cx(CS.textTooltipSecondary, CS.textRight)}>
+        {name}:
+      </TableCell>
     ) : (
       <TableCell />
     )}
     <TableCell className={cx(CS.textBold, CS.textLeft)}>
       {isValidElement(value)
         ? value
-        : formatValueForTooltip({ value, column, settings })}
+        : formatValueForTooltip({ value, column, settings, isAlreadyScaled })}
     </TableCell>
   </tr>
 );
@@ -109,13 +120,13 @@ const getRows = (hovered: HoveredObject) => {
   return [];
 };
 
-const getRowFromDataPoint = (data: DataPoint) => ({
+export const getRowFromDataPoint = (data: DataPoint) => ({
   ...data,
-  key: data.key || (data.col && getFriendlyName(data.col)),
+  key: data.key || (data?.col?.display_name ?? NULL_DISPLAY_VALUE),
 });
 
 const getRowFromDimension = ({ column, value }: HoveredDimension) => ({
-  key: column && getFriendlyName(column),
+  key: column?.display_name,
   value: value,
   col: column,
 });

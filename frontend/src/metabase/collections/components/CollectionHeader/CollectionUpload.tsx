@@ -1,20 +1,17 @@
 import type { ChangeEvent } from "react";
-import { useState, useRef } from "react";
+import { useRef, useState } from "react";
 import { t } from "ttag";
 
-import Tooltip, {
-  TooltipContainer,
-  TooltipTitle,
-  TooltipSubtitle,
-} from "metabase/core/components/Tooltip";
-import { MAX_UPLOAD_STRING } from "metabase/redux/uploads";
+import {
+  UploadInput,
+  UploadLabel,
+  UploadTooltip,
+} from "metabase/common/components/upload";
 import type { Collection } from "metabase-types/api";
 
 import { CollectionHeaderButton } from "./CollectionHeader.styled";
-import { UploadInput } from "./CollectionUpload.styled";
 import { UploadInfoModal } from "./CollectionUploadInfoModal";
-
-const UPLOAD_FILE_TYPES = [".csv", ".tsv"];
+import { trackCSVFileUploadClicked } from "./analytics";
 
 export function CollectionUpload({
   collection,
@@ -41,6 +38,7 @@ export function CollectionUpload({
             onClick={() => setShowInfoModal(true)}
           />
         </UploadTooltip>
+
         {showInfoModal && (
           <UploadInfoModal
             isAdmin={isAdmin}
@@ -52,6 +50,7 @@ export function CollectionUpload({
   }
 
   const handleFileUpload = (event: ChangeEvent<HTMLInputElement>) => {
+    trackCSVFileUploadClicked();
     const file = event.target.files?.[0];
     if (file !== undefined) {
       saveFile(file);
@@ -65,7 +64,7 @@ export function CollectionUpload({
 
   return (
     <UploadTooltip collection={collection}>
-      <label htmlFor="upload-csv">
+      <UploadLabel>
         <CollectionHeaderButton
           as="span"
           to=""
@@ -73,37 +72,8 @@ export function CollectionUpload({
           iconSize={20}
           aria-label={t`Upload data`}
         />
-      </label>
-      <UploadInput
-        id="upload-csv"
-        ref={uploadInputRef}
-        type="file"
-        accept="text/csv,text/tab-separated-values"
-        onChange={handleFileUpload}
-        data-testid="upload-input"
-      />
+      </UploadLabel>
+      <UploadInput ref={uploadInputRef} onChange={handleFileUpload} />
     </UploadTooltip>
   );
 }
-
-const UploadTooltip = ({
-  collection,
-  children,
-}: {
-  collection: Collection;
-  children: React.ReactNode;
-}) => (
-  <Tooltip
-    tooltip={
-      <TooltipContainer>
-        <TooltipTitle>{t`Upload data to ${collection.name}`}</TooltipTitle>
-        <TooltipSubtitle>{t`${UPLOAD_FILE_TYPES.join(
-          ", ",
-        )} (${MAX_UPLOAD_STRING} MB max)`}</TooltipSubtitle>
-      </TooltipContainer>
-    }
-    placement="bottom"
-  >
-    {children}
-  </Tooltip>
-);

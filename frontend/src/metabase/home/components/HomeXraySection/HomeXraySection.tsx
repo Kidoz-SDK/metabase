@@ -3,39 +3,47 @@ import { useCallback, useMemo, useState } from "react";
 import { t } from "ttag";
 import _ from "underscore";
 
-import { skipToken, useListDatabaseCandidatesQuery } from "metabase/api";
-import { useDatabaseListQuery } from "metabase/common/hooks";
-import LoadingAndErrorWrapper from "metabase/components/LoadingAndErrorWrapper";
-import Select from "metabase/core/components/Select";
+import {
+  skipToken,
+  useListDatabaseXraysQuery,
+  useListDatabasesQuery,
+} from "metabase/api";
+import { LoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper";
+import Select from "metabase/common/components/Select";
 import { useSelector } from "metabase/lib/redux";
 import { isSyncCompleted } from "metabase/lib/syncing";
+import { isNotNull } from "metabase/lib/types";
 import * as Urls from "metabase/lib/urls";
 import { getApplicationName } from "metabase/selectors/whitelabel";
-import type Database from "metabase-lib/v1/metadata/Database";
-import type { DatabaseCandidate } from "metabase-types/api";
+import type { Database, DatabaseXray } from "metabase-types/api";
 
 import { HomeCaption } from "../HomeCaption";
 import { HomeHelpCard } from "../HomeHelpCard";
 import { HomeXrayCard } from "../HomeXrayCard";
 
 import {
-  DatabaseLinkIcon,
   DatabaseLink,
+  DatabaseLinkIcon,
   DatabaseLinkText,
-  SectionBody,
   SchemaTrigger,
-  SchemaTriggerText,
   SchemaTriggerIcon,
+  SchemaTriggerText,
+  SectionBody,
 } from "./HomeXraySection.styled";
 
 export const HomeXraySection = () => {
-  const databaseListState = useDatabaseListQuery();
-  const database = getXrayDatabase(databaseListState.data);
-  const candidateListState = useListDatabaseCandidatesQuery(
+  const {
+    data: databasesData,
+    isLoading: databasesLoading,
+    error: databasesError,
+  } = useListDatabasesQuery();
+
+  const database = getXrayDatabase(databasesData?.data);
+  const candidateListState = useListDatabaseXraysQuery(
     database?.id ?? skipToken,
   );
-  const isLoading = databaseListState.isLoading || candidateListState.isLoading;
-  const error = databaseListState.error ?? candidateListState.error;
+  const isLoading = databasesLoading || candidateListState.isLoading;
+  const error = databasesError ?? candidateListState.error;
 
   if (isLoading || error) {
     return <LoadingAndErrorWrapper loading={isLoading} error={error} />;
@@ -52,18 +60,19 @@ export const HomeXraySection = () => {
 
 interface HomeXrayViewProps {
   database: Database;
-  candidates?: DatabaseCandidate[];
+  candidates?: DatabaseXray[];
 }
 
 const HomeXrayView = ({ database, candidates = [] }: HomeXrayViewProps) => {
   const isSample = database.is_sample;
-  const schemas = candidates.map(d => d.schema);
-  const [schema, setSchema] = useState(schemas[0]);
-  const candidate = candidates.find(d => d.schema === schema);
+  const schemas = candidates.map((d) => d.schema);
+  const [schema, setSchema] = useState(getDefaultSchema(schemas));
+  const candidate = candidates.find((d) => d.schema === schema);
   const tableCount = candidate ? candidate.tables.length : 0;
   const tableMessages = useMemo(() => getMessages(tableCount), [tableCount]);
-  const canSelectSchema = schemas.length > 1;
+  const canSelectSchema = schemas.length > 1 && schema !== null;
   const applicationName = useSelector(getApplicationName);
+  const hasTables = (candidate?.tables.length ?? 0) > 0;
 
   return (
     <div>
@@ -82,12 +91,12 @@ const HomeXrayView = ({ database, candidates = [] }: HomeXrayViewProps) => {
           {t`schema in`}
           <DatabaseInfo database={database} />
         </HomeCaption>
-      ) : (
+      ) : hasTables ? (
         <HomeCaption primary>
           {t`Here are some explorations of`}
           <DatabaseInfo database={database} />
         </HomeCaption>
-      )}
+      ) : null}
       <SectionBody>
         {candidate?.tables.map((table, index) => (
           <HomeXrayCard
@@ -103,6 +112,14 @@ const HomeXrayView = ({ database, candidates = [] }: HomeXrayViewProps) => {
   );
 };
 
+const getDefaultSchema = (schemas: Array<string | null>) => {
+  return (
+    schemas
+      .filter(isNotNull)
+      .find((schema) => schema.toLowerCase() === "public") || schemas[0]
+  );
+};
+
 interface SchemaSelectProps {
   schema: string;
   schemas: string[];
@@ -112,7 +129,9 @@ interface SchemaSelectProps {
 const SchemaSelect = ({ schema, schemas, onChange }: SchemaSelectProps) => {
   const trigger = (
     <SchemaTrigger>
-      <SchemaTriggerText>{schema}</SchemaTriggerText>
+      <SchemaTriggerText data-testid="xray-schema-name">
+        {schema}
+      </SchemaTriggerText>
       <SchemaTriggerIcon name="chevrondown" />
     </SchemaTrigger>
   );
@@ -149,9 +168,13 @@ const DatabaseInfo = ({ database }: DatabaseInfoProps) => {
   );
 };
 
-const getXrayDatabase = (databases: Database[] = []) => {
-  const sampleDatabase = databases.find(d => d.is_sample && isSyncCompleted(d));
-  const userDatabase = databases.find(d => !d.is_sample && isSyncCompleted(d));
+const getXrayDatabase = (databases: Database[] | undefined = []) => {
+  const sampleDatabase = databases.find(
+    (d) => d.is_sample && isSyncCompleted(d),
+  );
+  const userDatabase = databases.find(
+    (d) => !d.is_sample && isSyncCompleted(d),
+  );
   return userDatabase ?? sampleDatabase;
 };
 
@@ -165,7 +188,7 @@ const getMessages = (count: number) => {
 
   return _.chain(count)
     .range()
-    .map(index => options[index % options.length])
+    .map((index) => options[index % options.length])
     .sample(count)
     .value();
 };

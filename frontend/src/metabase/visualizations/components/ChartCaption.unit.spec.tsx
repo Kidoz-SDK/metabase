@@ -2,7 +2,12 @@ import userEvent from "@testing-library/user-event";
 import type { ComponentPropsWithoutRef } from "react";
 import _ from "underscore";
 
-import { render, screen, getIcon, queryIcon } from "__support__/ui";
+import {
+  getIcon,
+  queryIcon,
+  renderWithProviders,
+  screen,
+} from "__support__/ui";
 import type { Card, Series } from "metabase-types/api";
 import {
   createMockCard,
@@ -51,7 +56,7 @@ const setup = (props: Partial<Props> = {}) => {
     width = 200,
   } = props;
 
-  render(
+  renderWithProviders(
     <ChartCaption
       series={series}
       onChangeCardAndRun={onChangeCardAndRun}
@@ -86,7 +91,7 @@ describe("ChartCaption", () => {
 
     await userEvent.hover(getIcon("info"));
 
-    const tooltipContent = screen.getByRole("link");
+    const tooltipContent = await screen.findByRole("link");
     expect(tooltipContent).toBeInTheDocument();
     expect(tooltipContent).toHaveTextContent("link");
   });
@@ -99,5 +104,71 @@ describe("ChartCaption", () => {
     });
 
     expect(queryIcon("info")).not.toBeInTheDocument();
+  });
+
+  describe("title sources", () => {
+    it("should use card.title from settings as highest priority", () => {
+      setup({
+        series: getSeries({
+          card: createMockCard({
+            name: "Card Name",
+            visualization_settings: { "card.title": "Viz Settings Title" },
+          }),
+        }),
+        settings: { "card.title": "Settings Title" },
+      });
+
+      expect(screen.getByTestId("legend-caption")).toHaveTextContent(
+        "Settings Title",
+      );
+    });
+
+    it("should use card.title from visualization_settings when no settings title", () => {
+      setup({
+        series: getSeries({
+          card: createMockCard({
+            name: "Card Name",
+            visualization_settings: { "card.title": "Viz Settings Title" },
+          }),
+        }),
+        settings: {},
+      });
+
+      expect(screen.getByTestId("legend-caption")).toHaveTextContent(
+        "Viz Settings Title",
+      );
+    });
+
+    it("should use card.name when no title in settings or visualization_settings", () => {
+      setup({
+        series: getSeries({
+          card: createMockCard({
+            name: "Card Name",
+            visualization_settings: {},
+          }),
+        }),
+        settings: {},
+      });
+
+      expect(screen.getByTestId("legend-caption")).toHaveTextContent(
+        "Card Name",
+      );
+    });
+
+    it("should render empty title when no title sources available", () => {
+      setup({
+        series: getSeries({
+          card: createMockCard({
+            name: undefined,
+            visualization_settings: {},
+          }),
+        }),
+        settings: {},
+      });
+
+      const caption = screen.getByTestId("legend-caption");
+      expect(caption).toBeInTheDocument();
+      expect(caption).not.toHaveTextContent(/\S/); // Should not contain any non-whitespace characters
+    });
   });
 });

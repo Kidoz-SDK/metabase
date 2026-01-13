@@ -1,152 +1,225 @@
 (ns metabase.events.schema
   (:require
-   [malli.core :as mc]
    [malli.util :as mut]
+   [metabase.util.malli :as mu]
+   [metabase.util.malli.registry :as mr]
+   [metabase.util.malli.schema :as ms]
    [toucan2.core :as t2]))
 
+;;; TODO -- move these into appropriate modules.
+
+(mu/defn event-schema
+  "Get the Malli schema we should use for events of `topic`. By default, this looks in our registry for a schema
+  matching the event topic name; if it fails to find one, it falls back to `:map`."
+  [topic :- keyword?]
+  (or (mr/registered-schema topic)
+      :map))
+
+#_{:clj-kondo/ignore [:unused-private-var]}
+(defn- with-hydrate
+  "Given a malli entry schema of a map, return a new entry schema with an additional option
+  to hydrate information when sending system event notifications.
+
+    (events.notification/hydrate! [:map
+                                    (-> [:user_id :int] (with-hydrate :user [:model/User :email]))]
+                                  {:user_id 1})
+    ;; => {:user_id 1
+           :user    {:email \"ngoc@metabase.com\"}}"
+  [entry-schema k model]
+  (assert (#{2 3} (count entry-schema)) "entry-schema must have 2 or 3 elements")
+  (let [[entry-key option schema] (if (= 2 (count entry-schema))
+                                    [(first entry-schema) {} (second entry-schema)]
+                                    entry-schema)]
+    [entry-key (assoc option :hydrate {:key   k
+                                       :model model})
+     schema]))
+
+(def ^:private user-hydrate
+  [:model/User :first_name :last_name :email])
+
 ;; collection events
-(let [default-schema (mc/schema
-                      [:map {:closed true}
-                       [:user-id  pos-int?]
-                       [:object   [:fn #(t2/instance-of? :model/Collection %)]]])]
-  (def ^:private collection-events-schemas
-    {:event/collection-read default-schema}))
+
+(mr/def :event/collection-read
+  [:map {:closed true}
+   [:user-id  pos-int?]
+   [:object   [:fn #(t2/instance-of? :model/Collection %)]]])
+
+ ;; collection write events
+
+(mr/def ::collection
+  [:map {:closed true}
+   [:user-id [:maybe pos-int?]]
+   [:object [:fn #(t2/instance-of? :model/Collection %)]]])
+
+(mr/def :event/collection-create ::collection)
+(mr/def :event/collection-update ::collection)
 
 ;; dashboard events
 
-(let [default-schema (mc/schema
-                      [:map {:closed true}
-                       [:user-id pos-int?]
-                       [:object [:fn #(t2/instance-of? :model/Dashboard %)]]])
-      view-only      (mc/schema
-                      [:map {:closed true}
-                       [:user-id [:maybe pos-int?]]
-                       [:object [:fn #(t2/instance-of? :model/Dashboard %)]]])
-      with-dashcards (mut/assoc default-schema
-                                :dashcards [:sequential [:map [:id pos-int?]]])]
-  (def ^:private dashboard-events-schemas
-    {:event/dashboard-read             view-only
-     :event/dashboard-create           default-schema
-     :event/dashboard-update           default-schema
-     :event/dashboard-delete           default-schema
-     :event/dashboard-remove-cards     with-dashcards
-     :event/dashboard-add-cards        with-dashcards}))
+(mr/def ::dashboard
+  [:map {:closed true}
+   [:user-id pos-int?]
+   [:object [:fn #(t2/instance-of? :model/Dashboard %)]]])
 
-;; card events
+(mr/def :event/dashboard-create ::dashboard)
+(mr/def :event/dashboard-update ::dashboard)
+(mr/def :event/dashboard-delete ::dashboard)
 
-(let [default-schema (mc/schema
-                      [:map {:closed true}
-                       [:user-id  [:maybe pos-int?]]
-                       [:object   [:fn #(t2/instance-of? :model/Card %)]]])]
-  (def ^:private card-events-schemas
-    {:event/card-create default-schema
-     :event/card-read   default-schema
-     :event/card-update default-schema
-     :event/card-delete default-schema
-     :event/card-query  [:map {:closed true}
-                         [:card-id pos-int?]
-                         [:user-id [:maybe pos-int?]]
-                         [:context {:optional true} :any]]}))
+(mr/def ::dashboard-with-dashcards
+  (-> (event-schema ::dashboard)
+      (mut/assoc :dashcards [:sequential [:map [:id pos-int?]]])))
+
+(mr/def :event/dashboard-remove-cards ::dashboard-with-dashcards)
+(mr/def :event/dashboard-add-cards    ::dashboard-with-dashcards)
+
+(mr/def :event/dashboard-read
+  [:map {:closed true}
+   [:user-id   [:maybe pos-int?]]
+   [:object-id [:maybe pos-int?]]])
+
+(mr/def ::publicize
+  [:map {:closed true}
+   [:user-id pos-int?]
+   [:object-id pos-int?]])
+
+(mr/def :event/dashboard-public-link-created ::publicize)
+(mr/def :event/dashboard-public-link-deleted ::publicize)
+(mr/def :event/card-public-link-created ::publicize)
+(mr/def :event/card-public-link-deleted ::publicize)
 
 ;; user events
 
-(let [default-schema (mc/schema
-                      [:map {:closed true}
-                       [:user-id pos-int?]])]
-  (def ^:private user-events-schema
-    {:event/user-login  default-schema
-     :event/user-joined default-schema}))
+(mr/def ::user
+  [:map {:closed true}
+   [:user-id pos-int?]])
 
-;; metric events
+(mr/def :event/user-login  ::user)
+(mr/def :event/user-joined ::user)
 
-(let [default-schema (mc/schema
-                      [:map {:closed true}
-                       [:user-id  pos-int?]
-                       [:object   [:fn #(t2/instance-of? :model/LegacyMetric %)]]])
-      with-message   (mc/schema [:merge default-schema
-                                 [:map {:closed true}
-                                  [:revision-message {:optional true} :string]]])]
-  (def ^:private metric-related-schema
-    {:event/metric-create default-schema
-     :event/metric-update with-message
-     :event/metric-delete with-message}))
+(mr/def :event/user-invited
+  [:map {:closed true}
+   [:object [:map
+             [:email ms/Email]
+             [:is_from_setup {:optional true} :boolean]
+             [:first_name    {:optional true} [:maybe :string]]
+             [:invite_method {:optional true} :string]
+             [:sso_source    {:optional true} [:maybe [:or :keyword :string]]]]]
+   [:details {:optional true}
+    [:map {:closed true}
+     [:invitor [:map {:closed true}
+                [:email                       ms/Email]
+                [:first_name {:optional true} [:maybe :string]]]]]]])
 
 ;; segment events
 
-(let [default-schema (mc/schema
-                      [:map {:closed true}
-                       [:user-id  pos-int?]
-                       [:object   [:fn #(t2/instance-of? :model/Segment %)]]])
-      with-message (mc/schema
-                    [:merge default-schema
-                     [:map {:closed true}
-                      [:revision-message {:optional true} :string]]])]
-  (def ^:private segment-related-schema
-    {:event/segment-create default-schema
-     :event/segment-update with-message
-     :event/segment-delete with-message}))
+(mr/def ::segment
+  [:map {:closed true}
+   [:user-id  pos-int?]
+   [:object   [:fn #(t2/instance-of? :model/Segment %)]]])
+
+(mr/def :event/segment-create ::segment)
+
+(mr/def ::segment-with-message
+  [:merge
+   ::segment
+   [:map {:closed true}
+    [:revision-message {:optional true} :string]]])
+
+(mr/def :event/segment-update ::segment-with-message)
+(mr/def :event/segment-delete ::segment-with-message)
+
+;; measure events
+
+(mr/def ::measure
+  [:map {:closed true}
+   [:user-id  pos-int?]
+   [:object   [:fn #(t2/instance-of? :model/Measure %)]]])
+
+(mr/def :event/measure-create ::measure)
+
+(mr/def ::measure-with-message
+  [:merge
+   ::measure
+   [:map {:closed true}
+    [:revision-message {:optional true} :string]]])
+
+(mr/def :event/measure-update ::measure-with-message)
+(mr/def :event/measure-delete ::measure-with-message)
 
 ;; database events
 
-(let [default-schema (mc/schema
-                      [:map {:closed true}
-                       [:object [:fn #(t2/instance-of? :model/Database %)]]
-                       [:previous-object {:optional true} [:fn #(t2/instance-of? :model/Database %)]]
-                       [:user-id pos-int?]])]
-  (def ^:private database-events
-    {:event/database-create default-schema
-     :event/database-update default-schema
-     :event/database-delete default-schema}))
+(mr/def ::database
+  [:map {:closed true}
+   [:object [:fn #(t2/instance-of? :model/Database %)]]
+   [:previous-object {:optional true} [:fn #(t2/instance-of? :model/Database %)]]
+   [:details {:optional true} :map]
+   [:user-id pos-int?]
+   [:details-changed? {:optional true} [:maybe :boolean]]])
+
+(mr/def :event/database-create ::database)
+(mr/def :event/database-update ::database)
+(mr/def :event/database-delete ::database)
 
 ;; alert schemas
-(def ^:private alert-schema
-  {:event/alert-create (mc/schema
-                        [:map {:closed true}
-                         [:user-id pos-int?]
-                         [:object [:and
-                                   [:fn #(t2/instance-of? :model/Pulse %)]
-                                   [:map
-                                    [:card [:fn #(t2/instance-of? :model/Card %)]]]]]])})
+
+(mr/def :event/alert-create
+  [:map {:closed true}
+   (-> [:user-id pos-int?]
+       (with-hydrate :user user-hydrate))
+   [:object [:and
+             [:fn #(t2/instance-of? :model/Pulse %)]
+             [:map
+              [:card [:fn #(t2/instance-of? :model/Card %)]]]]]])
 
 ;; pulse schemas
-(def ^:private pulse-schemas
-  {:event/pulse-create (mc/schema
-                        [:map {:closed true}
-                         [:user-id pos-int?]
-                         [:object [:fn #(t2/instance-of? :model/Pulse %)]]])})
+
+(mr/def :event/pulse-create
+  [:map {:closed true}
+   [:user-id pos-int?]
+   [:object [:fn #(t2/instance-of? :model/Pulse %)]]])
 
 ;; table events
 
-(def ^:private table-events
-  {:event/table-read (mc/schema
-                      [:map {:closed true}
-                       [:user-id  pos-int?]
-                       [:object [:fn #(t2/instance-of? :model/Table %)]]])})
+(mr/def :event/table-read
+  [:map {:closed true}
+   [:user-id  pos-int?]
+   [:object [:fn #(t2/instance-of? :model/Table %)]]])
 
-(let [default-schema (mc/schema
-                      [:map {:closed true}
-                       [:user-id [:maybe pos-int?]]
-                       [:object [:maybe [:fn #(boolean (t2/model %))]]]
-                       [:has-access {:optional true} [:maybe :boolean]]])]
-  (def ^:private permission-failure-events
-    {:event/read-permission-failure default-schema
-     :event/write-permission-failure default-schema
-     :event/update-permission-failure default-schema
-     :event/create-permission-failure (mc/schema
-                                       [:map {:closed true}
-                                        [:user-id [:maybe pos-int?]]
-                                        [:model [:or :keyword :string]]])}))
+(mr/def ::permission-failure
+  [:map {:closed true}
+   [:user-id [:maybe pos-int?]]
+   [:object [:maybe [:fn #(boolean (t2/model %))]]]
+   [:has-access {:optional true} [:maybe :boolean]]])
 
-(def topic->schema
-  "Returns the schema for an event topic."
-  (merge alert-schema
-         card-events-schemas
-         collection-events-schemas
-         dashboard-events-schemas
-         database-events
-         metric-related-schema
-         permission-failure-events
-         pulse-schemas
-         table-events
-         user-events-schema
-         segment-related-schema))
+(mr/def :event/read-permission-failure   ::permission-failure)
+(mr/def :event/write-permission-failure  ::permission-failure)
+(mr/def :event/update-permission-failure ::permission-failure)
+
+(mr/def :event/create-permission-failure
+  [:map {:closed true}
+   [:user-id [:maybe pos-int?]]
+   [:model [:or :keyword :string]]])
+
+;; Enterprise remote sync events
+
+(mr/def :event/remote-sync
+  [:map
+   [:sync-type [:enum :initial :incremental :full "import" "export"]]
+   [:collection-id [:maybe ms/NonBlankString]]
+   [:user-id [:maybe pos-int?]]
+   [:timestamp [:maybe :any]]
+   [:branch {:optional true} [:maybe :string]]
+   [:status {:optional true} [:maybe [:enum "success" "error"]]]
+   [:version {:optional true} :string]
+   [:message {:optional true} [:maybe :string]]])
+
+;; snippet events
+
+(mr/def ::snippet
+  [:map {:closed true}
+   [:user-id [:maybe pos-int?]]
+   [:object [:fn #(t2/instance-of? :model/NativeQuerySnippet %)]]])
+
+(mr/def :event/snippet-create ::snippet)
+(mr/def :event/snippet-update ::snippet)
+(mr/def :event/snippet-delete ::snippet)

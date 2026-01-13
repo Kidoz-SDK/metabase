@@ -1,4 +1,4 @@
-(ns ^:mb/once metabase.util.date-2-test
+(ns metabase.util.date-2-test
   (:require
    [clojure.string :as str]
    [clojure.test :refer :all]
@@ -144,8 +144,8 @@
 ;; TODO - more tests!
 (deftest ^:parallel format-test
   (are
-    [expected input]
-    (= expected (u.date/format input))
+   [expected input]
+   (= expected (u.date/format input))
     "2019-06-05T18:39:00-07:00" (t/zoned-date-time "2019-06-05T18:39:00-07:00[US/Pacific]")
     "2019-11-05T18:39:00-08:00" (t/zoned-date-time "2019-11-05T18:39:00-08:00[US/Pacific]")
     "2019-06-05T18:39:00-07:00" (t/offset-date-time "2019-06-05T18:39:00-07:00")
@@ -159,8 +159,8 @@
 
 (deftest ^:parallel format-rfc3339-test
   (are
-    [expected input]
-    (= expected (u.date/format-rfc3339 input))
+   [expected input]
+   (= expected (u.date/format-rfc3339 input))
     "2019-06-05T18:39:00.00-07:00" (t/zoned-date-time "2019-06-05T18:39:00-07:00[US/Pacific]")
     "2019-11-05T18:39:00.00-08:00" (t/zoned-date-time "2019-11-05T18:39:00-08:00[US/Pacific]")
     "2019-06-05T18:39:00.00-07:00" (t/offset-date-time "2019-06-05T18:39:00-07:00")
@@ -497,8 +497,8 @@
         (doseq [t ((juxt t/instant t/local-date t/local-date-time t/offset-date-time identity)
                    (t/zoned-date-time "2019-11-01T00:00-08:00[US/Pacific]"))]
           (testing (format "t = %s" (pr-str t))
-            (is (= true
-                   (u.date/older-than? t (t/weeks 2)))
+            (is (true?
+                 (u.date/older-than? t (t/weeks 2)))
                 (format "%s happened before 2019-11-19" (pr-str t)))
             (is (= false
                    (u.date/older-than? t (t/months 2)))
@@ -506,7 +506,7 @@
 
 (deftest static-instances-locale-test
   (testing "in the Turkish locale, :minute-of-hour can be found"
-    (mt/with-locale "tr"
+    (mt/with-locale! "tr"
       (is (some? (:minute-of-hour (u.date.common/static-instances ChronoField)))))))
 
 (deftest ^:parallel with-time-zone-same-instant-test

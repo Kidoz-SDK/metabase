@@ -1,16 +1,16 @@
 import { createSelector } from "@reduxjs/toolkit";
 import { getIn } from "icepick";
 
-import Dashboards from "metabase/entities/dashboards";
+import { Dashboards } from "metabase/entities/dashboards";
 import { resourceListToMap } from "metabase/lib/redux";
 import {
   getShallowDatabases as getDatabases,
-  getShallowTables as getTables,
   getShallowFields as getFields,
   getShallowSegments as getSegments,
+  getShallowTables as getTables,
 } from "metabase/selectors/metadata";
 
-import { idsToObjectMap, databaseToForeignKeys } from "./utils";
+import { idsToObjectMap } from "./utils";
 
 // import { getDatabases, getTables, getFields, getSegments } from "metabase/selectors/metadata";
 
@@ -59,8 +59,8 @@ export const getTable = createSelector(
     tableId
       ? tables[tableId] || { id: tableId }
       : segmentId
-      ? tableBySegment
-      : {},
+        ? tableBySegment
+        : {},
 );
 
 export const getFieldId = (state, props) =>
@@ -97,33 +97,9 @@ export const getSegmentRevisions = createSelector(
 export const getTableQuestions = createSelector(
   [getTable, getQuestions],
   (table, questions) =>
-    Object.values(questions).filter(question => question.table_id === table.id),
-);
-
-const getDatabaseBySegment = createSelector(
-  [getSegment, getTables, getDatabases],
-  (segment, tables, databases) =>
-    (segment &&
-      segment.table_id &&
-      tables[segment.table_id] &&
-      databases[tables[segment.table_id].db_id]) ||
-    {},
-);
-
-const getForeignKeysBySegment = createSelector(
-  [getDatabaseBySegment],
-  databaseToForeignKeys,
-);
-
-const getForeignKeysByDatabase = createSelector(
-  [getDatabase],
-  databaseToForeignKeys,
-);
-
-export const getForeignKeys = createSelector(
-  [getSegmentId, getForeignKeysBySegment, getForeignKeysByDatabase],
-  (segmentId, foreignKeysBySegment, foreignKeysByDatabase) =>
-    segmentId ? foreignKeysBySegment : foreignKeysByDatabase,
+    Object.values(questions).filter(
+      (question) => question.table_id === table.id,
+    ),
 );
 
 export const getLoading = (state, props) => state.reference.isLoading;
@@ -132,7 +108,7 @@ export const getError = (state, props) => state.reference.error;
 
 export const getHasSingleSchema = createSelector(
   [getTablesByDatabase],
-  tables =>
+  (tables) =>
     tables && Object.keys(tables).length > 0
       ? Object.values(tables).every(
           (table, index, tables) => table.schema_name === tables[0].schema,

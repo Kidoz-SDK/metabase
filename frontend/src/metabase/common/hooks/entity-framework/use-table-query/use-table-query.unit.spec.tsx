@@ -4,7 +4,7 @@ import {
   screen,
   waitForLoaderToBeRemoved,
 } from "__support__/ui";
-import LoadingAndErrorWrapper from "metabase/components/LoadingAndErrorWrapper";
+import { LoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper";
 import { createMockTable } from "metabase-types/api/mocks";
 
 import { useTableQuery } from "./use-table-query";
@@ -31,7 +31,7 @@ const setup = () => {
 describe("useTableQuery", () => {
   it("should be initially loading", () => {
     setup();
-    expect(screen.getByTestId("loading-spinner")).toBeInTheDocument();
+    expect(screen.getByTestId("loading-indicator")).toBeInTheDocument();
   });
 
   it("should show data from the response", async () => {

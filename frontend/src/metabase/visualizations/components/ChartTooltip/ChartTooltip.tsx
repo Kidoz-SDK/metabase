@@ -1,8 +1,9 @@
 import { useMemo } from "react";
 import _ from "underscore";
 
-import Tooltip from "metabase/core/components/Tooltip";
+import Tooltip from "metabase/common/components/Tooltip";
 import { getEventTarget } from "metabase/lib/dom";
+import { PLUGIN_CONTENT_TRANSLATION } from "metabase/plugins";
 import type {
   HoveredObject,
   HoveredTimelineEvent,
@@ -14,25 +15,38 @@ import StackedDataTooltip from "./StackedDataTooltip";
 import TimelineEventTooltip from "./TimelineEventTooltip";
 
 export interface ChartTooltipProps {
-  hovered?: HoveredObject;
+  hovered?: HoveredObject | null;
   settings: VisualizationSettings;
 }
 
-const ChartTooltip = ({ hovered, settings }: ChartTooltipProps) => {
-  const tooltip = useMemo(() => {
-    if (!hovered) {
-      return null;
-    }
-    if (!_.isEmpty(hovered.timelineEvents)) {
-      return <TimelineEventTooltip hovered={hovered as HoveredTimelineEvent} />;
-    }
+export const ChartTooltipContent = ({
+  hovered,
+  settings,
+}: ChartTooltipProps) => {
+  if (!hovered) {
+    return null;
+  }
+  if (!_.isEmpty(hovered.timelineEvents)) {
+    return <TimelineEventTooltip hovered={hovered as HoveredTimelineEvent} />;
+  }
 
-    if (hovered.stackedTooltipModel) {
-      return <StackedDataTooltip {...hovered.stackedTooltipModel} />;
-    }
+  if (hovered.stackedTooltipModel) {
+    return <StackedDataTooltip {...hovered.stackedTooltipModel} />;
+  }
 
-    return <KeyValuePairChartTooltip hovered={hovered} settings={settings} />;
-  }, [hovered, settings]);
+  return <KeyValuePairChartTooltip hovered={hovered} settings={settings} />;
+};
+
+const ChartTooltip = ({
+  hovered: untranslatedHoveredObject,
+  settings,
+}: ChartTooltipProps) => {
+  const hovered =
+    PLUGIN_CONTENT_TRANSLATION.useTranslateFieldValuesInHoveredObject(
+      untranslatedHoveredObject,
+    );
+
+  const tooltip = <ChartTooltipContent hovered={hovered} settings={settings} />;
 
   const isNotEmpty = useMemo(() => {
     if (!hovered) {
@@ -56,8 +70,8 @@ const ChartTooltip = ({ hovered, settings }: ChartTooltipProps) => {
   const target = hasTargetElement
     ? hovered?.element
     : hasTargetEvent
-    ? getEventTarget(hovered.event)
-    : null;
+      ? getEventTarget(hovered.event)
+      : null;
 
   return target ? (
     <Tooltip

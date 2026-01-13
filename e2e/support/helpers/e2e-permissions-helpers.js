@@ -1,4 +1,7 @@
-import { popover } from "e2e/support/helpers";
+import _ from "underscore";
+
+import { SAMPLE_DB_ID } from "e2e/support/cypress_data";
+import { modal, popover } from "e2e/support/helpers";
 
 export function selectSidebarItem(item) {
   cy.findAllByRole("menuitem").contains(item).click();
@@ -18,21 +21,24 @@ export function modifyPermission(
 ) {
   selectPermissionRow(item, permissionIndex);
 
-  popover().within(() => {
-    if (shouldPropagate !== null) {
-      cy.findByRole("switch")
-        .as("toggle")
-        .then($el => {
-          if ($el.attr("aria-checked") !== shouldPropagate.toString()) {
-            cy.get("@toggle").click();
-          }
-        });
-    }
-    value && cy.findByText(value).click();
-  });
+  popover()
+    .should("have.length", 1)
+    .within(() => {
+      if (shouldPropagate !== null) {
+        cy.findByRole("switch")
+          .as("toggle")
+          .then(($el) => {
+            if ($el.attr("aria-checked") !== shouldPropagate.toString()) {
+              cy.get("@toggle").click();
+            }
+          });
+      }
+      value && cy.findByText(value).click();
+    });
 }
 
 export function selectPermissionRow(item, permissionIndex) {
+  // eslint-disable-next-line no-unsafe-element-filtering
   getPermissionRowPermissions(item).eq(permissionIndex).click();
 }
 
@@ -50,7 +56,7 @@ export function assertPermissionTable(rows) {
     .find("tbody > tr")
     .should("have.length", rows.length);
 
-  rows.forEach(row => {
+  rows.forEach((row) => {
     const [item, ...permissions] = row;
 
     getPermissionRowPermissions(item).each(($permissionEl, index) => {
@@ -74,6 +80,7 @@ export function assertPermissionForItem(
   permissionColumnIndex,
   permissionValue,
 ) {
+  // eslint-disable-next-line no-unsafe-element-filtering
   getPermissionRowPermissions(item)
     .eq(permissionColumnIndex)
     .should("have.text", permissionValue);
@@ -84,11 +91,94 @@ export function assertPermissionForItem(
  * @param {string} permission
  * @param {boolean} isDisabled
  */
-export function isPermissionDisabled(index, permission, isDisabled) {
-  return cy
-    .findAllByTestId("permissions-select")
+export function isPermissionDisabled(row, index, permission, isDisabled) {
+  // eslint-disable-next-line no-unsafe-element-filtering
+  return getPermissionRowPermissions(row)
     .eq(index)
-    .contains(permission)
-    .closest("a")
-    .should("have.attr", "aria-disabled", isDisabled.toString());
+    .should("have.attr", "aria-disabled", isDisabled.toString())
+    .contains(permission);
+}
+
+export const dismissSplitPermsModal = () => {
+  cy.findByRole("dialog", { name: /permissions may look different/ })
+    .findByRole("button", { name: "Got it" })
+    .click();
+};
+
+export function savePermissions() {
+  cy.findByTestId("edit-bar").button("Save changes").click();
+  cy.findByRole("dialog").findByText("Yes").click();
+  cy.findByTestId("edit-bar").should("not.exist");
+}
+
+export function selectImpersonatedAttribute(attribute) {
+  cy.findByRole("dialog").within(() => {
+    cy.findByRole("textbox", { name: "User attribute" }).click();
+  });
+
+  popover().findByText(attribute).click();
+}
+
+export function saveImpersonationSettings() {
+  cy.findByRole("dialog").findByText("Save").click();
+}
+
+export function assertSameBeforeAndAfterSave(assertionCallback) {
+  assertionCallback();
+  savePermissions();
+  assertionCallback();
+}
+
+export function assertDatasetReqIsSandboxed(options = {}) {
+  const { requestAlias = "@dataset", columnId, columnAssertion } = options;
+
+  cy.get(requestAlias).should(({ response }) => {
+    // check if data is reporting itself as sandboxed
+    const { data } = response.body;
+    expect(data.is_sandboxed).to.equal(true);
+
+    // if options to make assertions on a column's data
+    if (columnId && columnAssertion) {
+      const colIndex = data.cols.findIndex((c) => c.id === columnId);
+      expect(colIndex).to.be.gte(0);
+
+      const values = data.rows.map((row) => row[colIndex]);
+
+      const assertionFn = _.isFunction(columnAssertion)
+        ? columnAssertion
+        : (val) => val === columnAssertion;
+      const errMsg = `Expected every result in column to be equal to: ${columnAssertion}`;
+      expect(values.every(assertionFn)).to.equal(true, errMsg);
+    }
+  });
+}
+
+export function blockUserGroupPermissions(groupId, databaseId = SAMPLE_DB_ID) {
+  return cy.updatePermissionsGraph({
+    [groupId]: {
+      [databaseId]: {
+        "view-data": "blocked",
+        "create-queries": "no",
+      },
+    },
+  });
+}
+
+export function saveChangesToPermissions() {
+  cy.intercept("PUT", "/api/permissions/graph").as("updatePermissions");
+  cy.intercept("PUT", "/api/ee/advanced-permissions/application/graph").as(
+    "updatePermissions",
+  );
+  cy.log("Save changes to permissions");
+
+  cy.findByTestId("edit-bar")
+    .findByRole("button", { name: "Save changes" })
+    .click();
+
+  modal().within(() => {
+    cy.findByText("Save permissions?");
+    cy.findByText("Are you sure you want to do this?");
+    cy.button("Yes").click();
+  });
+  cy.wait("@updatePermissions");
 }

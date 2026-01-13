@@ -1,15 +1,19 @@
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 import { msgid, ngettext } from "ttag";
 import _ from "underscore";
 
 import CollectionCopyEntityModal from "metabase/collections/components/CollectionCopyEntityModal";
 import { isTrashedCollection } from "metabase/collections/utils";
-import { BulkActionBar } from "metabase/components/BulkActionBar";
-import Modal from "metabase/components/Modal";
-import { BulkMoveModal } from "metabase/containers/MoveModal";
+import { BulkActionBar } from "metabase/common/components/BulkActionBar";
+import { BulkMoveModal } from "metabase/common/components/MoveModal";
+import type { CollectionPickerItem } from "metabase/common/components/Pickers/CollectionPicker";
 import type { Collection, CollectionItem } from "metabase-types/api";
 
 import { ArchivedBulkActions } from "./ArchivedBulkActions";
+import {
+  type Destination,
+  QuestionMoveConfirmModal,
+} from "./QuestionMoveConfirmModal";
 import { UnarchivedBulkActions } from "./UnarchivedBulkActions";
 
 type CollectionBulkActionsProps = {
@@ -32,7 +36,10 @@ export const CollectionBulkActions = memo(
     setSelectedAction,
     clearSelected,
   }: CollectionBulkActionsProps) => {
-    const isVisible = selected.length > 0;
+    const [rememberedDestination, setRememberedDestination] =
+      useState<Destination | null>(null);
+
+    const isVisible = selected.length > 0 && selectedAction !== "confirm-move";
 
     const hasSelectedItems = useMemo(
       () => !!selectedItems && !_.isEmpty(selectedItems),
@@ -42,22 +49,68 @@ export const CollectionBulkActions = memo(
     const handleCloseModal = () => {
       setSelectedItems(null);
       setSelectedAction(null);
+      setRememberedDestination(null);
       clearSelected();
+    };
+
+    const handleCancelModal = () => {
+      setSelectedItems(null);
+      setSelectedAction(null);
+      setRememberedDestination(null);
     };
 
     const tryOrClear = (promise: Promise<any>) =>
       promise.finally(() => clearSelected());
 
-    const handleBulkMove = async (
-      collection: Pick<Collection, "id"> & Partial<Collection>,
-    ) => {
+    const handleConfirmedBulkQuestionMove = async () => {
+      if (rememberedDestination) {
+        handleCloseModal();
+        await doMove(rememberedDestination);
+      }
+    };
+
+    const doMove = async (destination: Destination) => {
       if (selectedItems) {
         await tryOrClear(
           Promise.all(
-            selectedItems.map(item => item.setCollection?.(collection)),
+            selectedItems.map((item) => item.setCollection?.(destination)),
           ),
         );
-        handleCloseModal();
+      }
+      handleCloseModal();
+    };
+
+    const handleBulkMove = async (destination: Destination) => {
+      if (selectedItems) {
+        // If the destination is a collection, then move the items
+        if (destination.model === "collection") {
+          await doMove(destination);
+        }
+
+        // otherwise, destination is a dashboard
+        else if (destination.model === "dashboard") {
+          // ensure that all selected items are cards. This should be enforced by the picker
+          if (!selectedItems.every((item) => item.model === "card")) {
+            throw new Error("can't move non-cards into dashboards");
+          }
+          //determine if we need to display a confirmation modal
+
+          //Check how many items are cards that appear in a dashboard
+          const potentialConfirmCards = selectedItems.filter(
+            (item) => item.dashboard_count && item.dashboard_count > 0,
+          );
+
+          //If there are none, then do the move
+          if (potentialConfirmCards.length === 0) {
+            await doMove(destination);
+          }
+
+          //Otherwise, get the names of the affected dashboards and display the modal
+          else {
+            setRememberedDestination(destination);
+            setSelectedAction("confirm-move");
+          }
+        }
       }
     };
 
@@ -66,6 +119,11 @@ export const CollectionBulkActions = memo(
       `${selected.length} items selected`,
       selected.length,
     );
+
+    // This is a little cheeky, but by virtue of the screens we show the BulkMoveModal, all
+    // selected items should have the same collection id. yatta!
+    const recentAndSearchFilter = (item: CollectionPickerItem) =>
+      item.model === "collection" && item.id === collection.id;
 
     return (
       <>
@@ -92,23 +150,31 @@ export const CollectionBulkActions = memo(
         </BulkActionBar>
 
         {selectedItems && hasSelectedItems && selectedAction === "copy" && (
-          <Modal onClose={handleCloseModal}>
-            <CollectionCopyEntityModal
-              entityObject={selectedItems?.[0]}
-              onClose={handleCloseModal}
-              onSaved={handleCloseModal}
-            />
-          </Modal>
+          <CollectionCopyEntityModal
+            entityObject={selectedItems?.[0]}
+            onClose={handleCloseModal}
+            onSaved={handleCloseModal}
+          />
         )}
 
         {selectedItems && hasSelectedItems && selectedAction === "move" && (
           <BulkMoveModal
             selectedItems={selectedItems}
-            onClose={handleCloseModal}
+            onClose={handleCancelModal}
             onMove={handleBulkMove}
             initialCollectionId={
               isTrashedCollection(collection) ? "root" : collection.id
             }
+            recentAndSearchFilter={recentAndSearchFilter}
+          />
+        )}
+
+        {hasSelectedItems && selectedAction === "confirm-move" && (
+          <QuestionMoveConfirmModal
+            selectedItems={selectedItems || []}
+            onConfirm={handleConfirmedBulkQuestionMove}
+            onClose={handleCloseModal}
+            destination={rememberedDestination}
           />
         )}
       </>

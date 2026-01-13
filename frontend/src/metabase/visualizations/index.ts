@@ -1,16 +1,19 @@
 import { t } from "ttag";
 import _ from "underscore";
 
+import { isStorybookActive } from "metabase/env";
 import type {
   DatasetData,
+  RawSeries,
   Series,
   TransformedSeries,
+  VisualizationDisplay,
 } from "metabase-types/api";
 
 import type { RemappingHydratedDatasetColumn } from "./types";
 import type { Visualization } from "./types/visualization";
 
-const visualizations = new Map<string, Visualization>();
+const visualizations = new Map<VisualizationDisplay, Visualization>();
 const aliases = new Map<string, Visualization>();
 visualizations.get = function (key) {
   return (
@@ -47,6 +50,16 @@ export function registerVisualization(visualization: Visualization) {
     );
   }
   if (visualizations.has(identifier)) {
+    if (isStorybookActive) {
+      console.error(
+        `Visualization with that identifier is already registered: ` +
+          visualization.name,
+      );
+
+      // do not throw if it's storybook
+      return;
+    }
+
     throw new Error(
       t`Visualization with that identifier is already registered: ` +
         visualization.name,
@@ -58,17 +71,23 @@ export function registerVisualization(visualization: Visualization) {
   }
 }
 
-type SeriesLike = Array<{ card: { display: string } }>;
+type SeriesLike = Array<{ card: { display: VisualizationDisplay } }>;
+
+export function getVisualization(display: VisualizationDisplay | null) {
+  return display ? visualizations.get(display) : defaultVisualization;
+}
 
 export function getVisualizationRaw(series: SeriesLike) {
   return visualizations.get(series[0].card.display);
 }
 
-export function getVisualizationTransformed(series: TransformedSeries) {
+export function getVisualizationTransformed(
+  series: RawSeries | TransformedSeries,
+) {
   // don't transform if we don't have the data
   if (
-    _.any(series, s => s.data == null) ||
-    _.any(series, s => s.error != null)
+    _.any(series, (s) => s.data == null) ||
+    _.any(series, (s) => s.error != null)
   ) {
     return {
       series,
@@ -95,51 +114,60 @@ export function getVisualizationTransformed(series: TransformedSeries) {
   return { series, visualization };
 }
 
-export function getIconForVisualizationType(display: string) {
+export function getIconForVisualizationType(display: VisualizationDisplay) {
   const viz = visualizations.get(display);
   return viz?.iconName ?? "unknown";
 }
 
 export const extractRemappings = (series: Series) => {
-  const se = series.map(s => ({
+  const se = series.map((s) => ({
     ...s,
     data: s.data && extractRemappedColumns(s.data),
   }));
   return se;
 };
 
-export function getMaxMetricsSupported(display: string) {
+export function getMaxMetricsSupported(display: VisualizationDisplay) {
   const visualization = visualizations.get(display);
   return visualization?.maxMetricsSupported || Infinity;
 }
 
-export function getMaxDimensionsSupported(display: string) {
+export function getMaxDimensionsSupported(display: VisualizationDisplay) {
   const visualization = visualizations.get(display);
   return visualization?.maxDimensionsSupported || 2;
 }
 
-export function canSavePng(display: string) {
+export function canSavePng(display: VisualizationDisplay) {
   const visualization = visualizations.get(display);
   return visualization?.canSavePng ?? true;
 }
 
-export function getDefaultSize(display: string) {
+export function getDefaultSize(display: VisualizationDisplay) {
   const visualization = visualizations.get(display);
   return visualization?.defaultSize;
 }
 
+export function isCartesianChart(display: VisualizationDisplay) {
+  const visualization = visualizations.get(display);
+  const settingNames = Object.keys(visualization?.settings ?? {});
+  return (
+    settingNames.includes("graph.dimensions") &&
+    settingNames.includes("graph.metrics")
+  );
+}
+
 // removes columns with `remapped_from` property and adds a `remapping` to the appropriate column
 export const extractRemappedColumns = (data: DatasetData) => {
-  const cols: RemappingHydratedDatasetColumn[] = data.cols.map(col => ({
+  const cols: RemappingHydratedDatasetColumn[] = data.cols.map((col) => ({
     ...col,
     remapped_from_index:
       col.remapped_from != null
-        ? _.findIndex(data.cols, c => c.name === col.remapped_from)
+        ? _.findIndex(data.cols, (c) => c.name === col.remapped_from)
         : undefined,
     remapping: col.remapped_to != null ? new Map() : undefined,
   }));
 
-  const rows = data.rows.map(row =>
+  const rows = data.rows.map((row) =>
     row.filter((value, colIndex) => {
       const col = cols[colIndex];
       if (col.remapped_from != null) {
@@ -165,7 +193,7 @@ export const extractRemappedColumns = (data: DatasetData) => {
   return {
     ...data,
     rows,
-    cols: cols.filter(col => col.remapped_from == null),
+    cols: cols.filter((col) => col.remapped_from == null),
   };
 };
 

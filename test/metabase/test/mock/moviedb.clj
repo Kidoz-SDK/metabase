@@ -70,10 +70,9 @@
               {:name      "value"
                :base-type :type/Text}}}})
 
-
 (driver/register! ::moviedb, :abstract? true)
 
-(defmethod driver/describe-database ::moviedb [_ {:keys [exclude-tables]}]
+(defmethod driver/describe-database* ::moviedb [_ {:keys [exclude-tables]}]
   (let [tables (for [table (vals moviedb-tables)
                      :when (not (contains? exclude-tables (:name table)))]
                  (select-keys table [:schema :name]))]
@@ -97,4 +96,4 @@
      {:keypath "movies.description", :value "A cinematic adventure."}
      {:keypath "description", :value "Information about movies"}]))
 
-(defmethod driver/database-supports? [::moviedb :foreign-keys] [_driver _feature _db] true)
+(defmethod driver/database-supports? [::moviedb :metadata/key-constraints] [_driver _feature _db] true)

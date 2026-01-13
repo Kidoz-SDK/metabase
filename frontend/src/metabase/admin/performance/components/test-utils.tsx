@@ -1,33 +1,39 @@
-import { setupEnterprisePlugins } from "__support__/enterprise";
-import { setupDatabasesEndpoints } from "__support__/server-mocks";
+import { Route } from "react-router";
+
+import {
+  setupEnterpriseOnlyPlugin,
+  setupEnterprisePlugins,
+} from "__support__/enterprise";
+import {
+  setupDatabasesEndpoints,
+  setupTokenStatusEndpoint,
+} from "__support__/server-mocks";
 import { setupPerformanceEndpoints } from "__support__/server-mocks/performance";
 import { mockSettings } from "__support__/settings";
 import { createMockEntitiesState } from "__support__/store";
-import { fireEvent, renderWithProviders, screen } from "__support__/ui";
+import { act, fireEvent, renderWithProviders, screen } from "__support__/ui";
 import type { TokenFeatures } from "metabase-types/api";
-import { DurationUnit } from "metabase-types/api";
-import {
-  createMockSettings,
-  createMockTokenFeatures,
-} from "metabase-types/api/mocks";
+import { CacheDurationUnit } from "metabase-types/api";
 import {
   createMockCacheConfig,
   createMockCacheConfigWithDoNotCacheStrategy,
   createMockCacheConfigWithDurationStrategy,
   createMockCacheConfigWithMultiplierStrategy,
-} from "metabase-types/api/mocks/performance";
+  createMockSettings,
+  createMockTokenFeatures,
+} from "metabase-types/api/mocks";
 import { createSampleDatabase } from "metabase-types/api/mocks/presets";
 import { createMockState } from "metabase-types/store/mocks";
 
 import { StrategyEditorForDatabases } from "./StrategyEditorForDatabases";
 
 export interface SetupOpts {
-  hasEnterprisePlugins?: boolean;
+  enterprisePlugins?: Parameters<typeof setupEnterpriseOnlyPlugin>[0][] | "*";
   tokenFeatures?: Partial<TokenFeatures>;
 }
 
 export const setupStrategyEditorForDatabases = ({
-  hasEnterprisePlugins,
+  enterprisePlugins,
   tokenFeatures = {},
 }: SetupOpts = {}) => {
   const storeInitialState = createMockState({
@@ -39,9 +45,14 @@ export const setupStrategyEditorForDatabases = ({
     ),
   });
 
-  if (hasEnterprisePlugins) {
-    setupEnterprisePlugins();
+  if (enterprisePlugins) {
+    if (enterprisePlugins === "*") {
+      setupEnterprisePlugins();
+    } else {
+      enterprisePlugins.forEach(setupEnterpriseOnlyPlugin);
+    }
   }
+  setupTokenStatusEndpoint({ valid: !!enterprisePlugins });
 
   const cacheConfigs = [
     createMockCacheConfigWithMultiplierStrategy({ model_id: 1 }),
@@ -50,7 +61,12 @@ export const setupStrategyEditorForDatabases = ({
     createMockCacheConfig({
       model: "root",
       model_id: 0,
-      strategy: { type: "duration", duration: 1, unit: DurationUnit.Hours },
+      strategy: {
+        type: "duration",
+        duration: 1,
+        unit: CacheDurationUnit.Hours,
+        refresh_automatically: false,
+      },
     }),
   ];
   setupPerformanceEndpoints(cacheConfigs);
@@ -60,9 +76,15 @@ export const setupStrategyEditorForDatabases = ({
   );
   setupDatabasesEndpoints(databases);
 
-  return renderWithProviders(<StrategyEditorForDatabases />, {
-    storeInitialState,
-  });
+  const TestStrategyEditorForDatabases = () => <StrategyEditorForDatabases />;
+
+  return renderWithProviders(
+    <Route path="*" component={TestStrategyEditorForDatabases} />,
+    {
+      storeInitialState,
+      withRouter: true,
+    },
+  );
 };
 
 export const getSaveButton = async () =>
@@ -77,6 +99,8 @@ export const changeInput = async (
     name: new RegExp(label),
   })) as HTMLInputElement;
   expect(input).toHaveAttribute("placeholder", expectedPlaceholder.toString());
-  fireEvent.change(input, { target: { value } });
+  act(() => {
+    fireEvent.change(input, { target: { value } });
+  });
   expect(input).toHaveValue(value);
 };

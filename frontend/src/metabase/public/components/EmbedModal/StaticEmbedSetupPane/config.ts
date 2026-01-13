@@ -4,10 +4,11 @@ export function getDefaultDisplayOptions(
   shouldShownDownloadData: boolean,
 ): EmbeddingDisplayOptions {
   return {
-    font: null,
+    font: "",
     theme: "light",
+    background: true,
     bordered: true,
     titled: true,
-    hide_download_button: shouldShownDownloadData ? false : null,
+    downloads: shouldShownDownloadData ? { pdf: true, results: true } : null,
   };
 }

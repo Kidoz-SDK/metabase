@@ -1,6 +1,6 @@
 import { jt, t } from "ttag";
 
-import Link from "metabase/core/components/Link";
+import Link from "metabase/common/components/Link";
 
 import {
   NoticeCloseIcon,
@@ -42,7 +42,7 @@ const getBannerContent = (
   hasDeprecatedDatabase: boolean,
 ) => {
   const databaseListUrl = "/admin/databases";
-  const slackSettingsUrl = "/admin/settings/slack";
+  const slackSettingsUrl = "/admin/settings/notifications";
 
   if (hasSlackBot && hasDeprecatedDatabase) {
     return jt`You’re using a ${(

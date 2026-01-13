@@ -2,9 +2,8 @@
   "Middleware for expanding LEGACY `:segment` 'macros' in *unexpanded* MBQL queries.
 
   (`:segment` forms are expanded into filter clauses.)"
+  (:refer-clojure :exclude [mapv not-empty get-in])
   (:require
-   [metabase.legacy-mbql.normalize :as mbql.normalize]
-   [metabase.lib.convert :as lib.convert]
    [metabase.lib.filter :as lib.filter]
    [metabase.lib.metadata :as lib.metadata]
    [metabase.lib.schema :as lib.schema]
@@ -18,7 +17,8 @@
    [metabase.util.i18n :refer [tru]]
    [metabase.util.log :as log]
    [metabase.util.malli :as mu]
-   [metabase.util.malli.registry :as mr]))
+   [metabase.util.malli.registry :as mr]
+   [metabase.util.performance :refer [mapv not-empty get-in]]))
 
 ;;; "legacy macro" as used below means legacy Segment.
 (mr/def ::legacy-macro
@@ -45,26 +45,22 @@
      (fn [_query _path stage]
        (lib.util.match/match stage
          [macro-type _opts (id :guard pos-int?)]
-         (conj! ids id))))
+         (conj! ids id))
+       nil))
     (not-empty (persistent! ids))))
 
 ;;; a legacy Segment has one or more filter clauses.
 
-(mu/defn ^:private legacy-macro-definition->pMBQL :- ::lib.schema/stage.mbql
-  "Get the definition of a macro as a pMBQL stage."
-  [metadata-providerable                            :- ::lib.schema.metadata/metadata-providerable
-   {:keys [definition table-id], :as _legacy-macro} :- ::legacy-macro]
-  (log/tracef "Converting legacy MBQL for macro definition from\n%s" (u/pprint-to-str definition))
-  (u/prog1 (-> {:type     :query
-                :query    (merge {:source-table table-id}
-                                 definition)
-                :database (u/the-id (lib.metadata/database metadata-providerable))}
-               mbql.normalize/normalize
-               lib.convert/->pMBQL
-               (lib.util/query-stage -1))
-    (log/tracef "to pMBQL\n%s" (u/pprint-to-str <>))))
+(mu/defn- segment-definition->stage :- ::lib.schema/stage.mbql
+  "Extract the pMBQL stage from a segment definition. Segment definitions are always MBQL 5 queries at this point
+  (converted by the segment model's after-select hook), so we just extract the first stage."
+  [_metadata-providerable :- ::lib.schema.metadata/metadata-providerable
+   {:keys [definition], :as _legacy-macro} :- ::legacy-macro]
+  (log/tracef "Extracting pMBQL stage from segment definition:\n%s" (u/pprint-to-str definition))
+  (u/prog1 (first (:stages definition))
+    (log/tracef "Extracted stage:\n%s" (u/pprint-to-str <>))))
 
-(mu/defn ^:private legacy-macro-filters :- [:maybe [:sequential ::lib.schema.expression/boolean]]
+(mu/defn- legacy-macro-filters :- [:maybe [:sequential ::lib.schema.expression/boolean]]
   "Get the filter(s) associated with a Segment."
   [legacy-macro :- ::legacy-macro]
   (mapv lib.util/fresh-uuids
@@ -73,7 +69,7 @@
 (mr/def ::id->legacy-macro
   [:map-of pos-int? ::legacy-macro])
 
-(mu/defn ^:private fetch-legacy-macros :- ::id->legacy-macro
+(mu/defn- fetch-legacy-macros :- ::id->legacy-macro
   [macro-type            :- ::macro-type
    metadata-providerable :- ::lib.schema.metadata/metadata-providerable
    legacy-macro-ids      :- [:maybe [:set {:min 1} pos-int?]]]
@@ -81,7 +77,7 @@
                             :segment :metadata/segment)]
     (u/prog1 (into {}
                    (map (juxt :id (fn [legacy-macro]
-                                    (assoc legacy-macro :definition (legacy-macro-definition->pMBQL metadata-providerable legacy-macro)))))
+                                    (assoc legacy-macro :definition (segment-definition->stage metadata-providerable legacy-macro)))))
                    (lib.metadata/bulk-metadata-or-throw metadata-providerable metadata-type legacy-macro-ids))
       ;; make sure all the IDs exist.
       (doseq [id legacy-macro-ids]
@@ -114,7 +110,7 @@
       lib.filter/flatten-compound-filters-in-stage
       lib.filter/remove-duplicate-filters-in-stage))
 
-(mu/defn ^:private resolve-legacy-macros :- ::lib.schema/query
+(mu/defn- resolve-legacy-macros :- ::lib.schema/query
   [macro-type       :- ::macro-type
    query            :- ::lib.schema/query
    legacy-macro-ids :- [:maybe [:set {:min 1} pos-int?]]]
@@ -125,7 +121,7 @@
      (fn [_query _path stage]
        (resolve-legacy-macros-in-stage macro-type stage id->legacy-macro)))))
 
-(mu/defn ^:private expand-legacy-macros :- ::lib.schema/query
+(mu/defn- expand-legacy-macros :- ::lib.schema/query
   [macro-type :- ::macro-type
    query      :- ::lib.schema/query]
   (if-let [legacy-macro-ids (not-empty (unresolved-legacy-macro-ids macro-type query))]

@@ -8,7 +8,7 @@ import {
   screen,
   waitForLoaderToBeRemoved,
 } from "__support__/ui";
-import LoadingAndErrorWrapper from "metabase/components/LoadingAndErrorWrapper";
+import { LoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper";
 import { createMockCollection } from "metabase-types/api/mocks";
 
 import { useCollectionQuery } from "./use-collection-query";
@@ -42,7 +42,7 @@ const setup = ({ error }: { error?: string } = {}) => {
 describe("useCollectionQuery", () => {
   it("should be initially loading", () => {
     setup();
-    expect(screen.getByTestId("loading-spinner")).toBeInTheDocument();
+    expect(screen.getByTestId("loading-indicator")).toBeInTheDocument();
   });
 
   it("should display error", async () => {

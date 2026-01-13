@@ -8,7 +8,7 @@
    [metabase.lib.test-util :as lib.tu]
    [metabase.lib.test-util.macros :as lib.tu.macros]
    [metabase.query-processor.middleware.auto-bucket-datetimes :as qp.auto-bucket-datetimes]
-   [metabase.query-processor.store :as qp.store]
+   ^{:clj-kondo/ignore [:deprecated-namespace]} [metabase.query-processor.store :as qp.store]
    [metabase.util.malli :as mu]))
 
 (deftest ^:parallel should-not-be-autobucketed?-test
@@ -19,7 +19,7 @@
             [:stages 0]
             (lib.normalize/normalize :mbql.clause/field [:field {:temporal-unit :month} (meta/id :checkins :date)]))))))
 
-(mu/defn ^:private auto-bucket [query :- :map]
+(mu/defn- auto-bucket [query :- :map]
   (if (= (:lib/type query) :mbql/query)
     (qp.auto-bucket-datetimes/auto-bucket-datetimes query)
     (let [metadata-provider (if (qp.store/initialized?)
@@ -61,6 +61,40 @@
              (auto-bucket-mbql
               {:source-table 1
                :filter       [:= [:field (meta/id :checkins :date) nil] "2018-11-19"]}))))))
+
+(deftest ^:parallel auto-bucket-expressions-test
+  (qp.store/with-metadata-provider meta/metadata-provider
+    (testing "Expression in filter gets temporal unit added"
+      (is (= [:= [:expression "cc" {:base-type :type/DateTime, :temporal-unit :day}] "2019-02-11"]
+             (:filter (auto-bucket-mbql
+                       {:source-table 1
+                        :expressions {"cc" [:convert-timezone
+                                            [:field (meta/id :orders :created-at) {:base-type :type/DateTime}]
+                                            "America/Argentina/Buenos_Aires"
+                                            "UTC"]}
+                        :filter      [:= [:expression "cc" {:base-type :type/DateTime}] "2019-02-11"]})))))
+    (testing "Expressions not appropriate for bucketing are left untouched"
+      (is (= [:= [:expression "cc" {:base-type :type/DateTime}] "2024-07-16T13:24:00"]
+             (:filter (auto-bucket-mbql
+                       {:source-table 1
+                        :expressions {"cc" [:convert-timezone
+                                            [:field (meta/id :orders :created-at) {:base-type :type/DateTime}]
+                                            "America/Argentina/Buenos_Aires"
+                                            "UTC"]}
+                        :filter      [:= [:expression "cc" {:base-type :type/DateTime}] "2024-07-16T13:24:00"]}))))
+      (is (= [:= [:expression "cc" {:base-type :type/DateTime}] 1]
+             (:filter (auto-bucket-mbql
+                       {:source-table 1
+                        :expressions {"cc" [:+ (meta/id :orders :id) 1]}
+                        :filter      [:= [:expression "cc" {:base-type :type/DateTime}] 1]}))))
+      (is (= [:= [:expression "cc" {:base-type :type/Time}] "10:00:00"]
+             (:filter (auto-bucket-mbql
+                       {:source-table 1
+                        :expressions {"cc" [:convert-timezone
+                                            [:field (meta/id :orders :created-at) {:base-type :type/Time}]
+                                            "America/Argentina/Buenos_Aires"
+                                            "UTC"]}
+                        :filter      [:= [:expression "cc" {:base-type :type/Time}] "10:00:00"]})))))))
 
 (deftest ^:parallel auto-bucket-in-compound-filter-clause-test
   (testing "Fields should still get auto-bucketed when present in compound filter clauses (#9127)"
@@ -122,21 +156,20 @@
   (testing "if a Field occurs more than once we should only rewrite the instances that should be rebucketed"
     (qp.store/with-metadata-provider meta/metadata-provider
       ;; filter doesn't get auto-bucketed here because it's being compared to something with > date resolution
-      (is (= {:source-table 1
-              :breakout     [[:field (meta/id :checkins :date) {:temporal-unit :day}]]
-              :filter       [:= [:field (meta/id :checkins :date) nil] "2018-11-20T14:20:00.000Z"]}
+      (is (= {:source-table    1
+              :breakout        [[:field (meta/id :checkins :date) {:temporal-unit :day}]]
+              :filter          [:= [:field (meta/id :checkins :date) nil] "2018-11-20T14:20:00.000Z"]}
              (auto-bucket-mbql
-              {:source-table 1
-               :breakout     [[:field (meta/id :checkins :date) nil]]
-               :filter       [:= [:field (meta/id :checkins :date) nil] "2018-11-20T14:20:00.000Z"]})))
-
-      (is (= {:source-table 1
-              :breakout     [[:field (meta/id :checkins :date) {:temporal-unit :month}]]
-              :filter       [:= [:field (meta/id :checkins :date) {:temporal-unit :day}] "2018-11-20"]}
+              {:source-table    1
+               :breakout        [[:field (meta/id :checkins :date) nil]]
+               :filter          [:= [:field (meta/id :checkins :date) nil] "2018-11-20T14:20:00.000Z"]})))
+      (is (= {:source-table    1
+              :breakout        [[:field (meta/id :checkins :date) {:temporal-unit :month}]]
+              :filter          [:= [:field (meta/id :checkins :date) {:temporal-unit :day}] "2018-11-20"]}
              (auto-bucket-mbql
-              {:source-table 1
-               :breakout     [[:field (meta/id :checkins :date) {:temporal-unit :month}]]
-               :filter       [:= [:field (meta/id :checkins :date) nil] "2018-11-20"]}))))))
+              {:source-table    1
+               :breakout        [[:field (meta/id :checkins :date) {:temporal-unit :month}]]
+               :filter          [:= [:field (meta/id :checkins :date) nil] "2018-11-20"]}))))))
 
 (deftest ^:parallel do-not-auto-bucket-inside-time-interval-test
   (testing "We should not try to bucket Fields inside a `time-interval` clause as that would be invalid"
@@ -183,11 +216,11 @@
 (deftest ^:parallel auto-bucket-by-effective-type-test
   (testing "UNIX timestamps should be considered to be :type/DateTime based on effective type"
     (qp.store/with-metadata-provider unix-timestamp-metadata-provider
-      (is (= {:source-table 1
-              :breakout     [[:field 1 {:temporal-unit :day}]]}
-             (auto-bucket-mbql
-              {:source-table 1
-               :breakout     [[:field 1 nil]]}))))))
+      (is (=? {:source-table 1
+               :breakout     [[:field 1 {:temporal-unit :day}]]}
+              (auto-bucket-mbql
+               {:source-table 1
+                :breakout     [[:field 1 nil]]}))))))
 
 (deftest ^:parallel ignore-native-queries-test
   (testing "do native queries pass thru unchanged?"
@@ -227,6 +260,15 @@
            (auto-bucket-mbql
             {:source-table 1
              :breakout     [[:field Integer/MAX_VALUE nil]]})))))
+
+(deftest ^:parallel do-not-auto-bucket-relative-time-interval-test
+  (testing "does a :type/DateTime breakout Field that is already bucketed pass thru unchanged?"
+    (qp.store/with-metadata-provider meta/metadata-provider
+      (is (= {:source-table (meta/id :orders)
+              :filter       [:relative-time-interval [:field (meta/id :orders :created-at) nil] 1 :day 2 :month]}
+             (auto-bucket-mbql
+              {:source-table (meta/id :orders)
+               :filter      [:relative-time-interval [:field (meta/id :orders :created-at) nil] 1 :day 2 :month]}))))))
 
 (deftest ^:parallel auto-bucket-unix-timestamp-fields-test
   (testing "do UNIX TIMESTAMP fields get auto-bucketed?"

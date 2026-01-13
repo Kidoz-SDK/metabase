@@ -1,24 +1,17 @@
 (ns metabase.driver.druid.query-processor
+  (:refer-clojure :exclude [every? mapv some get-in])
   (:require
    [clojure.core.match :refer [match]]
    [clojure.string :as str]
+   [metabase.driver-api.core :as driver-api]
    [metabase.driver.common :as driver.common]
    [metabase.driver.druid.js :as druid.js]
-   [metabase.legacy-mbql.schema :as mbql.s]
-   [metabase.legacy-mbql.util :as mbql.u]
-   [metabase.lib.metadata :as lib.metadata]
-   [metabase.lib.types.isa :as lib.types.isa]
-   [metabase.lib.util.match :as lib.util.match]
-   [metabase.query-processor.error-type :as qp.error-type]
-   [metabase.query-processor.interface :as qp.i]
-   [metabase.query-processor.middleware.annotate :as annotate]
-   [metabase.query-processor.store :as qp.store]
-   [metabase.query-processor.timezone :as qp.timezone]
    [metabase.util :as u]
    [metabase.util.date-2 :as u.date]
    [metabase.util.i18n :refer [tru]]
    [metabase.util.log :as log]
-   [metabase.util.malli :as mu]))
+   [metabase.util.malli :as mu]
+   [metabase.util.performance :refer [every? mapv some get-in]]))
 
 (set! *warn-on-reflection* true)
 
@@ -58,7 +51,7 @@
 
     (let [x 100] ...) ; x is the lvalue; 100 is the rvalue"
   {:arglists '([x])}
-  mbql.u/dispatch-by-clause-name-or-class)
+  driver-api/dispatch-by-clause-name-or-class)
 
 (defmethod ->rvalue nil
   [_]
@@ -95,7 +88,7 @@
 (defmethod ->rvalue :field
   [[_ id-or-name]]
   (if (integer? id-or-name)
-    (:name (lib.metadata/field (qp.store/metadata-provider) id-or-name))
+    (:name (driver-api/field (driver-api/metadata-provider) id-or-name))
     id-or-name))
 
 (defmethod ->rvalue :absolute-datetime
@@ -121,48 +114,46 @@
 (defmulti ^:private dimension-or-metric?
   "Is this field clause a `:dimension` or `:metric`?"
   {:arglists '([field-clause])}
-  mbql.u/dispatch-by-clause-name-or-class)
+  driver-api/dispatch-by-clause-name-or-class)
 
 (defmethod dimension-or-metric? :field
   [[_ id-or-name options]]
   (let [{:keys [base-type database-type]} (if (integer? id-or-name)
-                                            (lib.metadata/field (qp.store/metadata-provider) id-or-name)
+                                            (driver-api/field (driver-api/metadata-provider) id-or-name)
                                             options)]
     (cond
       (str/includes? database-type "[metric]") :metric
       (isa? base-type :type/DruidHyperUnique)  :metric
       :else                                    :dimension)))
 
-(defn- random-query-id []
+(defn- ^:dynamic *random-query-id* []
   (str (random-uuid)))
 
 (defn- query-type->default-query [query-type]
   (merge
    {:intervals   ["1900-01-01/2100-01-01"]
     :granularity :all
-    :context     {:queryId (random-query-id)}}
+    :context     {:queryId (*random-query-id*)}}
    (case query-type
      ::scan               {:queryType :scan
-                           :limit     qp.i/absolute-max-results}
+                           :limit     driver-api/absolute-max-results}
      ::total              {:queryType :timeseries}
      ::grouped-timeseries {:queryType :timeseries}
      ::topN               {:queryType :topN
                            :threshold topN-max-results}
      ::groupBy            {:queryType :groupBy})))
 
-
 ;;; ---------------------------------------------- handle-source-table -----------------------------------------------
 
 (defn- handle-source-table
   [_query-type {source-table-id :source-table} druid-query]
-  (let [{source-table-name :name} (lib.metadata/table (qp.store/metadata-provider) source-table-id)]
+  (let [{source-table-name :name} (driver-api/table (driver-api/metadata-provider) source-table-id)]
     (assoc-in druid-query [:query :dataSource] source-table-name)))
-
 
 ;;; ---------------------- handle-filter. See http://druid.io/docs/latest/querying/filters.html ----------------------
 
 (def ^:private ^{:arglists '([clause])} field?
-  (partial mbql.u/is-clause? :field))
+  (partial driver-api/is-clause? :field))
 
 (defn- filter:and
   [filters]
@@ -184,7 +175,7 @@
 
 (defn- filter:nil?
   [clause-or-field]
-  (if (mbql.u/is-clause? #{:+ :- :/ :*} clause-or-field)
+  (if (driver-api/is-clause? #{:+ :- :/ :*} clause-or-field)
     (filter:and (vec (for [arg   (rest clause-or-field)
                            :when (field? arg)]
                        (filter:nil? arg))))
@@ -232,7 +223,7 @@
 
     (parse-filter* [:= [:field 1 nil] 2]) ; -> {:type :selector, :dimension \"venue_price\", :value 2}"
   {:arglists '([filter-clause])}
-  mbql.u/dispatch-by-clause-name-or-class)
+  driver-api/dispatch-by-clause-name-or-class)
 
 (defmethod parse-filter* nil
   [_]
@@ -251,7 +242,7 @@
                  :value         (->rvalue pattern)
                  :caseSensitive (get options :case-sensitive true)}}
     (throw (ex-info (tru "Dynamic patterns are not supported.")
-                    {:type qp.error-type/invalid-query
+                    {:type driver-api/qp.error-type.invalid-query
                      :field field :pattern pattern :options options}))))
 
 (defmethod parse-filter* :starts-with
@@ -261,7 +252,7 @@
                  (str (escape-like-filter-pattern (->rvalue pattern)) \%)
                  (get options :case-sensitive true))
     (throw (ex-info (tru "Dynamic patterns are not supported.")
-                    {:type qp.error-type/invalid-query
+                    {:type driver-api/qp.error-type.invalid-query
                      :field field :pattern pattern :options options}))))
 
 (defmethod parse-filter* :ends-with
@@ -271,7 +262,7 @@
                  (str \% (escape-like-filter-pattern (->rvalue pattern)))
                  (get options :case-sensitive true))
     (throw (ex-info (tru "Dynamic patterns are not supported.")
-                    {:type qp.error-type/invalid-query
+                    {:type driver-api/qp.error-type.invalid-query
                      :field field :pattern pattern :options options}))))
 
 (defmethod parse-filter* :=
@@ -315,17 +306,19 @@
 
 (defn- parse-filter [filter-clause]
   ;; strip out all the filters against temporal fields. Those are handled separately, as intervals
-  (-> (lib.util.match/replace filter-clause
+  (-> (driver-api/replace filter-clause
         [_ [:field _ (_ :guard :temporal-unit)] & _]
         nil)
-      mbql.u/simplify-compound-filter
+      ;; TODO (Cam 8/18/25) -- I am 90% sure this is serving no useful purpose.
+      #_{:clj-kondo/ignore [:deprecated-var]}
+      driver-api/simplify-compound-filter
       parse-filter*))
 
-(mu/defn ^:private add-datetime-units* :- ::mbql.s/DateTimeValue
+(mu/defn- add-datetime-units* :- driver-api/mbql.schema.DateTimeValue
   "Return a `relative-datetime` clause with `n` units added to it."
-  [absolute-or-relative-datetime :- ::mbql.s/DateTimeValue
+  [absolute-or-relative-datetime :- driver-api/mbql.schema.DateTimeValue
    n                             :- number?]
-  (if (mbql.u/is-clause? :relative-datetime absolute-or-relative-datetime)
+  (if (driver-api/is-clause? :relative-datetime absolute-or-relative-datetime)
     (let [[_ original-n unit] absolute-or-relative-datetime]
       [:relative-datetime (+ n original-n) unit])
     (let [[_ t unit] absolute-or-relative-datetime]
@@ -335,7 +328,7 @@
   "Adding `n` `:default` units doesn't make sense. So if an `:absoulte-datetime` has `:default` as its unit, add `n`
   milliseconds, because that is the smallest unit Druid supports."
   [clause n]
-  (lib.util.match/replace clause
+  (driver-api/replace clause
     [:absolute-datetime t :default]
     [:absolute-datetime (u.date/add t :millisecond n) :millisecond]
 
@@ -343,7 +336,7 @@
     (add-datetime-units* clause n)))
 
 (defn- ->absolute-timestamp ^java.time.temporal.Temporal [clause]
-  (lib.util.match/match-one clause
+  (driver-api/match-one clause
     [:absolute-datetime t :default]
     t
 
@@ -363,8 +356,8 @@
   clauses, the methods are skipped entirely."
   {:arglists '([filter-clause])}
   (fn [filter-clause]
-    (when (lib.util.match/match-one filter-clause [:field _ (_ :guard :temporal-unit)])
-      (mbql.u/dispatch-by-clause-name-or-class filter-clause))))
+    (when (driver-api/match-one filter-clause [:field _ (_ :guard :temporal-unit)])
+      (driver-api/dispatch-by-clause-name-or-class filter-clause))))
 
 (defmethod filter-clause->intervals :default
   [_]
@@ -439,7 +432,7 @@
   ;; without checking first because some filters like string `:contains` can't be negated without using a `:not`
   ;; filter and we don't want to stack overflow
   (when (seq (filter-clause->intervals subclause))
-    (filter-clause->intervals (mbql.u/negate-filter-clause subclause))))
+    (filter-clause->intervals (driver-api/negate-filter-clause subclause))))
 
 (defn- compile-intervals
   "Compile the interval pairs generated by `filter-clause->intervals` into the format expected by Druid (`min/max`
@@ -461,18 +454,16 @@
         (seq filter)    (assoc-in [:query :filter] filter)
         (seq intervals) (assoc-in [:query :intervals] intervals)))))
 
-
 ;;; ----------------------------------------------- handle-aggregation -----------------------------------------------
-
 
 (defn- expression->field-names
   [[_ & args]]
   {:post [(every? (some-fn keyword? string?) %)]}
   (flatten (for [arg   args
                  :when (or (field? arg)
-                           (mbql.u/is-clause? #{:+ :- :/ :*} arg))]
+                           (driver-api/is-clause? #{:+ :- :/ :*} arg))]
              (cond
-               (mbql.u/is-clause? #{:+ :- :/ :*} arg) (expression->field-names arg)
+               (driver-api/is-clause? #{:+ :- :/ :*} arg) (expression->field-names arg)
                (field? arg)                           (->rvalue arg)))))
 
 (defn- expression-arg->js
@@ -499,15 +490,15 @@
      :name        output-name
      :fieldNames  field-names
      :fnReset     (druid.js/function []
-                    (druid.js/return 0))
+                                     (druid.js/return 0))
      :fnAggregate (druid.js/function (cons :current field-names)
-                    (druid.js/return (druid.js/+ :current (expression->js expression (if (= operator :/) 1 0)))))
+                                     (druid.js/return (druid.js/+ :current (expression->js expression (if (= operator :/) 1 0)))))
      :fnCombine   (druid.js/function [:x :y]
-                    (druid.js/return (druid.js/+ :x :y)))}))
+                                     (druid.js/return (druid.js/+ :x :y)))}))
 
 (defn- ag:doubleSum
   [field-clause output-name]
-  (if (mbql.u/is-clause? #{:+ :- :/ :*} field-clause)
+  (if (driver-api/is-clause? #{:+ :- :/ :*} field-clause)
     (ag:doubleSum:expression field-clause output-name)
     ;; metrics can use the built-in :doubleSum aggregator, but for dimensions we have to roll something that does the
     ;; same thing in JS
@@ -529,16 +520,16 @@
      :name        output-name
      :fieldNames  field-names
      :fnReset     (druid.js/function []
-                    (druid.js/return "Number.MAX_VALUE"))
+                                     (druid.js/return "Number.MAX_VALUE"))
      :fnAggregate (druid.js/function (cons :current field-names)
-                    (druid.js/return (druid.js/fn-call :Math.min :current
-                                                       (expression->js expression :Number.MAX_VALUE))))
+                                     (druid.js/return (druid.js/fn-call :Math.min :current
+                                                                        (expression->js expression :Number.MAX_VALUE))))
      :fnCombine   (druid.js/function [:x :y]
-                    (druid.js/return (druid.js/fn-call :Math.min :x :y)))}))
+                                     (druid.js/return (druid.js/fn-call :Math.min :x :y)))}))
 
 (defn- ag:doubleMin
   [field-clause output-name]
-  (if (mbql.u/is-clause? #{:+ :- :/ :*} field-clause)
+  (if (driver-api/is-clause? #{:+ :- :/ :*} field-clause)
     (ag:doubleMin:expression field-clause output-name)
     (case (dimension-or-metric? field-clause)
       :metric    {:type      :doubleMin
@@ -558,16 +549,16 @@
      :name        output-name
      :fieldNames  field-names
      :fnReset     (druid.js/function []
-                    (druid.js/return "Number.MIN_VALUE"))
+                                     (druid.js/return "Number.MIN_VALUE"))
      :fnAggregate (druid.js/function (cons :current field-names)
-                    (druid.js/return (druid.js/fn-call :Math.max :current
-                                                       (expression->js expression :Number.MIN_VALUE))))
+                                     (druid.js/return (druid.js/fn-call :Math.max :current
+                                                                        (expression->js expression :Number.MIN_VALUE))))
      :fnCombine   (druid.js/function [:x :y]
-                    (druid.js/return (druid.js/fn-call :Math.max :x :y)))}))
+                                     (druid.js/return (druid.js/fn-call :Math.max :x :y)))}))
 
 (defn- ag:doubleMax
   [field output-name]
-  (if (mbql.u/is-clause? #{:+ :- :/ :*} field)
+  (if (driver-api/is-clause? #{:+ :- :/ :*} field)
     (ag:doubleMax:expression field output-name)
     (case (dimension-or-metric? field)
       :metric    {:type      :doubleMax
@@ -588,13 +579,13 @@
 (defn- hyper-unique?
   [[_ field-id]]
   {:pre [(pos-int? field-id)]}
-  (isa? (:base-type (lib.metadata/field (qp.store/metadata-provider) field-id))
+  (isa? (:base-type (driver-api/field (driver-api/metadata-provider) field-id))
         :type/DruidHyperUnique))
 
 (defn- ag:distinct
   [field output-name]
   (cond
-    (mbql.u/is-clause? #{:+} field)
+    (driver-api/is-clause? #{:+} field)
     {:type       :cardinality
      :name       output-name
      :fieldNames (mapv ->rvalue (rest field))
@@ -615,7 +606,7 @@
   ([output-name]
    {:type :count, :name output-name})
   ([field output-name]
-   (if (and (mbql.u/is-clause? #{:field-id} field)
+   (if (and (driver-api/is-clause? #{:field-id} field)
             (hyper-unique? field))
      {:type      :hyperUnique
       :name      output-name
@@ -683,12 +674,16 @@
       [:max      _]    [[(or output-name-kwd :max)]
                         {:aggregations [(ag:doubleMax ag-field (or output-name :max))]}])))
 
-(mu/defn ^:private handle-aggregation
+(defn ^:private ^:dynamic *query-unique-name-fn*
+  [& _]
+  (throw (ex-info "Must bind metabase.driver.druid.query-processor/*query-unique-name-fn*. See handle-aggregation for an example." {})))
+
+(mu/defn- handle-aggregation
   [query-type
-   ag-clause :- ::mbql.s/Aggregation
+   ag-clause :- driver-api/mbql.schema.Aggregation
    druid-query]
-  (let [output-name               (annotate/aggregation-name *query* ag-clause)
-        [ag-type ag-field & args] (lib.util.match/match-one ag-clause
+  (let [output-name               (*query-unique-name-fn* (driver-api/aggregation-name *query* ag-clause))
+        [ag-type ag-field & args] (driver-api/match-one ag-clause
                                     [:aggregation-options ag & _] #_:clj-kondo/ignore (recur ag)
                                     _                             &match)]
     (if-not (isa? query-type ::ag-query)
@@ -697,7 +692,7 @@
                                        (create-aggregation-clause output-name ag-type ag-field args)
                                        (catch Throwable e
                                          (throw (ex-info (tru "Error creating aggregation clause")
-                                                         {:type        qp.error-type/driver
+                                                         {:type        driver-api/qp.error-type.driver
                                                           :clause-name output-name
                                                           :ag-type     ag-type
                                                           :ag-field    ag-field
@@ -708,21 +703,16 @@
             (update :query (partial merge-with concat) ag-clauses))))))
 
 (defn- deduplicate-aggregation-options [expression]
-  (lib.util.match/replace expression
+  (driver-api/replace expression
     [:aggregation-options [:aggregation-options ag options-1] options-2]
     [:aggregation-options ag (merge options-1 options-2)]))
 
-(def ^:private ^:dynamic *query-unique-identifier-counter*
-  "Counter used for generating unique identifiers for use in the query. Bound to `(atom 0)` and incremented on each use
-  as the MBQL query is compiled."
-  nil)
-
 (defn- aggregation-unique-identifier [clause]
-  (format "__%s_%d" (name clause) (first (swap-vals! *query-unique-identifier-counter* inc))))
+  (format "__%s" (*query-unique-name-fn* (name clause))))
 
 (defn- add-expression-aggregation-output-names
   [expression]
-  (lib.util.match/replace expression
+  (driver-api/replace expression
     [:aggregation-options ag options]
     (deduplicate-aggregation-options [:aggregation-options (add-expression-aggregation-output-names ag) options])
 
@@ -740,18 +730,18 @@
 
 (defn- expression-post-aggregation
   [[operator & args, :as expression]]
-  (lib.util.match/match-one expression
+  (driver-api/match-one expression
     ;; If it's a named expression, we want to preserve the included name, so recurse, but merge in the name
     [:aggregation-options ag _]
     (merge (expression-post-aggregation (second expression))
-           {:name (annotate/aggregation-name *query* expression)})
+           {:name (driver-api/aggregation-name *query* expression)})
 
     _
     {:type   :arithmetic
-     :name   (annotate/aggregation-name *query* expression)
+     :name   (driver-api/aggregation-name *query* expression)
      :fn     operator
      :fields (vec (for [arg args]
-                    (lib.util.match/match-one arg
+                    (driver-api/match-one arg
                       number?
                       {:type :constant, :name (str &match), :value &match}
 
@@ -764,8 +754,7 @@
                       ;; we should never get here unless our code is B U S T E D
                       _
                       (throw (ex-info (tru "Expected :aggregation-options, constant, or expression.")
-                               {:type :bug, :input arg})))))}))
-
+                                      {:type :bug, :input arg})))))}))
 
 (declare handle-aggregations)
 
@@ -775,7 +764,7 @@
   (into []
         (comp (remove number?)
               (map (fn [arg]
-                     (if (mbql.u/is-clause? #{:+ :- :/ :*} arg)
+                     (if (driver-api/is-clause? #{:+ :- :/ :*} arg)
                        (expression->actual-ags arg)
                        [arg])))
               cat)
@@ -783,7 +772,7 @@
 
 (defn- unwrap-name
   [x]
-  (if (mbql.u/is-clause? :aggregation-options x)
+  (if (driver-api/is-clause? :aggregation-options x)
     (second x)
     x))
 
@@ -802,27 +791,30 @@
 
 (defn- handle-aggregations
   [query-type {aggregations :aggregation} druid-query]
-  (reduce
-   (fn [druid-query aggregation]
-     (lib.util.match/match-one aggregation
-       [:aggregation-options [(_ :guard #{:+ :- :/ :*}) & _] _]
-       (handle-expression-aggregation query-type &match druid-query)
+  (binding [*query-unique-name-fn* (driver-api/unique-name-generator)]
+    ;; Load unique name generator with projections from breakouts
+    (doseq [projection (:projections druid-query)]
+      (*query-unique-name-fn* (name projection)))
+    (reduce
+     (fn [druid-query aggregation]
+       (driver-api/match-one aggregation
+         [:aggregation-options [(_ :guard #{:+ :- :/ :*}) & _] _]
+         (handle-expression-aggregation query-type &match druid-query)
 
-       #{:+ :- :/ :*}
-       (handle-expression-aggregation query-type &match druid-query)
+         #{:+ :- :/ :*}
+         (handle-expression-aggregation query-type &match druid-query)
 
-       _
-       (handle-aggregation query-type &match druid-query)))
-   druid-query
-   aggregations))
-
+         _
+         (handle-aggregation query-type &match druid-query)))
+     druid-query
+     aggregations)))
 
 ;;; ------------------------------------------------ handle-breakout -------------------------------------------------
 
 (defmulti ^:private ->dimension-rvalue
   "Format `Field` for use in a `:dimension` or `:dimensions` clause."
   {:arglists '([field-clause])}
-  mbql.u/dispatch-by-clause-name-or-class)
+  driver-api/dispatch-by-clause-name-or-class)
 
 (defn- extract:timeFormat
   "Create a time format extraction. Returns a string. See
@@ -900,7 +892,7 @@
                       :month   "P1M"
                       :quarter "P3M"
                       :year    "P1Y")
-          :timeZone (qp.timezone/results-timezone-id)}
+          :timeZone (driver-api/results-timezone-id)}
          ;; Druid uses Monday for the start of its weekly calculations. Metabase uses Sundays. When grouping by week,
          ;; the origin keypair will use the date specified as it's start of the week. The below date is the first
          ;; Sunday after Epoch. The date itself isn't significant, it just uses it to figure out what day it should
@@ -942,9 +934,10 @@
    :extractionFn (unit->extraction-fn unit)})
 
 (defmethod ->dimension-rvalue :field
-  [[_ _ {:keys [temporal-unit]} :as clause]]
-  (if temporal-unit
-    (temporal-dimension-rvalue temporal-unit)
+  [[_ _ {:keys [base-type temporal-unit]} :as clause]]
+  (if (or temporal-unit
+          (isa? base-type :type/Temporal))
+    (temporal-dimension-rvalue (or temporal-unit :default))
     (->rvalue clause)))
 
 (defmulti ^:private handle-breakout
@@ -962,9 +955,9 @@
 
 (defn- field-clause->name
   [field-clause]
-  (lib.util.match/match-one field-clause
+  (driver-api/match-one field-clause
     [:field (id :guard integer?) _]
-    (:name (lib.metadata/field (qp.store/metadata-provider) id))
+    (:name (driver-api/field (driver-api/metadata-provider) id))
 
     [:field (field-name :guard string?) _]
     field-name))
@@ -991,7 +984,6 @@
                                        (field-clause->name breakout-field))))))
       (assoc-in [:query :dimensions] (mapv ->dimension-rvalue breakout-fields))))
 
-
 ;;; ------------------------------------------------ handle-order-by -------------------------------------------------
 
 (defmulti ^:private handle-order-by
@@ -1011,7 +1003,7 @@
   (let [field             (->rvalue field)
         breakout-field    (->rvalue breakout-field)
         sort-by-breakout? (= field breakout-field)
-        ag-field          (lib.util.match/match-one ag
+        ag-field          (driver-api/match-one ag
                             :distinct
                             :distinct___count
 
@@ -1026,10 +1018,10 @@
     (when-not sort-by-breakout?
       (assert ag-field))
     (assoc-in druid-query [:query :metric] (match [sort-by-breakout? direction]
-                                               [true  :asc]  {:type :alphaNumeric}
-                                               [true  :desc] {:type :inverted, :metric {:type :alphaNumeric}}
-                                               [false :asc]  {:type :inverted, :metric ag-field}
-                                               [false :desc] ag-field))))
+                                             [true  :asc]  {:type :alphaNumeric}
+                                             [true  :desc] {:type :inverted, :metric {:type :alphaNumeric}}
+                                             [false :asc]  {:type :inverted, :metric ag-field}
+                                             [false :desc] ag-field))))
 
 (defmethod handle-order-by ::groupBy
   [_ {:keys [order-by]} druid-query]
@@ -1043,12 +1035,12 @@
   datetime"
   [field]
   (when field
-    (lib.util.match/match-one field
+    (driver-api/match-one field
       [:field _id-or-name (_opts :guard :temporal-unit)]
       true
 
       [:field (id :guard pos-int?) _opts]
-      (lib.types.isa/temporal? (lib.metadata/field (qp.store/metadata-provider) id)))))
+      (driver-api/temporal? (driver-api/field (driver-api/metadata-provider) id)))))
 
 ;; Handle order by timstamp field
 (defmethod handle-order-by ::grouped-timeseries
@@ -1075,7 +1067,6 @@
                                             :desc :descending
                                             :asc  :ascending)))))
 
-
 ;;; ------------------------------------------------- handle-fields --------------------------------------------------
 
 (defmulti ^:private handle-fields
@@ -1088,7 +1079,7 @@
     (log/warn
      (u/format-color 'red
          ;; TODO - this is not really true, is it
-         "WARNING: It only makes sense to specify :fields for a query with no aggregation. Ignoring the clause.")))
+                     "WARNING: It only makes sense to specify :fields for a query with no aggregation. Ignoring the clause.")))
   druid-query)
 
 (defmethod handle-fields ::scan
@@ -1115,7 +1106,6 @@
    druid-query
    fields))
 
-
 ;;; -------------------------------------------------- handle-limit --------------------------------------------------
 
 (defmulti ^:private handle-limit
@@ -1128,7 +1118,7 @@
   #15414, adjust it back to the old known working value. had to work around."
   [limit]
   (cond-> limit
-    (= limit qp.i/absolute-max-results) inc))
+    (= limit driver-api/absolute-max-results) inc))
 
 (defmethod handle-limit ::scan
   [_ {limit :limit} druid-query]
@@ -1153,7 +1143,6 @@
     true  (assoc-in [:query :limitSpec :type]  :default)
     limit (assoc-in [:query :limitSpec :limit] (adjust-limit limit))))
 
-
 ;;; -------------------------------------------------- handle-page ---------------------------------------------------
 
 ;; TODO - no real way to implement this DB side, probably have to do Clojure-side w/ `take`/`drop`
@@ -1167,7 +1156,6 @@
   (when page-clause
     (log/warn (u/format-color 'red "WARNING: 'page' is not yet implemented.")))
   druid-query)
-
 
 ;;; +----------------------------------------------------------------------------------------------------------------+
 ;;; |                                          Build + Log + Process Query                                           |
@@ -1186,7 +1174,7 @@
         ts?       (boolean
                    (and
                     ;; Checks whether the query is a timeseries
-                    (lib.util.match/match-one (first breakout-fields) [:field _ (_ :guard :temporal-unit)])
+                    (driver-api/match-one (first breakout-fields) [:field _ (_ :guard :temporal-unit)])
                     ;; (excludes x-of-y type breakouts)
                     (contains? timeseries-units (:unit (first breakout-fields)))
                     ;; (excludes queries with LIMIT)
@@ -1218,13 +1206,13 @@
   "Transpile an MBQL (inner) query into a native form suitable for a Druid DB."
   [query]
   ;; Merge `:settings` into the inner query dict so the QP has access to it
-  (let [query (assoc (:query query) :settings (:settings query))]
-    (binding [*query*                           query
-              *query-unique-identifier-counter* (atom 0)]
+  (let [query (driver-api/->legacy-MBQL query)
+        query (assoc (:query query) :settings (:settings query))]
+    (binding [*query* query]
       (try
         (build-druid-query query)
         (catch Throwable e
           (throw (ex-info (tru "Error generating Druid query")
-                          {:type         qp.error-type/driver
+                          {:type         driver-api/qp.error-type.driver
                            :source-query query}
                           e)))))))

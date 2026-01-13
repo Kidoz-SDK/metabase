@@ -1,5 +1,5 @@
+const { H } = cy;
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
-import { restore, filterWidget, visitDashboard } from "e2e/support/helpers";
 
 const { ORDERS, ORDERS_ID, PRODUCTS, PRODUCTS_ID } = SAMPLE_DATABASE;
 
@@ -41,10 +41,10 @@ describe("scenarios > dashboard > filters", () => {
       "filterValues",
     );
 
-    restore();
+    H.restore();
     cy.signInAsAdmin();
 
-    cy.createQuestionAndDashboard({ questionDetails, dashboardDetails }).then(
+    H.createQuestionAndDashboard({ questionDetails, dashboardDetails }).then(
       ({ body: dashboardCard }) => {
         const { card_id, dashboard_id } = dashboardCard;
 
@@ -69,15 +69,15 @@ describe("scenarios > dashboard > filters", () => {
           ],
         };
 
-        cy.editDashboardCard(dashboardCard, updatedCardDetails);
+        H.editDashboardCard(dashboardCard, updatedCardDetails);
 
-        visitDashboard(dashboard_id);
+        H.visitDashboard(dashboard_id);
       },
     );
   });
 
   it("should work properly when connected to the explicitly joined field", () => {
-    filterWidget().click();
+    H.filterWidget().click();
     cy.wait("@filterValues");
 
     cy.findByPlaceholderText("Search the list").type("Awe");
@@ -88,10 +88,10 @@ describe("scenarios > dashboard > filters", () => {
 
     cy.location("search").should(
       "eq",
-      "?text=Awesome%20Concrete%20Shoes&text=Awesome%20Iron%20Hat",
+      "?text=Awesome+Concrete+Shoes&text=Awesome+Iron+Hat",
     );
 
-    filterWidget().contains("2 selections");
+    H.filterWidget().contains("2 selections");
 
     cy.findByTestId("dashcard").within(() => {
       cy.findAllByText("Awesome Concrete Shoes");
@@ -101,7 +101,7 @@ describe("scenarios > dashboard > filters", () => {
 });
 
 function selectFromDropdown(values) {
-  values.forEach(value => {
-    cy.findByTestId(`${value}-filter-value`).should("be.visible").click();
+  values.forEach((value) => {
+    cy.findByLabelText(value).should("be.visible").click();
   });
 }

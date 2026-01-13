@@ -2,12 +2,10 @@
   (:require
    [clojure.java.jdbc :as jdbc]
    [clojure.string :as str]
-   [metabase.config :as config]
    [metabase.driver :as driver]
    [metabase.driver.ddl.interface :as ddl.i]
-   [metabase.driver.sql-jdbc.execute :as sql-jdbc.execute]
+   [metabase.driver.sql.query-processor :as sql.qp]
    [metabase.driver.sql.util :as sql.u]
-   [metabase.driver.sql.util.unprepare :as unprepare]
    [metabase.test.data.interface :as tx]
    [metabase.test.data.sql :as sql.tx]
    [metabase.test.data.sql-jdbc :as sql-jdbc.tx]
@@ -21,20 +19,25 @@
 
 (sql-jdbc.tx/add-test-extensions! :sparksql)
 
-;; during unit tests don't treat Spark SQL as having FK support
-(defmethod driver/database-supports? [:sparksql :foreign-keys] [_driver _feature _db] (not config/is-test?))
+(doseq [feature [:test/time-type
+                 :test/timestamptz-type]]
+  (defmethod driver/database-supports? [:sparksql feature]
+    [_driver _feature _database]
+    false))
 
-(defmethod tx/supports-time-type? :sparksql [_driver] false)
-(defmethod tx/supports-timestamptz-type? :sparksql [_driver] false)
-
-(doseq [[base-type database-type] {:type/BigInteger "BIGINT"
-                                   :type/Boolean    "BOOLEAN"
-                                   :type/Date       "DATE"
-                                   :type/DateTime   "TIMESTAMP"
-                                   :type/Decimal    "DECIMAL"
-                                   :type/Float      "DOUBLE"
-                                   :type/Integer    "INTEGER"
-                                   :type/Text       "STRING"}]
+(doseq [[base-type database-type] {:type/BigInteger     "BIGINT"
+                                   :type/Boolean        "BOOLEAN"
+                                   :type/Date           "DATE"
+                                   ;; TODO (Cam 9/25/25) -- in Spark SQL 3.4+ (which we don't test against yet)
+                                   ;; there's the new `TIMESTAMP_NTZ` type that stores timestamps as wall-clock time
+                                   ;; without timezone adjustment.
+                                   :type/DateTime       "TIMESTAMP"
+                                   ;; stores timestamps as UTC but displays them in session timezone
+                                   :type/DateTimeWithTZ "TIMESTAMP"
+                                   :type/Decimal        "DECIMAL"
+                                   :type/Float          "DOUBLE"
+                                   :type/Integer        "INTEGER"
+                                   :type/Text           "STRING"}]
   (defmethod sql.tx/field-base-type->sql-type [:sparksql base-type] [_ _] database-type))
 
 ;; If someone tries to run Time column tests with SparkSQL give them a heads up that SparkSQL does not support it
@@ -68,7 +71,7 @@
 
   Object
   (->inline [obj]
-    [:raw (unprepare/unprepare-value :sparksql obj)]))
+    [:raw (sql.qp/inline-value :sparksql obj)]))
 
 (defmethod ddl/insert-rows-honeysql-form :sparksql
   [driver table-identifier row-or-rows]
@@ -82,25 +85,27 @@
                                 (->inline val)))))]
     ((get-method ddl/insert-rows-honeysql-form :sql/test-extensions) driver table-identifier rows)))
 
-(defmethod load-data/do-insert! :sparksql
-  [driver spec table-identifier row-or-rows]
-  (let [statements (ddl/insert-rows-ddl-statements driver table-identifier row-or-rows)]
-    (sql-jdbc.execute/do-with-connection-with-options
-     driver
-     spec
-     {:write? true}
-     (fn [^java.sql.Connection conn]
-       (try
-         (.setAutoCommit conn false)
-         (doseq [sql+args statements]
-           (jdbc/execute! {:connection conn} sql+args {:transaction? false}))
-         (catch java.sql.SQLException e
-           (log/infof "Error inserting data: %s" (u/pprint-to-str 'red statements))
-           (jdbc/print-sql-exception-chain e)
-           (throw e)))))))
+;;; since we're not parameterizing these statements at all we can load data in bigger chunks than the default 200. For
+;;; bigger tables like ORDERS this means loading data takes ~11 seconds instead of ~60
+(defmethod load-data/chunk-size :sparksql
+  [_driver _dbdef _tabledef]
+  1000)
 
-(defmethod load-data/load-data! :sparksql [& args]
-  (apply load-data/load-data-maybe-add-ids! args))
+(defmethod load-data/do-insert! :sparksql
+  [driver ^java.sql.Connection conn table-identifier rows]
+  (let [statements (ddl/insert-rows-dml-statements driver table-identifier rows)]
+    (try
+      (.setAutoCommit conn true)
+      (doseq [sql+args statements]
+        (jdbc/execute! {:connection conn} sql+args {:transaction? false}))
+      (catch java.sql.SQLException e
+        (log/infof "Error inserting data: %s" (u/pprint-to-str 'red statements))
+        (jdbc/print-sql-exception-chain e)
+        (throw e)))))
+
+(defmethod load-data/row-xform :sparksql
+  [_driver _dbdef tabledef]
+  (load-data/maybe-add-ids-xform tabledef))
 
 (defmethod sql.tx/create-table-sql :sparksql
   [driver {:keys [database-name]} {:keys [table-name field-definitions]}]
@@ -142,6 +147,8 @@
 
 ;; strip out the default table alias `t1` from the generated native query
 (defmethod tx/count-with-field-filter-query :sparksql
-  [driver table field]
-  (-> ((get-method tx/count-with-field-filter-query :sql/test-extensions) driver table field)
-      (update :query str/replace #"`t1` " "")))
+  ([driver table field]
+   (tx/count-with-field-filter-query driver table field 1))
+  ([driver table field sample-value]
+   (-> ((get-method tx/count-with-field-filter-query :sql/test-extensions) driver table field sample-value)
+       (update :query str/replace #"`t1` " ""))))

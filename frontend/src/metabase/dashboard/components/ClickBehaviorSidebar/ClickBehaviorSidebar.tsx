@@ -4,18 +4,19 @@ import { useMount, usePrevious } from "react-use";
 
 import { useDashboardQuery } from "metabase/common/hooks";
 import { Sidebar } from "metabase/dashboard/components/Sidebar";
+import {
+  type DashboardContextReturned,
+  useDashboardContext,
+} from "metabase/dashboard/context";
 import { isTableDisplay } from "metabase/lib/click-behavior";
-import type { UiParameter } from "metabase-lib/v1/parameters/types";
 import {
   canSaveClickBehavior,
   clickBehaviorIsValid,
 } from "metabase-lib/v1/parameters/utils/click-behavior";
-import { getColumnKey } from "metabase-lib/v1/queries/utils/get-column-key";
+import { getColumnKey } from "metabase-lib/v1/queries/utils/column-key";
 import type {
-  Dashboard,
-  QuestionDashboardCard,
-  DashCardId,
   ClickBehavior,
+  DashCardVisualizationSettings,
   DatasetColumn,
 } from "metabase-types/api";
 
@@ -27,37 +28,23 @@ function shouldShowTypeSelector(clickBehavior?: ClickBehavior) {
   return !clickBehavior || clickBehavior.type == null;
 }
 
-type VizSettings = Record<string, unknown>;
-
-interface Props {
-  dashboard: Dashboard;
-  dashcard: QuestionDashboardCard;
-  parameters: UiParameter[];
-  hideClickBehaviorSidebar: () => void;
-  onUpdateDashCardColumnSettings: (
-    id: DashCardId,
-    columnKey: string,
-    settings?: VizSettings | null,
-  ) => void;
-  onUpdateDashCardVisualizationSettings: (
-    id: DashCardId,
-    settings?: VizSettings | null,
-  ) => void;
-  onReplaceAllDashCardVisualizationSettings: (
-    id: DashCardId,
-    settings?: VizSettings | null,
-  ) => void;
-}
-
-export function ClickBehaviorSidebar({
+export function ClickBehaviorSidebarInner({
   dashboard,
-  dashcard,
-  parameters,
-  hideClickBehaviorSidebar,
-  onUpdateDashCardColumnSettings,
-  onUpdateDashCardVisualizationSettings,
-  onReplaceAllDashCardVisualizationSettings,
-}: Props) {
+  clickBehaviorSidebarDashcard: dashcard,
+}: {
+  dashboard: NonNullable<DashboardContextReturned["dashboard"]>;
+  clickBehaviorSidebarDashcard: NonNullable<
+    DashboardContextReturned["clickBehaviorSidebarDashcard"]
+  >;
+}) {
+  const {
+    parameters,
+    closeSidebar: hideClickBehaviorSidebar,
+    onUpdateDashCardColumnSettings,
+    onUpdateDashCardVisualizationSettings,
+    onReplaceAllDashCardVisualizationSettings,
+  } = useDashboardContext();
+
   const [isTypeSelectorVisible, setTypeSelectorVisible] = useState<
     boolean | null
   >(null);
@@ -67,7 +54,7 @@ export function ClickBehaviorSidebar({
   );
 
   const [originalVizSettings, setOriginalVizSettings] = useState<
-    VizSettings | undefined | null
+    DashCardVisualizationSettings | null | undefined
   >(null);
 
   const [originalColumnVizSettings, setOriginalColumnVizSettings] = useState<
@@ -196,6 +183,7 @@ export function ClickBehaviorSidebar({
 
   return (
     <Sidebar
+      data-testid="click-behavior-sidebar"
       onClose={hideClickBehaviorSidebar}
       onCancel={handleCancel}
       isCloseDisabled={isCloseDisabled}
@@ -221,3 +209,18 @@ export function ClickBehaviorSidebar({
     </Sidebar>
   );
 }
+
+export const ClickBehaviorSidebar = () => {
+  const { dashboard, clickBehaviorSidebarDashcard } = useDashboardContext();
+
+  if (!clickBehaviorSidebarDashcard || !dashboard) {
+    return null;
+  }
+
+  return (
+    <ClickBehaviorSidebarInner
+      dashboard={dashboard}
+      clickBehaviorSidebarDashcard={clickBehaviorSidebarDashcard}
+    />
+  );
+};

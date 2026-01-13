@@ -1,20 +1,8 @@
 import { onlyOn } from "@cypress/skip-test";
 
+const { H } = cy;
 import { USERS } from "e2e/support/cypress_data";
 import { FIRST_COLLECTION_ID } from "e2e/support/cypress_sample_instance_data.js";
-import {
-  restore,
-  popover,
-  appBar,
-  navigationSidebar,
-  openNativeEditor,
-  openCollectionMenu,
-  openCollectionItemMenu,
-  modal,
-  setTokenFeatures,
-  sidebar,
-  entityPickerModal,
-} from "e2e/support/helpers";
 
 import { displaySidebarChildOf } from "./helpers/e2e-collections-sidebar.js";
 
@@ -27,13 +15,13 @@ const PERMISSIONS = {
 describe("collection permissions", () => {
   beforeEach(() => {
     cy.intercept("GET", "/api/search*").as("search");
-    restore();
+    H.restore();
   });
 
   describe("item management", () => {
     Object.entries(PERMISSIONS).forEach(([permission, userGroup]) => {
       context(`${permission} access`, () => {
-        userGroup.forEach(user => {
+        userGroup.forEach((user) => {
           onlyOn(permission === "curate", () => {
             describe(`${user} user`, () => {
               beforeEach(() => {
@@ -43,11 +31,11 @@ describe("collection permissions", () => {
               describe("create dashboard", () => {
                 it("should offer to save dashboard to a currently opened collection", () => {
                   cy.visit("/collection/root");
-                  navigationSidebar().within(() => {
+                  H.navigationSidebar().within(() => {
                     displaySidebarChildOf("First collection");
                     cy.findByText("Second collection").click();
                   });
-                  appBar().within(() => {
+                  H.appBar().within(() => {
                     cy.icon("add").click();
                   });
                   // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
@@ -62,10 +50,10 @@ describe("collection permissions", () => {
                     cy.visit("/collection/root");
                     // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
                     cy.findByText("Orders in a dashboard").click();
-                    appBar().within(() => {
+                    H.appBar().within(() => {
                       cy.icon("add").click();
                     });
-                    popover().findByText("Dashboard").click();
+                    H.popover().findByText("Dashboard").click();
                     cy.findByLabelText(/Which collection/).findByText(
                       "Our analytics",
                     );
@@ -111,10 +99,6 @@ describe("collection permissions", () => {
                 it("should be able to duplicate the dashboard without obstructions from the modal (metabase#15256)", () => {
                   duplicate("Orders in a dashboard");
                 });
-
-                it.skip("should be able to duplicate the question (metabase#15255)", () => {
-                  duplicate("Orders");
-                });
               });
 
               describe("archive", () => {
@@ -128,11 +112,11 @@ describe("collection permissions", () => {
 
                 it("should be able to archive/unarchive model", () => {
                   cy.skipOn(user === "nodata");
-                  cy.createNativeQuestion({
+                  H.createNativeQuestion({
                     name: "Model",
                     type: "model",
                     native: {
-                      query: "SELECT * FROM ORDERS",
+                      query: "SELECT 1",
                     },
                   });
                   archiveUnarchive("Model", "model");
@@ -141,15 +125,15 @@ describe("collection permissions", () => {
                 describe("archive page", () => {
                   it("should show archived items (metabase#15080, metabase#16617)", () => {
                     cy.visit("collection/root");
-                    openCollectionItemMenu("Orders");
-                    popover().within(() => {
+                    H.openCollectionItemMenu("Orders");
+                    H.popover().within(() => {
                       cy.findByText("Move to trash").click();
                     });
                     cy.findByTestId("toast-undo").within(() => {
                       cy.findByText("Trashed question");
                       cy.icon("close").click();
                     });
-                    navigationSidebar().within(() => {
+                    H.navigationSidebar().within(() => {
                       cy.findByText("Trash").click();
                     });
                     cy.location("pathname").should("eq", "/trash");
@@ -168,10 +152,10 @@ describe("collection permissions", () => {
                   });
 
                   it("archiving sub-collection should redirect to its parent", () => {
-                    cy.request("GET", "/api/collection").then(xhr => {
+                    cy.request("GET", "/api/collection").then((xhr) => {
                       // We need to obtain the ID programatically
                       const { id: THIRD_COLLECTION_ID } = xhr.body.find(
-                        collection => collection.slug === "third_collection",
+                        (collection) => collection.slug === "third_collection",
                       );
 
                       cy.intercept(
@@ -182,18 +166,18 @@ describe("collection permissions", () => {
                       cy.visit(`/collection/${THIRD_COLLECTION_ID}`);
                     });
 
-                    openCollectionMenu();
-                    popover().within(() =>
+                    H.openCollectionMenu();
+                    H.popover().within(() =>
                       // eslint-disable-next-line no-unscoped-text-selectors -- linter erroring for no reason
                       cy.findByText("Move to trash").click(),
                     );
-                    modal().findByText("Move to trash").click();
+                    H.modal().findByText("Move to trash").click();
 
                     cy.wait("@editCollection");
 
                     cy.findByTestId("archive-banner").should("exist");
 
-                    navigationSidebar().within(() => {
+                    H.navigationSidebar().within(() => {
                       cy.findByText("First collection");
                       cy.findByText("Second collection");
                       cy.findByText("Third collection").should("not.exist");
@@ -214,15 +198,15 @@ describe("collection permissions", () => {
                     cy.findByTestId("archive-banner").should("not.exist");
 
                     // But unarchived collection is now visible in the sidebar
-                    navigationSidebar().within(() => {
+                    H.navigationSidebar().within(() => {
                       cy.findByText("Third collection");
                     });
                   });
 
                   it("visiting already archived collection by its ID shouldn't let you edit it (metabase#12489)", () => {
-                    cy.request("GET", "/api/collection").then(xhr => {
+                    cy.request("GET", "/api/collection").then((xhr) => {
                       const { id: THIRD_COLLECTION_ID } = xhr.body.find(
-                        collection => collection.slug === "third_collection",
+                        (collection) => collection.slug === "third_collection",
                       );
                       // Archive it
                       cy.request(
@@ -266,16 +250,16 @@ describe("collection permissions", () => {
                   });
 
                   it("abandoning archive process should keep you in the same collection (metabase#15289)", () => {
-                    cy.request("GET", "/api/collection").then(xhr => {
+                    cy.request("GET", "/api/collection").then((xhr) => {
                       const { id: THIRD_COLLECTION_ID } = xhr.body.find(
-                        collection => collection.slug === "third_collection",
+                        (collection) => collection.slug === "third_collection",
                       );
                       cy.visit(`/collection/${THIRD_COLLECTION_ID}`);
-                      openCollectionMenu();
-                      popover().within(() =>
+                      H.openCollectionMenu();
+                      H.popover().within(() =>
                         cy.findByText("Move to trash").click(),
                       );
-                      modal().findByText("Cancel").click();
+                      H.modal().findByText("Cancel").click();
                       cy.location("pathname").should(
                         "eq",
                         `/collection/${THIRD_COLLECTION_ID}-third-collection`,
@@ -289,8 +273,8 @@ describe("collection permissions", () => {
 
                 function archiveUnarchive(item, expectedEntityName) {
                   cy.visit("/collection/root");
-                  openCollectionItemMenu(item);
-                  popover().within(() => {
+                  H.openCollectionItemMenu(item);
+                  H.popover().within(() => {
                     cy.findByText("Move to trash").click();
                   });
                   cy.findByText(item).should("not.exist");
@@ -321,8 +305,8 @@ describe("collection permissions", () => {
             it("should be offered to duplicate dashboard in collections they have `read` access to", () => {
               const { first_name, last_name } = USERS[user];
               cy.visit("/collection/root");
-              openCollectionItemMenu("Orders in a dashboard");
-              popover().findByText("Duplicate").click();
+              H.openCollectionItemMenu("Orders in a dashboard");
+              H.popover().findByText("Duplicate").click();
               cy.findByTestId("collection-picker-button").should(
                 "have.text",
                 `${first_name} ${last_name}'s Personal Collection`,
@@ -336,7 +320,7 @@ describe("collection permissions", () => {
               cy.findByText("Orders")
                 .closest("tr")
                 .within(() => {
-                  cy.icon("table").trigger("mouseover");
+                  cy.icon("table2").trigger("mouseover");
                   cy.findByRole("checkbox").should("not.exist");
                 });
 
@@ -349,7 +333,7 @@ describe("collection permissions", () => {
                 });
             });
 
-            ["/", "/collection/root"].forEach(route => {
+            ["/", "/collection/root"].forEach((route) => {
               it("should not be offered to save dashboard in collections they have `read` access to (metabase#15281)", () => {
                 const { first_name, last_name } = USERS[user];
                 cy.visit(route);
@@ -358,7 +342,7 @@ describe("collection permissions", () => {
                 cy.findByText("Dashboard").click();
 
                 // Coming from the root collection, the initial offered collection will be "Our analytics" (read-only access)
-                modal().within(() => {
+                H.modal().within(() => {
                   cy.findByText(
                     `${first_name} ${last_name}'s Personal Collection`,
                   ).click();
@@ -369,7 +353,9 @@ describe("collection permissions", () => {
                   // Test will fail on this step first
                   cy.findByText("First collection").should("not.exist");
                   // This is the second step that makes sure not even search returns collections with read-only access
-                  cy.findByPlaceholderText("Search…").type("third{Enter}");
+                  cy.findByPlaceholderText(
+                    "Search this collection or everywhere…",
+                  ).type("third{Enter}");
 
                   cy.wait("@search");
                   cy.findByText(/Loading/i).should("not.exist");
@@ -386,16 +372,19 @@ describe("collection permissions", () => {
   it("should offer to save items to 'Our analytics' if user has a 'curate' access to it", () => {
     cy.signIn("normal");
 
-    openNativeEditor().type("select * from people");
+    H.startNewNativeQuestion();
+    H.NativeEditor.type("select * from people");
     // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
     cy.findByText("Save").click();
 
-    cy.findByLabelText(/Which collection/).findByText("Our analytics");
+    cy.findByLabelText(/Where do you want to save this/).findByText(
+      "Our analytics",
+    );
   });
 
   it("should load the collection permissions admin pages", () => {
     cy.signInAsAdmin();
-    setTokenFeatures("all");
+    H.activateToken("pro-self-hosted");
     cy.intercept("GET", "/api/collection/graph").as("permissionsGraph");
     cy.intercept("GET", "/api/permissions/group").as("permissionsGroups");
 
@@ -417,11 +406,36 @@ describe("collection permissions", () => {
     );
     cy.findByTestId("permission-table");
 
-    sidebar().findByText("Metabase analytics").click();
+    H.sidebar().findByText("Usage analytics").click();
     cy.findByTestId("permissions-editor").findByText(
-      "Permissions for Metabase analytics",
+      "Permissions for Usage analytics",
     );
     cy.findByTestId("permission-table");
+  });
+
+  it("should show the new collection button in a sidebar even to users without collection access", () => {
+    cy.intercept("POST", "/api/collection").as("createCollection");
+
+    cy.signIn("nocollection");
+    cy.visit("/");
+    H.navigationSidebar()
+      .findByLabelText("Create a new collection")
+      .should("be.visible")
+      .click();
+
+    cy.findByTestId("new-collection-modal").within(() => {
+      cy.findByLabelText("Name").type("Foo");
+      cy.log(
+        "The only possible location to save the new collection is this user's personal collection",
+      );
+      cy.findByTestId("collection-picker-button").should(
+        "contain",
+        "No Collection Tableton's Personal Collection",
+      );
+      cy.button("Create").click();
+      cy.wait("@createCollection");
+    });
+    cy.location("pathname").should("match", /^\/collection\/\d+-foo/);
   });
 });
 
@@ -430,12 +444,12 @@ function clickButton(name) {
 }
 
 function pinItem(item) {
-  openCollectionItemMenu(item);
-  popover().icon("pin").click();
+  H.openCollectionItemMenu(item);
+  H.popover().icon("pin").click();
 }
 
 function exposeChildrenFor(collectionName) {
-  navigationSidebar()
+  H.navigationSidebar()
     .findByText(collectionName)
     .parentsUntil("[data-testid=sidebar-collection-link-root]")
     .find(".Icon-chevronright")
@@ -445,9 +459,9 @@ function exposeChildrenFor(collectionName) {
 
 function move(item) {
   cy.visit("/collection/root");
-  openCollectionItemMenu(item);
-  popover().findByText("Move").click();
-  entityPickerModal().within(() => {
+  H.openCollectionItemMenu(item);
+  H.popover().findByText("Move").click();
+  H.entityPickerModal().within(() => {
     cy.findByText(`Move "${item}"?`);
     // Let's move it into a nested collection
     cy.findByText("First collection").click();
@@ -470,9 +484,9 @@ function move(item) {
 
 function duplicate(item) {
   cy.visit("/collection/root");
-  openCollectionItemMenu(item);
+  H.openCollectionItemMenu(item);
   cy.findByText("Duplicate").click();
-  modal()
+  H.modal()
     .as("modal")
     .within(() => {
       clickButton("Duplicate");

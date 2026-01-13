@@ -1,11 +1,13 @@
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
 
-import { color, alpha } from "metabase/lib/colors";
+import { alpha } from "metabase/lib/colors";
 
 export const MigrationCard = styled.div`
-  border: 1px solid ${color("border")};
+  border: 1px solid var(--mb-color-border);
   border-radius: 0.5rem;
   padding: 2rem 3rem;
+  background: var(--mb-color-bg-white);
 `;
 
 export const LargeIconContainer = styled.div<{
@@ -18,6 +20,6 @@ export const LargeIconContainer = styled.div<{
   height: 4rem;
   width: 4rem;
   border-radius: 50%;
-  background: ${props => alpha(props.color, 0.15)};
-  color: ${props => props.color};
+  background: ${(props) => alpha(props.color, 0.15)};
+  color: ${(props) => props.color};
 `;

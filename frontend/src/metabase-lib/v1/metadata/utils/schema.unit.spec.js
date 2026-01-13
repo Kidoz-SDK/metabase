@@ -2,8 +2,8 @@ import { generateSchemaId, getSchemaName, parseSchemaId } from "./schema";
 
 const SCHEMA_TEST_CASES = [
   { dbId: 1, schemaName: 2, schema: "1:2" },
-  { dbId: "1", schemaName: "2", schema: "1:2" },
-  { dbId: "1", schema: "1:" },
+  { dbId: 1, schemaName: "2", schema: "1:2" },
+  { dbId: 1, schema: "1:" },
   {
     dbId: -1337,
     schemaName: "Collection",
@@ -12,8 +12,9 @@ const SCHEMA_TEST_CASES = [
 ];
 
 describe("generateSchemaId", () => {
-  SCHEMA_TEST_CASES.forEach(testCase => {
+  SCHEMA_TEST_CASES.forEach((testCase) => {
     const { dbId, schemaName, schema } = testCase;
+
     it(`returns "${schema}" for "${dbId}" DB and ${schemaName} schema`, () => {
       expect(generateSchemaId(dbId, schemaName)).toBe(schema);
     });
@@ -30,10 +31,10 @@ describe("generateSchemaId", () => {
 });
 
 describe("parseSchemaId", () => {
-  SCHEMA_TEST_CASES.forEach(testCase => {
+  SCHEMA_TEST_CASES.forEach((testCase) => {
     const { schema, dbId, schemaName } = testCase;
 
-    const expectedDatabaseId = String(dbId);
+    const expectedDatabaseId = dbId;
     const expectedSchemaName = schemaName ? String(schemaName) : "";
 
     it(`parses "${schema}" correctly`, () => {
@@ -54,14 +55,14 @@ describe("parseSchemaId", () => {
       `1:2:${getEncodedPayload(payload)}`,
     );
     expect({ dbId, schemaName, payload: decodedPayload }).toEqual({
-      dbId: "1",
+      dbId: 1,
       schemaName: "2",
       payload,
     });
   });
 
   it("handles colons inside schema name", () => {
-    const databaseId = "-1337";
+    const databaseId = -1337;
     const collectionName = "test:collection";
     const payload = { foo: "bar" };
 
@@ -78,9 +79,10 @@ describe("parseSchemaId", () => {
 });
 
 describe("getSchemaName", () => {
-  SCHEMA_TEST_CASES.forEach(testCase => {
+  SCHEMA_TEST_CASES.forEach((testCase) => {
     const { schema, schemaName } = testCase;
     const expectedSchemaName = schemaName ? String(schemaName) : "";
+
     it(`returns "${expectedSchemaName}" for "${schema}"`, () => {
       expect(getSchemaName(schema)).toBe(expectedSchemaName);
     });

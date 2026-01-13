@@ -1,18 +1,22 @@
 (ns metabase.query-processor.streaming.xlsx-test
   (:require
-   [cheshire.generate :as json.generate]
    [clojure.java.io :as io]
    [clojure.test :refer :all]
    [dk.ative.docjure.spreadsheet :as spreadsheet]
    [metabase.driver :as driver]
-   [metabase.query-processor.streaming.common :as common]
+   [metabase.models.visualization-settings :as mb.viz]
+   [metabase.query-processor.streaming.common :as streaming.common]
    [metabase.query-processor.streaming.interface :as qp.si]
    [metabase.query-processor.streaming.xlsx :as qp.xlsx]
-   [metabase.shared.models.visualization-settings :as mb.viz]
-   [metabase.test :as mt])
+   [metabase.test :as mt]
+   [metabase.util.json :as json])
   (:import
    (com.fasterxml.jackson.core JsonGenerator)
-   (java.io BufferedInputStream BufferedOutputStream ByteArrayInputStream ByteArrayOutputStream)))
+   (java.io
+    BufferedInputStream
+    BufferedOutputStream
+    ByteArrayInputStream
+    ByteArrayOutputStream)))
 
 (set! *warn-on-reflection* true)
 
@@ -25,10 +29,10 @@
    (format-string format-settings nil))
 
   ([format-settings col]
-   (let [viz-settings (common/viz-settings-for-col
-                        (assoc col :field_ref [:field 1])
-                        {::mb.viz/column-settings {{::mb.viz/field-id 1} format-settings}})
-         format-strings (@#'qp.xlsx/format-settings->format-strings viz-settings col)]
+   (let [viz-settings (streaming.common/viz-settings-for-col
+                       (assoc col :field_ref [:field 1])
+                       {::mb.viz/column-settings {{::mb.viz/field-id 1} format-settings}})
+         format-strings (@#'qp.xlsx/format-settings->format-strings viz-settings col true)]
      ;; If only one format string is returned (for datetimes) or both format strings
      ;; are equal, just return a single value to make tests more readable.
      (cond
@@ -390,7 +394,7 @@
   [sheet]
   (mapv (fn [row]
           (mapv spreadsheet/read-cell row))
-        (spreadsheet/into-seq sheet)))
+        (some-> sheet spreadsheet/into-seq)))
 
 (defn parse-xlsx-results
   "Given a byte array representing an XLSX document, parses the query result sheet using the provided `parse-fn`"
@@ -404,20 +408,20 @@
        (parse-fn sheet)))))
 
 (defn- xlsx-export
-  ([ordered-cols viz-settings rows]
-   (xlsx-export ordered-cols viz-settings rows parse-cell-content))
-
-  ([ordered-cols viz-settings rows parse-fn]
-   (with-open [bos (ByteArrayOutputStream.)
-               os  (BufferedOutputStream. bos)]
-     (let [results-writer (qp.si/streaming-results-writer :xlsx os)]
-       (qp.si/begin! results-writer {:data {:ordered-cols ordered-cols}} viz-settings)
-       (doall (map-indexed
-               (fn [i row] (qp.si/write-row! results-writer row i ordered-cols viz-settings))
-               rows))
-       (qp.si/finish! results-writer {:row_count (count rows)}))
-     (let [bytea (.toByteArray bos)]
-       (parse-xlsx-results bytea parse-fn)))))
+  [ordered-cols viz-settings rows & {:keys [parse-fn pivot-export-options]}]
+  (with-open [bos (ByteArrayOutputStream.)
+              os  (BufferedOutputStream. bos)]
+    (let [results-writer (qp.si/streaming-results-writer :xlsx os)]
+      (qp.si/begin! results-writer {:data {:ordered-cols ordered-cols
+                                           :pivot? (some? pivot-export-options)
+                                           :pivot-export-options pivot-export-options}}
+                    viz-settings)
+      (doall (map-indexed
+              (fn [i row] (qp.si/write-row! results-writer row i ordered-cols viz-settings))
+              rows))
+      (qp.si/finish! results-writer {:row_count (count rows)}))
+    (let [bytea (.toByteArray bos)]
+      (parse-xlsx-results bytea (or parse-fn parse-cell-content)))))
 
 (defn- parse-format-strings
   [sheet]
@@ -433,7 +437,7 @@
              (rest (xlsx-export [{:field_ref [:field 0] :name "Col" :semantic_type :type/Cost}]
                                 {}
                                 [[1] [1.23] [1.004] [1.005] [10000000000] [10000000000.123]]
-                                parse-format-strings)))))
+                                :parse-fn parse-format-strings)))))
 
     (testing "Misc format strings are included correctly in exports"
       (is (= ["[$€]#,##0.00"]
@@ -442,7 +446,7 @@
                                                              {::mb.viz/currency           "EUR"
                                                               ::mb.viz/currency-in-header false}}}
                                   [[1.23]]
-                                  parse-format-strings))))
+                                  :parse-fn parse-format-strings))))
       (is (= ["yyyy.m.d, h:mm:ss am/pm"]
              (second (xlsx-export [{:field_ref [:field 0] :name "Col" :effective_type :type/Temporal}]
                                   {::mb.viz/column-settings {{::mb.viz/field-id 0}
@@ -451,7 +455,7 @@
                                                               ::mb.viz/time-style     "h:mm A",
                                                               ::mb.viz/time-enabled   "seconds"}}}
                                   [[#t "2020-03-28T10:12:06.681"]]
-                                  parse-format-strings)))))))
+                                  :parse-fn parse-format-strings)))))))
 
 (deftest column-order-test
   (testing "Column titles are ordered correctly in the output"
@@ -477,7 +481,7 @@
     (is (= ["Display name"]
            (first (xlsx-export [{:id 0, :display_name "Display name", :name "Name"}] {} []))))
     (is (= ["Column title"]
-           (first (xlsx-export [{:id 0, :display_name "Display name", :name "Name"}]
+           (first (xlsx-export [{:id 0, :display_name "Display name", :name "Name" :field_ref [:field 0]}]
                                {::mb.viz/column-settings {{::mb.viz/field-id 0} {::mb.viz/column-title "Column title"}}}
                                []))))
     ;; Columns can be correlated to viz settings by :name if :id is missing (e.g. for native queries)
@@ -494,26 +498,26 @@
                                []))))
     ;; Currency code is used if requested in viz settings
     (is (= ["Col (USD)"]
-           (first (xlsx-export [{:id 0, :name "Col", :semantic_type :type/Cost}]
+           (first (xlsx-export [{:id 0, :name "Col", :semantic_type :type/Cost :field_ref [:field 0]}]
                                {::mb.viz/column-settings {{::mb.viz/field-id 0}
                                                           {::mb.viz/currency "USD",
                                                            ::mb.viz/currency-style "code"}}}
                                []))))
     ;; Currency name is used if requested in viz settings
     (is (= ["Col (US dollars)"]
-           (first (xlsx-export [{:id 0, :name "Col", :semantic_type :type/Cost}]
+           (first (xlsx-export [{:id 0, :name "Col", :semantic_type :type/Cost :field_ref [:field 0]}]
                                {::mb.viz/column-settings {{::mb.viz/field-id 0}
                                                           {::mb.viz/currency "USD",
                                                            ::mb.viz/currency-style "name"}}}
                                []))))
     ;; Currency type from viz settings is respected
     (is (= ["Col (€)"]
-           (first (xlsx-export [{:id 0, :name "Col", :semantic_type :type/Cost}]
+           (first (xlsx-export [{:id 0, :name "Col", :semantic_type :type/Cost :field_ref [:field 0]}]
                                {::mb.viz/column-settings {{::mb.viz/field-id 0} {::mb.viz/currency "EUR"}}}
                                []))))
     ;; Falls back to code if native symbol is not supported
     (is (= ["Col (KGS)"]
-           (first (xlsx-export [{:id 0, :name "Col", :semantic_type :type/Cost}]
+           (first (xlsx-export [{:id 0, :name "Col", :semantic_type :type/Cost :field_ref [:field 0]}]
                                {::mb.viz/column-settings {{::mb.viz/field-id 0}
                                                           {::mb.viz/currency "KGS", ::mb.viz/currency-style "symbol"}}}
                                []))))
@@ -524,7 +528,7 @@
                                []))))
     ;; Currency not included if ::mb.viz/currency-in-header is false
     (is (= ["Col"]
-           (first (xlsx-export [{:id 0, :name "Col", :semantic_type :type/Cost}]
+           (first (xlsx-export [{:id 0, :name "Col", :semantic_type :type/Cost :field_ref [:field 0]}]
                                {::mb.viz/column-settings {{::mb.viz/field-id 0}
                                                           {::mb.viz/currency "USD",
                                                            ::mb.viz/currency-style "code",
@@ -533,7 +537,7 @@
 
   (testing "If a col is remapped to a foreign key field, the title is taken from the viz settings for its fk_field_id (#18573)"
     (is (= ["Correct title"]
-           (first (xlsx-export [{:id 0, :fk_field_id 1, :remapped_from "FIELD_1"}]
+           (first (xlsx-export [{:id 0, :fk_field_id 1, :remapped_from "FIELD_1" :field_ref [:field 0]}]
                                {::mb.viz/column-settings {{::mb.viz/field-id 0} {::mb.viz/column-title "Incorrect title"}
                                                           {::mb.viz/field-id 1} {::mb.viz/column-title "Correct title"}}}
                                []))))))
@@ -542,7 +546,7 @@
   (testing "scale is applied to data prior to export"
     (is (= [2.0]
            (second (xlsx-export [{:id 0, :name "Col"}]
-                                {::mb.viz/column-settings {{::mb.viz/field-id 0} {::mb.viz/scale 2}}}
+                                {::mb.viz/column-settings {{::mb.viz/column-name "Col"} {::mb.viz/scale 2}}}
                                 [[1.0]]))))))
 
 (deftest misc-data-test
@@ -633,20 +637,29 @@
 
 (defrecord ^:private SampleNastyClass [^String v])
 
-(json.generate/add-encoder
+(json/add-encoder
  SampleNastyClass
  (fn [obj, ^JsonGenerator json-generator]
    (.writeString json-generator (str (:v obj)))))
+
+(defrecord ^:private SampleNastyClass2 [^Number v])
+
+(json/add-encoder
+ SampleNastyClass2
+ (fn [obj, ^JsonGenerator json-generator]
+   (.writeNumber json-generator (long (:v obj)))))
 
 (defrecord ^:private AnotherNastyClass [^String v])
 
 (deftest encode-strange-classes-test
   (testing (str "Make sure that we're piggybacking off of the JSON encoding logic when encoding strange values in "
                 "XLSX (#5145, #5220, #5459)")
-    (is (= ["Hello XLSX World!" "{:v \"No Encoder\"}"]
-           (second (xlsx-export [{:name "val1"} {:name "val2"}]
+    (is (= ["Hello XLSX World!" "23" "{\"v\":\"No Encoder\"}"]
+           (second (xlsx-export [{:name "val1"} {:name "val2"} {:name "val3"}]
                                 {}
-                                [[(SampleNastyClass. "Hello XLSX World!") (AnotherNastyClass. "No Encoder")]]))))))
+                                [[(SampleNastyClass. "Hello XLSX World!")
+                                  (SampleNastyClass2. 23)
+                                  (AnotherNastyClass. "No Encoder")]]))))))
 
 (defn- parse-column-widths
   [^org.apache.poi.ss.usermodel.Sheet sheet]
@@ -666,22 +679,22 @@
     (xlsx-export [{:id 0, :name "Col1"} {:id 1, :name "Col2"}]
                  {}
                  [["a" "abcdefghijklmnopqrstuvwxyz"]]
-                 assert-non-default-widths))
+                 :parse-fn assert-non-default-widths))
   (testing "Auto-sizing works when the number of rows is at or above the auto-sizing threshold"
     (binding [qp.xlsx/*auto-sizing-threshold* 2]
       (xlsx-export [{:id 0, :name "Col1"}]
                    {}
                    [["abcdef"] ["abcedf"]]
-                   assert-non-default-widths)
+                   :parse-fn assert-non-default-widths)
       (xlsx-export [{:id 0, :name "Col1"}]
                    {}
                    [["abcdef"] ["abcedf"] ["abcdef"]]
-                   assert-non-default-widths)))
+                   :parse-fn assert-non-default-widths)))
   (testing "An auto-sized column does not exceed max-column-width (the width of 255 characters)"
     (let [[col-width] (xlsx-export [{:id 0, :name "Col1"}]
                                    {}
                                    [[(apply str (repeat 256 "0"))]]
-                                   parse-column-widths)]
+                                   :parse-fn parse-column-widths)]
       (is (= 65280 col-width)))))
 
 (deftest poi-tempfiles-test
@@ -696,7 +709,18 @@
       (qp.si/begin! results-writer {:data {:ordered-cols []}} {})
       (qp.si/finish! results-writer {:row_count 0})
       ;; No additional files should exist in the temp directory
-      (is (= expected-poifiles-count (count (file-seq poifiles-directory)))))))
+      (is (= expected-poifiles-count (count (file-seq poifiles-directory))))))
+  (testing "if the tempfile directory doesn't exist xlsx downloads still work"
+    (with-open [bos (ByteArrayOutputStream.)
+                os  (BufferedOutputStream. bos)]
+      (doto (io/file (str (System/getProperty "java.io.tmpdir") "/poifiles"))
+        (.delete))
+      (let [results-writer (qp.si/streaming-results-writer :xlsx os)]
+        (qp.si/begin! results-writer {:data {:ordered-cols []}} {})
+        (qp.si/finish! results-writer {:row_count 0})
+        (let [istr (ByteArrayInputStream. (.toByteArray bos))]
+          (is (spreadsheet/workbook? (spreadsheet/load-workbook-from-stream istr))
+              "not a valid workbook"))))))
 
 (deftest dont-format-non-temporal-columns-as-temporal-columns-test
   (testing "Don't format columns with temporal semantic type as datetime unless they're actually datetimes (#18729)"
@@ -713,3 +737,24 @@
                           {}
                           [[1]
                            [2]]))))))
+
+(deftest ambiguous-column-types-dont-error
+  (testing "Ambiguous column types (eg. `:type/SnowflakeVariant` will not throw an exception. (#46981)"
+    (mt/dataset test-data
+      (is (= [["CREATED_AT"]
+              [1.0]
+              [2.0]]
+             (xlsx-export [{:id             0
+                            :unit           :month-of-year
+                            :name           "CREATED_AT"
+                            :effective_type :type/SnowflakeVariant
+                            :base_type      :type/SnowflakeVariant}]
+                          {}
+                          [[1]
+                           [2]]))))))
+
+(deftest number-of-characters-cell-test
+  (testing "When the number of characters exceeds *number-of-characters-cell*, the excess part will be truncated."
+    (binding [qp.xlsx/*number-of-characters-cell* 5]
+      (is (= ["abcde"]
+             (second (xlsx-export [{:id 0, :name "Col"}] {} [["abcdefghijklmnopqrstuvwxyz"]])))))))

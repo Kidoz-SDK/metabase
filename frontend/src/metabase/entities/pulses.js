@@ -1,14 +1,17 @@
 import { t } from "ttag";
 
-import { subscriptionApi } from "metabase/api";
-import { getCollectionType } from "metabase/entities/collections";
+import {
+  subscriptionApi,
+  useGetSubscriptionQuery,
+  useListSubscriptionsQuery,
+} from "metabase/api";
+import { getCollectionType } from "metabase/entities/collections/utils";
 import { color } from "metabase/lib/colors";
 import {
   createEntity,
-  undo,
   entityCompatibleQuery,
+  undo,
 } from "metabase/lib/entities";
-import * as Urls from "metabase/lib/urls";
 import { addUndo } from "metabase/redux/undo";
 
 export const UNSUBSCRIBE = "metabase/entities/pulses/unsubscribe";
@@ -16,13 +19,20 @@ export const UNSUBSCRIBE = "metabase/entities/pulses/unsubscribe";
 /**
  * @deprecated use "metabase/api" instead
  */
-const Pulses = createEntity({
+export const Pulses = createEntity({
   name: "pulses",
   nameOne: "pulse",
   path: "/api/pulse",
 
   actionTypes: {
     UNSUBSCRIBE,
+  },
+
+  rtk: {
+    getUseGetQuery: () => ({
+      useGetQuery,
+    }),
+    useListQuery: useListSubscriptionsQuery,
   },
 
   api: {
@@ -66,7 +76,7 @@ const Pulses = createEntity({
 
     unsubscribe:
       ({ id }) =>
-      async dispatch => {
+      async (dispatch) => {
         await entityCompatibleQuery(
           id,
           dispatch,
@@ -79,10 +89,8 @@ const Pulses = createEntity({
   },
 
   objectSelectors: {
-    getName: pulse => pulse && pulse.name,
-    getUrl: pulse => pulse && Urls.pulse(pulse.id),
-    getIcon: pulse => ({ name: "pulse" }),
-    getColor: pulse => color("pulse"),
+    getName: (pulse) => pulse && pulse.name,
+    getColor: (pulse) => color("pulse"),
   },
 
   getAnalyticsMetadata([object], { action }, getState) {
@@ -91,4 +99,6 @@ const Pulses = createEntity({
   },
 });
 
-export default Pulses;
+const useGetQuery = ({ id }, options) => {
+  return useGetSubscriptionQuery(id, options);
+};

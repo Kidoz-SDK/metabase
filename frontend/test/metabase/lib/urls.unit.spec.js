@@ -3,14 +3,14 @@ import {
   browseDatabase,
   collection,
   dashboard,
-  question,
+  extractCollectionId,
+  extractEntityId,
+  extractQueryParams,
+  isCollectionPath,
   model,
   modelDetail,
   modelEditor,
-  extractQueryParams,
-  extractEntityId,
-  extractCollectionId,
-  isCollectionPath,
+  question,
 } from "metabase/lib/urls";
 
 describe("urls", () => {
@@ -132,6 +132,7 @@ describe("urls", () => {
         }),
       ).toHaveLength(7);
     });
+
     it("should return correct parameters", () => {
       expect(extractQueryParams({ foo: "bar" })).toEqual([["foo", "bar"]]);
 
@@ -191,9 +192,9 @@ describe("urls", () => {
       });
 
       it("should return correct metadata editor URL", () => {
-        expect(
-          modelEditor({ id: 1, name: "Order" }, { type: "metadata" }),
-        ).toBe("/model/1-order/metadata");
+        expect(modelEditor({ id: 1, name: "Order" }, { type: "columns" })).toBe(
+          "/model/1-order/columns",
+        );
       });
 
       it("should handle missing name", () => {
@@ -447,7 +448,7 @@ describe("urls", () => {
       },
     ];
 
-    testCases.forEach(testCase => {
+    testCases.forEach((testCase) => {
       const { caseName, input, expectedString } = testCase;
       const entity = { id: 1, name: input };
 

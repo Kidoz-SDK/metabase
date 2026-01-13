@@ -1,11 +1,22 @@
-import Questions from "metabase/entities/questions";
+import { createAction } from "@reduxjs/toolkit";
+import { t } from "ttag";
+import _ from "underscore";
+
+import { Questions } from "metabase/entities/questions";
 import {
   DEFAULT_CARD_SIZE,
   GRID_WIDTH,
   getPositionForNewDashCard,
 } from "metabase/lib/dashboard_grid";
-import { createAction, createThunkAction } from "metabase/lib/redux";
+import { createThunkAction } from "metabase/lib/redux";
+import { checkNotNull } from "metabase/lib/types";
+import { loadMetadataForCard } from "metabase/questions/actions";
+import { addUndo } from "metabase/redux/undo";
 import { getDefaultSize } from "metabase/visualizations";
+import {
+  getCardIdsFromColumnValueMappings,
+  isVisualizerDashboardCard,
+} from "metabase/visualizer/utils";
 import type {
   Card,
   CardId,
@@ -14,33 +25,53 @@ import type {
   DashboardId,
   DashboardTabId,
   VirtualCard,
+  VisualizerVizDefinition,
 } from "metabase-types/api";
 import type { Dispatch, GetState } from "metabase-types/store";
 
 import {
   trackCardCreated,
+  trackDashcardDuplicated,
   trackQuestionReplaced,
   trackSectionAdded,
 } from "../analytics";
 import type { SectionLayout } from "../sections";
-import { getDashCardById, getDashboardId } from "../selectors";
 import {
+  getCurrentDashcards,
+  getDashCardById,
+  getDashboard,
+  getDashboardId,
+  getDashboards,
+  getDashcards,
+  getSelectedTabId,
+} from "../selectors";
+import {
+  type NewDashboardCard,
   createDashCard,
   createVirtualCard,
   generateTemporaryDashcardId,
+  hasInlineParameters,
+  isQuestionDashCard,
   isVirtualDashCard,
 } from "../utils";
 
-import { autoWireParametersToNewCard } from "./auto-wire-parameters/actions";
+import { showAutoWireToastNewCard } from "./auto-wire-parameters/actions";
+import { closeAddCardAutoWireToasts } from "./auto-wire-parameters/toasts";
 import {
   ADD_CARD_TO_DASH,
   ADD_MANY_CARDS_TO_DASH,
   REMOVE_CARD_FROM_DASH,
+  TRASH_DASHBOARD_QUESTION_FROM_DASH,
   UNDO_REMOVE_CARD_FROM_DASH,
+  UNDO_TRASH_DASHBOARD_QUESTION_FROM_DASH,
   setDashCardAttributes,
+  setDashboardAttributes,
 } from "./core";
 import { cancelFetchCardData, fetchCardData } from "./data-fetching";
-import { loadMetadataForDashboard } from "./metadata";
+import {
+  duplicateParameters,
+  removeParameterAndReferences,
+} from "./parameters";
 import { getExistingDashCards } from "./utils";
 
 export type NewDashCardOpts = {
@@ -48,22 +79,18 @@ export type NewDashCardOpts = {
   tabId: DashboardTabId | null;
 };
 
-type NewDashboardCard = Omit<
-  DashboardCard,
-  "entity_id" | "created_at" | "updated_at"
->;
-
-type AddDashCardOpts = NewDashCardOpts & {
+export type AddDashCardOpts = NewDashCardOpts & {
   dashcardOverrides: Partial<NewDashboardCard> & {
     card: Card | VirtualCard;
+    series?: Card[];
   };
 };
 
 export const MARK_NEW_CARD_SEEN = "metabase/dashboard/MARK_NEW_CARD_SEEN";
-export const markNewCardSeen = createAction(MARK_NEW_CARD_SEEN);
+export const markNewCardSeen = createAction<DashCardId>(MARK_NEW_CARD_SEEN);
 
-const _addDashCard = createAction<NewDashboardCard>(ADD_CARD_TO_DASH);
-const _addManyDashCards = createAction<NewDashboardCard[]>(
+export const addCardToDash = createAction<NewDashboardCard>(ADD_CARD_TO_DASH);
+export const addManyCardsToDash = createAction<NewDashboardCard[]>(
   ADD_MANY_CARDS_TO_DASH,
 );
 
@@ -96,7 +123,7 @@ export const addDashCardToDashboard =
       ...dashcardOverrides,
     });
 
-    dispatch(_addDashCard(dashcard));
+    dispatch(addCardToDash(dashcard));
 
     return dashcard;
   };
@@ -124,7 +151,7 @@ export const addSectionToDashboard =
 
     const sectionDashcards = sectionLayout
       .getLayout(position)
-      .map(dashcardOverrides =>
+      .map((dashcardOverrides) =>
         createDashCard({
           dashboard_id: dashId,
           dashboard_tab_id: tabId ?? null,
@@ -132,11 +159,11 @@ export const addSectionToDashboard =
         }),
       );
 
-    dispatch(_addManyDashCards(sectionDashcards));
+    dispatch(addManyCardsToDash(sectionDashcards));
     trackSectionAdded(dashId, sectionLayout.id);
   };
 
-type AddCardToDashboardOpts = NewDashCardOpts & {
+export type AddCardToDashboardOpts = NewDashCardOpts & {
   cardId: CardId;
 };
 
@@ -155,11 +182,11 @@ export const addCardToDashboard =
         tabId,
         dashcardOverrides: { id: dashcardId, card, card_id: cardId },
       }),
-    );
+    ) as DashboardCard;
 
     dispatch(fetchCardData(card, dashcard, { reload: true, clearCache: true }));
-    await dispatch(loadMetadataForDashboard([dashcard]));
-    dispatch(autoWireParametersToNewCard({ dashcard_id: dashcardId }));
+    await dispatch(loadMetadataForCard(card));
+    dispatch(showAutoWireToastNewCard({ dashcard_id: dashcardId }));
   };
 
 export const addHeadingDashCardToDashboard =
@@ -182,6 +209,16 @@ export const addMarkdownDashCardToDashboard =
   (dispatch: Dispatch) => {
     trackCardCreated("text", dashId);
     const card = createVirtualCard("text");
+    const dashcardOverrides = {
+      card,
+      visualization_settings: { virtual_card: card },
+    };
+    dispatch(addDashCardToDashboard({ dashId, tabId, dashcardOverrides }));
+  };
+export const addIFrameDashCardToDashboard =
+  ({ dashId, tabId }: NewDashCardOpts) =>
+  (dispatch: Dispatch) => {
+    const card = createVirtualCard("iframe");
     const dashcardOverrides = {
       card,
       visualization_settings: { virtual_card: card },
@@ -233,39 +270,319 @@ export const replaceCard =
     const dashcard = getDashCardById(getState(), dashcardId);
 
     dispatch(fetchCardData(card, dashcard, { reload: true, clearCache: true }));
-    await dispatch(loadMetadataForDashboard([dashcard]));
-    dispatch(autoWireParametersToNewCard({ dashcard_id: dashcardId }));
+    await dispatch(loadMetadataForCard(card));
+    dispatch(showAutoWireToastNewCard({ dashcard_id: dashcardId }));
 
     dashboardId && trackQuestionReplaced(dashboardId);
   };
 
+export const addCardWithVisualization =
+  ({
+    visualization,
+    tabId,
+  }: {
+    visualization: VisualizerVizDefinition;
+    tabId: number | null;
+  }) =>
+  async (dispatch: Dispatch, getState: GetState) => {
+    const cardIds = getCardIdsFromColumnValueMappings(
+      visualization.columnValuesMapping,
+    );
+    const cards: Card[] = [];
+
+    for (const cardId of cardIds) {
+      await dispatch(Questions.actions.fetch({ id: cardId }));
+      const card: Card = Questions.selectors
+        .getObject(getState(), { entityId: cardId })
+        .card();
+      cards.push(card);
+    }
+
+    const [mainCard, ...secondaryCards] = cards;
+
+    const dashcardId = generateTemporaryDashcardId();
+    const dashcard = dispatch(
+      addDashCardToDashboard({
+        dashId: getState().dashboard.dashboardId!,
+        tabId,
+        dashcardOverrides: {
+          id: dashcardId,
+          card: mainCard,
+          card_id: mainCard.id,
+          series: secondaryCards,
+          visualization_settings: {
+            visualization,
+          },
+        },
+      }),
+    ) as DashboardCard;
+
+    for (const card of cards) {
+      dispatch(
+        fetchCardData(card, dashcard, { reload: true, clearCache: true }),
+      );
+      await dispatch(loadMetadataForCard(card));
+    }
+  };
+
+export const replaceCardWithVisualization =
+  ({
+    dashcardId,
+    visualization,
+  }: {
+    dashcardId: DashCardId;
+    visualization: VisualizerVizDefinition;
+  }) =>
+  async (dispatch: Dispatch, getState: GetState) => {
+    const cardIds = getCardIdsFromColumnValueMappings(
+      visualization.columnValuesMapping,
+    );
+    const cards: Card[] = [];
+
+    for (const cardId of cardIds) {
+      await dispatch(Questions.actions.fetch({ id: cardId }));
+      const card: Card = Questions.selectors
+        .getObject(getState(), { entityId: cardId })
+        .card();
+      cards.push(card);
+    }
+
+    const [mainCard, ...secondaryCards] = cards;
+
+    const originalDashCard = getDashCardById(getState(), dashcardId);
+    const parameter_mappings = isQuestionDashCard(originalDashCard)
+      ? originalDashCard.parameter_mappings
+      : [];
+
+    await dispatch(
+      setDashCardAttributes({
+        id: dashcardId,
+        attributes: {
+          card_id: mainCard.id,
+          card: mainCard,
+          series: secondaryCards,
+          parameter_mappings,
+          visualization_settings: {
+            visualization,
+          },
+        },
+      }),
+    );
+    const dashcard = getDashCardById(getState(), dashcardId);
+
+    for (const card of cards) {
+      dispatch(
+        fetchCardData(card, dashcard, { reload: true, clearCache: true }),
+      );
+      await dispatch(loadMetadataForCard(card));
+    }
+  };
+
+export const DUPLICATE_CARD = "metabase/dashboard/DUPLICATE_CARD";
+export const duplicateCard = createThunkAction(
+  DUPLICATE_CARD,
+  ({ id }: { id: DashCardId }) =>
+    (dispatch, getState) => {
+      const dashboard = getDashboard(getState());
+      const originalDashcard = getDashCardById(getState(), id);
+      if (!dashboard || !originalDashcard) {
+        throw new Error("Dashboard or original dashcard not found");
+      }
+
+      const dashboards = getDashboards(getState());
+      const dashcards = getDashcards(getState());
+      const tabId = getSelectedTabId(getState());
+
+      const position = getPositionForNewDashCard(
+        getExistingDashCards(dashboards, dashcards, dashboard.id, tabId),
+        originalDashcard.size_x,
+        originalDashcard.size_y,
+      );
+
+      const dashcard = {
+        ...originalDashcard,
+        ...position,
+        id: generateTemporaryDashcardId(),
+      };
+
+      if (hasInlineParameters(dashcard)) {
+        const originalParameterIds = [...dashcard.inline_parameters];
+        const newParameters = duplicateParameters(
+          dispatch,
+          getState,
+          dashcard.inline_parameters,
+        );
+        dashcard.inline_parameters = newParameters.map(
+          (parameter) => parameter.id,
+        );
+        if (Array.isArray(dashcard.parameter_mappings)) {
+          dashcard.parameter_mappings = dashcard.parameter_mappings.map(
+            (mapping) => {
+              const inlineParameterIndex = originalParameterIds.indexOf(
+                mapping.parameter_id,
+              );
+              if (inlineParameterIndex !== -1) {
+                return {
+                  ...mapping,
+                  parameter_id: newParameters[inlineParameterIndex].id,
+                };
+              }
+              return mapping;
+            },
+          );
+        }
+      }
+
+      dispatch(
+        addDashCardToDashboard({
+          dashId: dashboard.id,
+          dashcardOverrides: dashcard,
+          tabId,
+        }),
+      );
+
+      if (!isVirtualDashCard(dashcard)) {
+        dispatch(fetchCardData(dashcard.card, dashcard));
+
+        if (
+          (isQuestionDashCard(dashcard) ||
+            isVisualizerDashboardCard(dashcard)) &&
+          dashcard.series &&
+          dashcard.series.length > 0
+        ) {
+          dashcard.series.forEach((card) => {
+            dispatch(fetchCardData(card, dashcard));
+          });
+        }
+      }
+
+      trackDashcardDuplicated(dashboard.id);
+    },
+);
+
 export const removeCardFromDashboard = createThunkAction(
   REMOVE_CARD_FROM_DASH,
   ({
-      dashcardId,
-      cardId,
-    }: {
-      dashcardId: DashCardId;
-      cardId: DashboardCard["card_id"];
-    }) =>
-    dispatch => {
-      // @ts-expect-error — data-fetching.js actions must be converted to TypeScript
+    dashcardId,
+    cardId,
+  }: {
+    dashcardId: DashCardId;
+    cardId: DashboardCard["card_id"];
+  }) =>
+    (dispatch, getState) => {
+      const dashboard = checkNotNull(getDashboard(getState()));
+      const dashcards = getCurrentDashcards(getState());
+      const dashcard = getDashCardById(getState(), dashcardId);
+
+      const originalParameters = dashboard.parameters
+        ? [...dashboard.parameters]
+        : dashboard.parameters;
+
+      dispatch(closeAddCardAutoWireToasts());
       dispatch(cancelFetchCardData(cardId, dashcardId));
+      if (hasInlineParameters(dashcard)) {
+        dashcard.inline_parameters.forEach((parameterId) => {
+          removeParameterAndReferences(dispatch, getState, parameterId);
+        });
+      }
+
+      const dashcardCountByCardId = _.countBy(dashcards, "card_id");
+      const isLastDashboardQuestionDashcard = Boolean(
+        dashcard.card_id &&
+          dashcard.card.dashboard_id !== null &&
+          dashcardCountByCardId[dashcard.card_id] <= 1,
+      );
+      dispatch(
+        addUndo({
+          message: isLastDashboardQuestionDashcard
+            ? t`Trashed and removed card`
+            : t`Removed card`,
+          undo: true,
+          action: () =>
+            dispatch(
+              undoRemoveCardFromDashboard({
+                dashcardId,
+                originalParameters: hasInlineParameters(dashcard)
+                  ? originalParameters
+                  : undefined,
+              }),
+            ),
+        }),
+      );
+
       return { dashcardId };
     },
 );
 
-export const undoRemoveCardFromDashboard = createThunkAction(
+const undoRemoveCardFromDashboard = createThunkAction(
   UNDO_REMOVE_CARD_FROM_DASH,
-  ({ dashcardId }) =>
+  ({ dashcardId, originalParameters }) =>
     (dispatch, getState) => {
+      const dashboardId = checkNotNull(getDashboardId(getState()));
       const dashcard = getDashCardById(getState(), dashcardId);
-      const card = dashcard.card;
+
+      if (originalParameters) {
+        dispatch(
+          setDashboardAttributes({
+            id: dashboardId,
+            attributes: {
+              parameters: originalParameters,
+            },
+          }),
+        );
+      }
 
       if (!isVirtualDashCard(dashcard)) {
+        const card = dashcard.card;
         dispatch(fetchCardData(card, dashcard));
       }
 
       return { dashcardId };
+    },
+);
+
+export const trashDashboardQuestion = createThunkAction(
+  TRASH_DASHBOARD_QUESTION_FROM_DASH,
+  ({
+    dashcardId,
+    cardId,
+  }: {
+    dashcardId: DashCardId;
+    cardId: DashboardCard["card_id"];
+  }) =>
+    async (dispatch) => {
+      await dispatch(
+        Questions.actions.setArchived({ id: cardId }, true, {
+          notify: {
+            action: () =>
+              dispatch(undoTrashDashboardQuestion({ dashcardId, cardId })),
+            undo: false,
+          },
+        }),
+      );
+      dispatch(removeCardFromDashboard({ dashcardId, cardId }));
+    },
+);
+
+const undoTrashDashboardQuestion = createThunkAction(
+  UNDO_TRASH_DASHBOARD_QUESTION_FROM_DASH,
+  ({
+    dashcardId,
+    cardId,
+  }: {
+    dashcardId: DashCardId;
+    cardId: DashboardCard["card_id"];
+  }) =>
+    async (dispatch) => {
+      await dispatch(
+        Questions.actions.setArchived({ id: cardId }, false, {
+          notify: {
+            action: () =>
+              dispatch(trashDashboardQuestion({ dashcardId, cardId })),
+            undo: false,
+          },
+        }),
+      );
+      dispatch(undoRemoveCardFromDashboard({ dashcardId }));
     },
 );

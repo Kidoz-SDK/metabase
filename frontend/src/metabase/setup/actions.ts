@@ -2,12 +2,12 @@ import { createAction } from "@reduxjs/toolkit";
 import { t } from "ttag";
 
 import { createDatabase } from "metabase/admin/databases/database";
-import { getSettings } from "metabase/admin/settings/selectors";
 import {
   initializeSettings,
   updateSetting,
   updateSettings,
 } from "metabase/admin/settings/settings";
+import { userApi } from "metabase/api";
 import { loadLocalization } from "metabase/lib/i18n";
 import { createAsyncThunk } from "metabase/lib/redux";
 import MetabaseSettings from "metabase/lib/settings";
@@ -25,14 +25,14 @@ import {
 } from "./analytics";
 import {
   getAvailableLocales,
-  getInvite,
+  getIsEmbeddingUseCase,
   getLocale,
   getNextStep,
   getSetupToken,
   getUsageReason,
 } from "./selectors";
 import type { SetupStep } from "./types";
-import { getDefaultLocale, getLocales, getUserToken } from "./utils";
+import { getDefaultLocale, getLocales } from "./utils";
 
 interface ThunkConfig {
   state: State;
@@ -44,17 +44,8 @@ export const goToNextStep = createAsyncThunk(
     const state = getState() as State;
     const nextStep = getNextStep(state);
     dispatch(selectStep(nextStep));
-  },
-);
-
-export const LOAD_USER_DEFAULTS = "metabase/setup/LOAD_USER_DEFAULTS";
-export const loadUserDefaults = createAsyncThunk(
-  LOAD_USER_DEFAULTS,
-  async (): Promise<UserInfo | undefined> => {
-    const token = getUserToken();
-    if (token) {
-      const defaults = await SetupApi.user_defaults({ token });
-      return defaults.user;
+    if (nextStep === "completed") {
+      dispatch(setEmbeddingHomepageFlags());
     }
   },
 );
@@ -77,7 +68,6 @@ export const LOAD_DEFAULTS = "metabase/setup/LOAD_DEFAULTS";
 export const loadDefaults = createAsyncThunk<void, void, ThunkConfig>(
   LOAD_DEFAULTS,
   (_, { dispatch }) => {
-    dispatch(loadUserDefaults());
     dispatch(loadLocaleDefaults());
   },
 );
@@ -100,14 +90,12 @@ export const submitUser = createAsyncThunk<void, UserInfo, ThunkConfig>(
   "metabase/setup/SUBMIT_USER_INFO",
   async (user: UserInfo, { dispatch, getState, rejectWithValue }) => {
     const token = getSetupToken(getState());
-    const invite = getInvite(getState());
     const locale = getLocale(getState());
 
     try {
       await SetupApi.create({
         token,
         user,
-        invite,
         prefs: {
           site_name: user.site_name,
           site_locale: locale?.code,
@@ -172,8 +160,20 @@ export const skipDatabase = createAsyncThunk(
 export const SUBMIT_USER_INVITE = "metabase/setup/SUBMIT_USER_INVITE";
 export const submitUserInvite = createAsyncThunk(
   SUBMIT_USER_INVITE,
-  (_: InviteInfo, { dispatch }) => {
-    dispatch(goToNextStep());
+  async (inviteInfo: InviteInfo, { dispatch, rejectWithValue }) => {
+    try {
+      await dispatch(
+        userApi.endpoints.createUser.initiate({
+          email: inviteInfo.email,
+          first_name: inviteInfo.first_name || undefined,
+          last_name: inviteInfo.last_name || undefined,
+          source: "setup",
+        }),
+      ).unwrap();
+      dispatch(goToNextStep());
+    } catch (error) {
+      return rejectWithValue(error);
+    }
   },
 );
 
@@ -219,24 +219,12 @@ export const updateTracking = createAsyncThunk(
   },
 );
 
-export const SUBMIT_SETUP = "metabase/setup/SUBMIT_SETUP";
-export const submitSetup = createAsyncThunk<void, void, ThunkConfig>(
-  SUBMIT_SETUP,
-  async (_, { dispatch }) => {
-    dispatch(setEmbeddingHomepageFlags());
-    dispatch(goToNextStep());
-  },
-);
-
 export const setEmbeddingHomepageFlags = createAsyncThunk(
   "setup/setEmbeddingHomepageFlags",
   async (_, { getState, dispatch }) => {
     const usageReason = getUsageReason(getState());
     const tokenFeatures = getSetting(getState(), "token-features");
-    const adminSettings = getSettings(getState());
-    const enableEmbeddingSetByEnv = adminSettings.find(
-      (setting: { key: string }) => setting.key === "enable-embedding",
-    )?.is_env_setting;
+    const isEmbeddingUseCase = getIsEmbeddingUseCase(getState());
 
     const interestedInEmbedding =
       usageReason === "embedding" || usageReason === "both";
@@ -244,13 +232,8 @@ export const setEmbeddingHomepageFlags = createAsyncThunk(
 
     const settingsToChange: Partial<Settings> = {};
 
-    if (interestedInEmbedding) {
+    if (isEmbeddingUseCase || interestedInEmbedding) {
       settingsToChange["embedding-homepage"] = "visible";
-    }
-
-    if (interestedInEmbedding && !enableEmbeddingSetByEnv) {
-      settingsToChange["enable-embedding"] = true;
-      settingsToChange["setup-embedding-autoenabled"] = true;
     }
 
     settingsToChange["setup-license-active-at-setup"] = isLicenseActive;

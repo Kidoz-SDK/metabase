@@ -1,9 +1,10 @@
 /* eslint-disable react/prop-types */
 import cx from "classnames";
+import Color from "color";
 import { Component } from "react";
 import { t } from "ttag";
 
-import { Ellipsified } from "metabase/core/components/Ellipsified";
+import { Ellipsified } from "metabase/common/components/Ellipsified";
 import CS from "metabase/css/core/index.css";
 import { color } from "metabase/lib/colors";
 import {
@@ -11,6 +12,7 @@ import {
   formatNumber,
   formatValue,
 } from "metabase/lib/formatting";
+import { formatNullable } from "metabase/lib/formatting/nullable";
 import {
   FunnelNormalRoot,
   FunnelStart,
@@ -20,7 +22,6 @@ import {
   Subtitle,
   Title,
 } from "metabase/visualizations/components/FunnelNormal.styled";
-import { getFriendlyName } from "metabase/visualizations/lib/utils";
 
 import { computeChange } from "../lib/numeric";
 
@@ -31,29 +32,31 @@ export default class FunnelNormal extends Component {
       rawSeries,
       gridSize,
       hovered,
+      isDashboard,
       onHoverChange,
       onVisualizationClick,
       visualizationIsClickable,
       settings,
-      isPlaceholder,
     } = this.props;
 
-    const [series] = isPlaceholder ? this.props.series : rawSeries;
+    const [series] = rawSeries;
     const {
       data: { cols, rows },
     } = series;
 
     const dimensionIndex = cols.findIndex(
-      col => col.name === settings["funnel.dimension"],
+      (col) => col.name === settings["funnel.dimension"],
     );
     const metricIndex = cols.findIndex(
-      col => col.name === settings["funnel.metric"],
+      (col) => col.name === settings["funnel.metric"],
     );
 
     const sortedRows = settings["funnel.rows"]
       ? settings["funnel.rows"]
-          .filter(fr => fr.enabled)
-          .map(fr => rows.find(row => row[dimensionIndex] === fr.key))
+          .filter((fr) => fr.enabled)
+          .map((fr) =>
+            rows.find((row) => formatNullable(row[dimensionIndex]) === fr.key),
+          )
       : rows;
 
     const isNarrow = gridSize && gridSize.width < 7;
@@ -64,6 +67,7 @@ export default class FunnelNormal extends Component {
       formatValue(dimension, {
         ...settings.column(cols[dimensionIndex]),
         jsx,
+        stringifyNull: true,
         majorWidth: 0,
       });
     const formatMetric = (metric, jsx = true) =>
@@ -72,7 +76,7 @@ export default class FunnelNormal extends Component {
         jsx,
         majorWidth: 0,
       });
-    const formatPercent = percent => `${(100 * percent).toFixed(2)} %`;
+    const formatPercent = (percent) => `${(100 * percent).toFixed(2)} %`;
 
     // Initial infos (required for step calculation)
     let infos = [
@@ -130,7 +134,7 @@ export default class FunnelNormal extends Component {
               col: cols[dimensionIndex],
             },
             {
-              key: getFriendlyName(cols[metricIndex]),
+              key: cols[metricIndex].display_name,
               value: row[metricIndex],
               col: cols[metricIndex],
             },
@@ -159,7 +163,7 @@ export default class FunnelNormal extends Component {
 
     const isClickable = onVisualizationClick != null;
 
-    const handleClick = e => {
+    const handleClick = (e) => {
       if (onVisualizationClick && visualizationIsClickable(infos[0].clicked)) {
         onVisualizationClick(e);
       }
@@ -172,14 +176,19 @@ export default class FunnelNormal extends Component {
         data-testid="funnel-chart"
       >
         <FunnelStep isFirst>
-          <Head isNarrow={isNarrow}>
+          <Head
+            isNarrow={isNarrow}
+            style={{ fontSize: isDashboard ? "0.8125rem" : "unset" }}
+          >
             <Ellipsified data-testid="funnel-chart-header">
               {formatDimension(sortedRows[0][dimensionIndex])}
             </Ellipsified>
           </Head>
           <FunnelStart isNarrow={isNarrow}>
             <Title>{formatMetric(sortedRows[0][metricIndex])}</Title>
-            <Subtitle>{getFriendlyName(cols[metricIndex])}</Subtitle>
+            <Subtitle>
+              <Ellipsified>{cols[metricIndex].display_name}</Ellipsified>
+            </Subtitle>
           </FunnelStart>
           {/* This part of code in used only to share height between .Start and .Graph columns. */}
           <Info isNarrow={isNarrow}>
@@ -193,7 +202,10 @@ export default class FunnelNormal extends Component {
 
           return (
             <FunnelStep key={index}>
-              <Head isNarrow={isNarrow}>
+              <Head
+                isNarrow={isNarrow}
+                style={{ fontSize: isDashboard ? "0.8125rem" : "unset" }}
+              >
                 <Ellipsified data-testid="funnel-chart-header">
                   {formatDimension(sortedRows[index + 1][dimensionIndex])}
                 </Ellipsified>
@@ -211,7 +223,9 @@ export default class FunnelNormal extends Component {
                 <Title>
                   <Ellipsified>{formatPercent(stepPercentage)}</Ellipsified>
                 </Title>
-                <Subtitle>
+                <Subtitle
+                  style={{ fontSize: isDashboard ? "0.8125rem" : "unset" }}
+                >
                   <Ellipsified>
                     {formatMetric(sortedRows[index + 1][metricIndex])}
                   </Ellipsified>
@@ -239,7 +253,7 @@ const GraphSection = ({
         height="100%"
         width="100%"
         className={cx(className, CS.absolute)}
-        onMouseMove={e => {
+        onMouseMove={(e) => {
           if (onHoverChange && info.hovered) {
             onHoverChange({
               ...info.hovered,
@@ -248,7 +262,7 @@ const GraphSection = ({
           }
         }}
         onMouseLeave={() => onHoverChange && onHoverChange(null)}
-        onClick={e => {
+        onClick={(e) => {
           if (onVisualizationClick && info.clicked) {
             onVisualizationClick({
               ...info.clicked,
@@ -261,7 +275,7 @@ const GraphSection = ({
       >
         <polygon
           opacity={1 - index * (0.9 / (infos.length + 1))}
-          fill={color("brand")}
+          fill={Color(color("brand")).hex()}
           points={`0 ${info.graph.startBottom}, 0 ${info.graph.startTop}, 1 ${info.graph.endTop}, 1 ${info.graph.endBottom}`}
         />
       </svg>

@@ -1,29 +1,29 @@
-import _ from "lodash";
+import _ from "underscore";
 
 import {
-  updateDataPermission,
-  SAVE_DATA_PERMISSIONS,
   LOAD_DATA_PERMISSIONS,
+  SAVE_DATA_PERMISSIONS,
   UPDATE_DATA_PERMISSION,
+  updateDataPermission,
 } from "metabase/admin/permissions/permissions";
 import {
   DataPermission,
-  DataPermissionValue,
   DataPermissionType,
+  DataPermissionValue,
 } from "metabase/admin/permissions/types";
 import {
-  createThunkAction,
-  createAction,
-  handleActions,
   combineReducers,
+  createAction,
+  createThunkAction,
+  handleActions,
   withRequestState,
 } from "metabase/lib/redux";
 import { GTAPApi } from "metabase/services";
 
-import { getPolicyKeyFromParams, getPolicyKey } from "./utils";
+import { getPolicyKey, getPolicyKeyFromParams } from "./utils";
 
 export const FETCH_POLICY = "metabase-enterprise/sandboxes/FETCH_POLICY";
-export const fetchPolicy = withRequestState(params => [
+export const fetchPolicy = withRequestState((params) => [
   "plugins",
   "sandboxesPlugin",
   "policies",
@@ -42,7 +42,7 @@ export const UPDATE_TABLE_SANDBOXING_PERMISSION =
   "metabase-enterprise/sandboxes/UPDATE_TABLE_SANDBOXING_PERMISSION";
 export const updateTableSandboxingPermission = createThunkAction(
   UPDATE_TABLE_SANDBOXING_PERMISSION,
-  params => async dispatch => {
+  (params) => async (dispatch) => {
     const { groupId, ...entityId } = params;
     return dispatch(
       updateDataPermission({
@@ -84,7 +84,7 @@ const groupTableAccessPolicies = handleActions(
           return state;
         }
 
-        const { entityId, metadata, groupId } = payload;
+        const { entityId, metadata, groupId, value, permissionInfo } = payload;
 
         // if user is unsandboxing a specific table,
         // remove the specific table's sandbox data
@@ -95,9 +95,11 @@ const groupTableAccessPolicies = handleActions(
           });
           const isTableSandboxed = key in state;
           const isUnsandboxingTable =
-            isTableSandboxed && payload.value !== DataPermissionValue.SANDBOXED;
+            isTableSandboxed &&
+            permissionInfo.permission === DataPermission.VIEW_DATA &&
+            value !== DataPermissionValue.SANDBOXED;
 
-          if (isTableSandboxed && isUnsandboxingTable) {
+          if (isUnsandboxingTable) {
             return _.omit(state, key);
           } else {
             return state;
@@ -109,12 +111,12 @@ const groupTableAccessPolicies = handleActions(
           const tables = database?.tables ?? [];
           // filter tables if there's a schema referenced in the entity id
           const entityTables = tables.filter(
-            table =>
+            (table) =>
               !entityId.schemaName || table.schema_name === entityId.schemaName,
           );
 
           // delete 0 to N sandboxes present in the state
-          const policyKeys = entityTables.map(table =>
+          const policyKeys = entityTables.map((table) =>
             getPolicyKeyFromParams({ groupId, tableId: table.id }),
           );
           return _.omit(state, policyKeys);

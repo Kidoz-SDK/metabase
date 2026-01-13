@@ -1,4 +1,3 @@
-/* eslint-disable react/prop-types */
 import { t } from "ttag";
 
 import { SearchFilterDateDisplay } from "metabase/search/components/SearchFilterDateDisplay";
@@ -21,6 +20,6 @@ export const LastEditedAtFilter: SearchFilterDropdown<"last_edited_at"> = {
       <SearchFilterDatePicker value={value} onChange={onChange} />
     </Box>
   ),
-  fromUrl: value => value,
-  toUrl: value => value,
+  fromUrl: (value) => value,
+  toUrl: (value) => value,
 };

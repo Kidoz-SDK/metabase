@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { render, screen } from "__support__/ui";
 import {
   createMockTimeline,
   createMockTimelineEvent,
@@ -26,7 +26,6 @@ const getProps = (
   event: createMockTimelineEvent(),
   timeline: createMockTimeline(),
   onSubmit: jest.fn(),
-  onCancel: jest.fn(),
   onClose: jest.fn(),
   ...opts,
 });

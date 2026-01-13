@@ -6,7 +6,9 @@ redirect_from:
 
 # Running Metabase on Docker
 
-Metabase provides an official Docker image via Dockerhub that can be used for deployments on any system that is running Docker.
+> To get fast, reliable, and secure deployment with none of the work or hidden costs that come with self-hosting, check out [Metabase Cloud](https://www.metabase.com/cloud/).
+
+Metabase provides an official Docker image via Docker Hub that can be used for deployments on any system that is running Docker.
 
 If you're trying to upgrade your Metabase version on Docker, check out these [upgrading instructions](upgrading-metabase.md).
 
@@ -44,7 +46,7 @@ docker run -d -p 12345:3000 --name metabase metabase/metabase
 
 ## Pro or Enterprise quick start
 
-Use this quick start if you have a [license token](../paid-features/activating-the-enterprise-edition.md) for a [paid version](https://www.metabase.com/pricing) of Metabase, and you want to run Metabase locally. See below for instructions on [running Metabase in production](#production-installation).
+Use this quick start if you have a [license token](../installation-and-operation/activating-the-enterprise-edition.md) for a [Pro or Enterprise version](https://www.metabase.com/pricing/) of Metabase, and you want to run Metabase locally. See below for instructions on [running Metabase in production](#production-installation).
 
 Assuming you have [Docker](https://www.docker.com/) installed and running, get the latest Docker image:
 
@@ -92,7 +94,6 @@ createdb metabaseappdb
 
 No need to add any tables; Metabase will create those on startup. And let's assume that database is accessible via `my-database-host:5432` with username `name` and password `password`.
 
-
 Here's an example Docker command that tells Metabase to use that database:
 
 ```
@@ -116,15 +117,16 @@ If you've already been running Metabase with the default application database (H
 
 Here's an example `docker-compose.yml` file for running Metabase with a PostgreSQL database `metabaseappdb`:
 
+> This is an example file and is not meant to be used when running Metabase in a production environment. Please refer to our guide about [How to run Metabase in production](https://www.metabase.com/learn/metabase-basics/administration/administration-and-operation/metabase-in-production)
+
 ```yml
-version: '3.9'
 services:
   metabase:
     image: metabase/metabase:latest
     container_name: metabase
     hostname: metabase
     volumes:
-    - /dev/urandom:/dev/random:ro
+      - /dev/urandom:/dev/random:ro
     ports:
       - 3000:3000
     environment:
@@ -142,13 +144,15 @@ services:
       timeout: 5s
       retries: 5
   postgres:
-    image: postgres:latest
+    image: postgres:16
     container_name: postgres
     hostname: postgres
     environment:
       POSTGRES_USER: metabase
       POSTGRES_DB: metabaseappdb
       POSTGRES_PASSWORD: mysecretpassword
+    volumes:
+      - ./pg_data:/var/lib/postgresql/data
     networks:
       - metanet1
 networks:
@@ -272,22 +276,21 @@ Here is an example `docker-compose.yml` file to start a Metabase Docker containe
 
 In addition to this example yml file, you'll need to create two files:
 
-- db_user.txt
-- db_password.txt
+- `db_user.txt`
+- `db_password.txt`
 
-These files should be in the same directory as the `docker-compose.yml`. Put the db_user in the db_user.txt file, and db_password in the db_password.txt file.
+These files should be in the same directory as the `docker-compose.yml`. Put the `db_user` in the `db_user.txt` file, and db_password in the `db_password.txt` file.
 
 Notice the "\_FILE" on the environment variables that have a secret:
 
 ```yml
-version: '3.9'
 services:
   metabase:
     image: metabase/metabase:latest
     container_name: metabase
     hostname: metabase
     volumes:
-    - /dev/urandom:/dev/random:ro
+      - /dev/urandom:/dev/random:ro
     ports:
       - 3000:3000
     environment:
@@ -297,6 +300,8 @@ services:
       MB_DB_USER_FILE: /run/secrets/db_user
       MB_DB_PASS_FILE: /run/secrets/db_password
       MB_DB_HOST: postgres
+    logging:
+      driver: local
     networks:
       - metanet1
     secrets:
@@ -324,23 +329,25 @@ networks:
   metanet1:
     driver: bridge
 secrets:
-   db_password:
-     file: db_password.txt
-   db_user:
-     file: db_user.txt
+  db_password:
+    file: db_password.txt
+  db_user:
+    file: db_user.txt
 ```
 
 We currently support the following [environment variables](../configuring-metabase/environment-variables.md) to be used as secrets:
 
-- MB_DB_USER
-- MB_DB_PASS
-- MB_DB_CONNECTION_URI
-- MB_EMAIL_SMTP_PASSWORD
-- MB_EMAIL_SMTP_USERNAME
-- MB_LDAP_PASSWORD
-- MB_LDAP_BIND_DN
+- `MB_DB_USER`
+- `MB_DB_PASS`
+- `MB_DB_CONNECTION_URI`
+- `MB_EMAIL_SMTP_PASSWORD`
+- `MB_EMAIL_SMTP_USERNAME`
+- `MB_LDAP_PASSWORD`
+- `MB_LDAP_BIND_DN`
 
 In order for the Metabase container to read the files and use the contents as a secret, the environment variable name needs to be appended with a "\_FILE" as explained above.
+
+> This is an example file and is not meant to be used when running Metabase in a production environment. Please refer to our guide about [How to run Metabase in production](https://www.metabase.com/learn/metabase-basics/administration/administration-and-operation/metabase-in-production).
 
 ## Troubleshooting
 

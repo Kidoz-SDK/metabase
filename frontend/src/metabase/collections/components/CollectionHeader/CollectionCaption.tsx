@@ -1,16 +1,18 @@
 import { useCallback } from "react";
 import { t } from "ttag";
 
+import { getCurrentUser } from "metabase/admin/datamodel/selectors";
 import {
   isEditableCollection,
-  isRootTrashCollection,
   isInstanceAnalyticsCollection,
+  isRootTrashCollection,
 } from "metabase/collections/utils";
-import { color } from "metabase/lib/colors";
+import { useSelector } from "metabase/lib/redux";
 import {
   PLUGIN_COLLECTIONS,
   PLUGIN_COLLECTION_COMPONENTS,
 } from "metabase/plugins";
+import { getIsTenantUser } from "metabase/selectors/user";
 import { Icon } from "metabase/ui";
 import type { Collection } from "metabase-types/api";
 
@@ -21,7 +23,7 @@ import {
   CaptionTitleContainer,
 } from "./CollectionCaption.styled";
 
-export interface CollectionCaptionProps {
+interface CollectionCaptionProps {
   collection: Collection;
   onUpdateCollection: (entity: Collection, values: Partial<Collection>) => void;
 }
@@ -30,7 +32,8 @@ export const CollectionCaption = ({
   collection,
   onUpdateCollection,
 }: CollectionCaptionProps): JSX.Element => {
-  const isEditable = isEditableCollection(collection);
+  const currentUser = useSelector(getCurrentUser);
+  const isEditable = isEditableCollection(collection, { currentUser });
   const hasDescription = Boolean(collection.description);
 
   const handleChangeName = useCallback(
@@ -48,7 +51,7 @@ export const CollectionCaption = ({
   );
 
   return (
-    <CaptionRoot>
+    <CaptionRoot data-testid="collection-caption">
       <CaptionTitleContainer>
         <CollectionCaptionIcon collection={collection} />
         <CaptionTitle
@@ -58,19 +61,25 @@ export const CollectionCaption = ({
           isDisabled={!isEditable}
           data-testid="collection-name-heading"
           onChange={handleChangeName}
+          maxLength={100}
         />
       </CaptionTitleContainer>
       {(isEditable || hasDescription) && (
         <CaptionDescription
-          key={collection.id}
-          initialValue={collection.description}
+          key={
+            // Including the description in the key prevents a stale value from
+            // being stored in the state of EditableText if the collection's
+            // description is modified in another component
+            `${collection.id}-${collection.description}`
+          }
+          description={collection.description}
           placeholder={t`Add description`}
           isVisible={Boolean(collection.description)}
-          isDisabled={!isEditable}
-          isOptional
-          isMultiline
-          isMarkdown
+          canWrite={isEditable}
           onChange={handleChangeDescription}
+          data-testid="collection-description-in-caption"
+          left={0}
+          maxLength={255}
         />
       )}
     </CaptionRoot>
@@ -78,26 +87,33 @@ export const CollectionCaption = ({
 };
 
 const CollectionCaptionIcon = ({ collection }: { collection: Collection }) => {
+  const isTenantUser = useSelector(getIsTenantUser);
+
   if (isInstanceAnalyticsCollection(collection)) {
     return (
       <PLUGIN_COLLECTION_COMPONENTS.CollectionInstanceAnalyticsIcon
         size={24}
-        color={color("brand")}
+        c="brand"
         collection={collection}
         entity="collection"
       />
     );
   }
 
+  if (PLUGIN_COLLECTIONS.isSyncedCollection(collection) && !isTenantUser) {
+    // external users should see the normal icon, they should not know about what synced collections are
+    return <Icon name="synced_collection" size={24} c="brand" />;
+  }
+
   if (isRootTrashCollection(collection)) {
-    return <Icon name="trash" size={24} />;
+    return <Icon name="trash" size={24} c="text-disabled" />;
   }
 
   if (
     collection.archived &&
     PLUGIN_COLLECTIONS.isRegularCollection(collection)
   ) {
-    return <Icon name="folder" size={24} color="text-light" />;
+    return <Icon name="folder" size={24} c="text-disabled" />;
   }
 
   return (

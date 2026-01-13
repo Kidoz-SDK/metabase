@@ -1,9 +1,11 @@
+// eslint-disable-next-line no-restricted-imports
 import { css } from "@emotion/react";
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
 import type { HTMLAttributes } from "react";
 
 import type { ButtonProps } from "metabase/ui";
-import { Stack, Button, Group, TextInput } from "metabase/ui";
+import { Button, Group, Stack, TextInput } from "metabase/ui";
 
 export const SearchUserPickerContainer = styled(Stack)`
   overflow: hidden;
@@ -23,7 +25,7 @@ export const SearchUserPickerContent = styled(Stack)`
 `;
 
 export const SearchUserSelectBox = styled(Stack)`
-  border: ${({ theme }) => theme.fn.themeColor("border")} 1px solid;
+  border: 1px solid var(--mb-color-border);
   border-radius: ${({ theme }) => theme.radius.md};
 `;
 
@@ -32,16 +34,14 @@ export const SelectedUserButton = styled(Button)<
 >`
   ${({ theme }) => {
     const primaryColor = theme.fn.themeColor("brand");
-    const backgroundColor = theme.fn.lighten(primaryColor, 0.8);
-    const hoverBackgroundColor = theme.fn.lighten(primaryColor, 0.6);
 
     return css`
-      background-color: ${backgroundColor};
+      background-color: color-mix(in srgb, ${primaryColor}, white 88%);
       border: 0;
 
       &:hover {
-        background-color: ${hoverBackgroundColor};
+        background-color: color-mix(in srgb, ${primaryColor}, white 60%);
       }
     `;
   }}
-`;
+` as unknown as typeof Button;

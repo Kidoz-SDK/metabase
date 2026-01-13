@@ -1,25 +1,25 @@
 import { dissoc } from "icepick";
 import { t } from "ttag";
 
+import { useGetDefaultCollectionId } from "metabase/collections/hooks";
+import { useEscapeToCloseModal } from "metabase/common/hooks/use-escape-to-close-modal";
 import {
-  getInstanceAnalyticsCustomCollection,
-  isInstanceAnalyticsCollection,
-} from "metabase/collections/utils";
-import { useCollectionListQuery } from "metabase/common/hooks";
-import ModalContent from "metabase/components/ModalContent";
-import { CopyDashboardFormConnected } from "metabase/dashboard/containers/CopyDashboardForm";
-import { CopyQuestionForm } from "metabase/questions/components/CopyQuestionForm";
-import { Flex, Loader } from "metabase/ui";
+  CopyDashboardFormConnected,
+  type CopyDashboardFormProperties,
+} from "metabase/dashboard/containers/CopyDashboardForm";
+import { DocumentCopyForm } from "metabase/documents/components/DocumentCopyForm/DocumentCopyForm";
+import { CopyCardForm } from "metabase/questions/components/CopyCardForm/CopyCardForm";
+import { Modal } from "metabase/ui";
 
 interface EntityCopyModalProps {
   entityType: string;
   entityObject: any;
-  copy: (data: any) => void;
+  copy: (data: any) => Promise<any>;
   title?: string;
   onClose: () => void;
-  onSaved: (newEntityObject: any) => void;
+  onSaved: (newEntityObject?: any) => void;
   overwriteOnInitialValuesChange?: boolean;
-  onValuesChange?: (values: Record<string, unknown>) => void;
+  onValuesChange?: (values: CopyDashboardFormProperties) => void;
   form?: any;
 }
 
@@ -32,18 +32,16 @@ const EntityCopyModal = ({
   onSaved,
   ...props
 }: EntityCopyModalProps) => {
-  const { data: collections = [] } = useCollectionListQuery();
-
   const resolvedObject =
     typeof entityObject?.getPlainObject === "function"
       ? entityObject.getPlainObject()
       : entityObject;
+  const defaultCollectionId = useGetDefaultCollectionId(
+    resolvedObject?.collection?.id,
+  );
 
-  if (isInstanceAnalyticsCollection(resolvedObject?.collection)) {
-    const customCollection = getInstanceAnalyticsCustomCollection(collections);
-    if (customCollection) {
-      resolvedObject.collection_id = customCollection.id;
-    }
+  if (defaultCollectionId) {
+    resolvedObject.collection_id = defaultCollectionId;
   }
 
   const initialValues = {
@@ -51,44 +49,45 @@ const EntityCopyModal = ({
     name: resolvedObject.name + " - " + t`Duplicate`,
   };
 
-  const renderForm = (props: any) => {
-    switch (entityType) {
-      case "dashboards":
-        return (
-          <CopyDashboardFormConnected
-            onSubmit={copy}
-            onClose={onClose}
-            onSaved={onSaved}
-            collections={collections}
-            {...props}
-          />
-        );
-      case "questions":
-        return (
-          <CopyQuestionForm
-            onSubmit={copy}
-            onClose={onClose}
-            onSaved={onSaved}
-            collections={collections}
-            {...props}
-          />
-        );
-    }
-  };
+  useEscapeToCloseModal(onClose);
 
   return (
-    <ModalContent
+    <Modal
       title={title || t`Duplicate "${resolvedObject.name}"`}
+      opened
       onClose={onClose}
+      closeOnEscape={false}
     >
-      {!collections?.length ? (
-        <Flex justify="center" p="lg">
-          <Loader />
-        </Flex>
-      ) : (
-        renderForm({ ...props, initialValues })
+      {entityType === "dashboards" && (
+        <CopyDashboardFormConnected
+          onSubmit={copy}
+          onClose={onClose}
+          onSaved={onSaved}
+          initialValues={initialValues}
+          {...props}
+          originalDashboardId={resolvedObject.id}
+        />
       )}
-    </ModalContent>
+      {entityType === "cards" && (
+        <CopyCardForm
+          onSubmit={copy}
+          onCancel={onClose}
+          onSaved={onSaved}
+          initialValues={initialValues}
+          model={entityObject?.type}
+          {...props}
+        />
+      )}
+      {entityType === "documents" && (
+        <DocumentCopyForm
+          onSubmit={copy}
+          onCancel={onClose}
+          onSaved={onSaved}
+          initialValues={initialValues}
+          {...props}
+        />
+      )}
+    </Modal>
   );
 };
 

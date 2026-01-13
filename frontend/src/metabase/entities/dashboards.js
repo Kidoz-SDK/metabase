@@ -1,6 +1,10 @@
 import { t } from "ttag";
 
-import { dashboardApi } from "metabase/api";
+import {
+  dashboardApi,
+  useGetDashboardQuery,
+  useListDashboardsQuery,
+} from "metabase/api/dashboard";
 import {
   canonicalCollectionId,
   isRootTrashCollection,
@@ -8,20 +12,14 @@ import {
 import {
   getCollectionType,
   normalizedCollection,
-} from "metabase/entities/collections";
+} from "metabase/entities/collections/utils";
 import { color } from "metabase/lib/colors";
 import {
   createEntity,
   entityCompatibleQuery,
   undo,
 } from "metabase/lib/entities";
-import {
-  compose,
-  withAction,
-  withAnalytics,
-  withRequestState,
-} from "metabase/lib/redux";
-import * as Urls from "metabase/lib/urls/dashboards";
+import { compose, withAction, withRequestState } from "metabase/lib/redux";
 import { addUndo } from "metabase/redux/undo";
 
 const COPY_ACTION = `metabase/entities/dashboards/COPY`;
@@ -29,13 +27,22 @@ const COPY_ACTION = `metabase/entities/dashboards/COPY`;
 /**
  * @deprecated use "metabase/api" instead
  */
-const Dashboards = createEntity({
+export const Dashboards = createEntity({
   name: "dashboards",
   nameOne: "dashboard",
   path: "/api/dashboard",
 
+  // eslint-disable-next-line ttag/no-module-declaration -- see metabase#55045
   displayNameOne: t`dashboard`,
+  // eslint-disable-next-line ttag/no-module-declaration -- see metabase#55045
   displayNameMany: t`dashboards`,
+
+  rtk: {
+    getUseGetQuery: () => ({
+      useGetQuery: useGetDashboardQuery,
+    }),
+    useListQuery: useListDashboardsQuery,
+  },
 
   api: {
     list: (entityQuery, dispatch) =>
@@ -114,13 +121,12 @@ const Dashboards = createEntity({
     copy: compose(
       withAction(COPY_ACTION),
       // NOTE: unfortunately we can't use Dashboard.withRequestState, etc because the entity isn't defined yet
-      withRequestState(dashboard => [
+      withRequestState((dashboard) => [
         "entities",
         "dashboard",
         dashboard.id,
         "copy",
       ]),
-      withAnalytics("entities", "dashboard", "copy"),
     )(
       (entityObject, overrides, { notify } = {}) =>
         async (dispatch, getState) => {
@@ -145,7 +151,7 @@ const Dashboards = createEntity({
   },
 
   actions: {
-    save: dashboard => async dispatch => {
+    save: (dashboard) => async (dispatch) => {
       const savedDashboard = await entityCompatibleQuery(
         dashboard,
         dispatch,
@@ -167,11 +173,9 @@ const Dashboards = createEntity({
   },
 
   objectSelectors: {
-    getName: dashboard => dashboard && dashboard.name,
-    getUrl: dashboard => dashboard && Urls.dashboard(dashboard),
-    getCollection: dashboard =>
+    getName: (dashboard) => dashboard && dashboard.name,
+    getCollection: (dashboard) =>
       dashboard && normalizedCollection(dashboard.collection),
-    getIcon: () => ({ name: "dashboard" }),
     getColor: () => color("dashboard"),
   },
 
@@ -180,5 +184,3 @@ const Dashboards = createEntity({
     return type && `collection=${type}`;
   },
 });
-
-export default Dashboards;

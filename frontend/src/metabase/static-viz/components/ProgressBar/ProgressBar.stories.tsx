@@ -1,25 +1,40 @@
-import type { ComponentStory } from "@storybook/react";
+import type { StoryFn } from "@storybook/react";
 
-import ProgressBar from "./ProgressBar";
+import { StaticVisualization } from "../StaticVisualization";
+import type { StaticChartProps } from "../StaticVisualization/types";
+
 import { BELOW_GOAL, EXCEEDS_GOAL, REACHED_GOAL, ZERO } from "./stories-data";
 
 export default {
-  title: "static-viz/ProgressBar",
-  component: ProgressBar,
+  title: "Viz/Static Viz/ProgressBar",
+  component: StaticVisualization,
 };
 
-const Template: ComponentStory<typeof ProgressBar> = args => {
-  return <ProgressBar {...args} />;
+const Template: StoryFn<StaticChartProps> = (args) => {
+  return <StaticVisualization {...args} />;
 };
 
-export const Default = Template.bind({});
-Default.args = ZERO;
+export const Default = {
+  render: Template,
+  args: ZERO,
+};
 
-export const BelowGoal = Template.bind({});
-BelowGoal.args = BELOW_GOAL;
+export const BelowGoal = {
+  render: Template,
+  args: BELOW_GOAL,
+};
 
-export const ReachedGoal = Template.bind({});
-ReachedGoal.args = REACHED_GOAL;
+export const ReachedGoal = {
+  render: Template,
+  args: REACHED_GOAL,
+};
 
-export const ExceedsGoal = Template.bind({});
-ExceedsGoal.args = EXCEEDS_GOAL;
+export const ExceedsGoal = {
+  render: Template,
+  args: EXCEEDS_GOAL,
+};
+
+export const Watermark = {
+  render: Template,
+  args: { ...EXCEEDS_GOAL, hasDevWatermark: true },
+};

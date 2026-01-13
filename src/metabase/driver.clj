@@ -1,89 +1,39 @@
+#_{:clj-kondo/ignore [:metabase/namespace-name]}
 (ns metabase.driver
   "Metabase Drivers handle various things we need to do with connected data warehouse databases, including things like
-  introspecting their schemas and processing and running MBQL queries. Drivers must implement some or all of the
-  multimethods defined below, and register themselves with a call to [[metabase.driver/register!]].
+   introspecting their schemas and processing and running MBQL queries. Drivers must implement some or all of the
+   multimethods defined below, and register themselves with a call to [[metabase.driver/register!]].
 
-  SQL-based drivers can use the `:sql` driver as a parent, and JDBC-based SQL drivers can use `:sql-jdbc`. Both of
-  these drivers define additional multimethods that child drivers should implement; see [[metabase.driver.sql]] and
-  [[metabase.driver.sql-jdbc]] for more details."
+   SQL-based drivers can use the `:sql` driver as a parent, and JDBC-based SQL drivers can use `:sql-jdbc`. Both of
+   these drivers define additional multimethods that child drivers should implement; see [[metabase.driver.sql]] and
+   [[metabase.driver.sql-jdbc]] for more details."
+  (:refer-clojure :exclude [some mapv empty?])
+  #_{:clj-kondo/ignore [:metabase/modules]}
   (:require
+   [clojure.java.io :as io]
    [clojure.set :as set]
    [clojure.string :as str]
-   [java-time.api :as t]
+   [metabase.auth-provider.core :as auth-provider]
+   [metabase.classloader.core :as classloader]
    [metabase.driver.impl :as driver.impl]
-   [metabase.models.setting :as setting :refer [defsetting]]
-   [metabase.plugins.classloader :as classloader]
+   [metabase.driver.settings]
+   [metabase.query-processor.error-type :as qp.error-type]
    [metabase.util :as u]
-   [metabase.util.i18n :refer [deferred-tru tru]]
-   [metabase.util.log :as log]
+   [metabase.util.i18n :refer [tru]]
+   [metabase.util.json :as json]
    [metabase.util.malli :as mu]
-   [potemkin :as p]
-   [toucan2.core :as t2]))
+   [metabase.util.malli.registry :as mr]
+   [metabase.util.performance :refer [mapv empty?]]
+   [potemkin :as p]))
 
 (set! *warn-on-reflection* true)
 
-(declare notify-database-updated)
+(comment metabase.driver.settings/keep-me)
 
-(defn- notify-all-databases-updated
-  "Send notification that all Databases should immediately release cached resources (i.e., connection pools).
-
-  Currently only used below by [[report-timezone]] setter (i.e., only used when report timezone changes). Reusing
-  pooled connections with the old session timezone can have weird effects, especially if report timezone is changed to
-  `nil` (meaning subsequent queries will not attempt to change the session timezone) or something considered invalid
-  by a given Database (meaning subsequent queries will fail to change the session timezone)."
-  []
-  (doseq [{driver :engine, id :id, :as database} (t2/select 'Database)]
-    (try
-      (notify-database-updated driver database)
-      (catch Throwable e
-        (log/errorf e "Failed to notify %s Database %s updated" driver id)))))
-
-(defn- short-timezone-name [timezone-id]
-  (let [^java.time.ZoneId zone (if (seq timezone-id)
-                                 (t/zone-id timezone-id)
-                                 (t/zone-id))]
-    (.getDisplayName
-     zone
-     java.time.format.TextStyle/SHORT
-     (java.util.Locale/getDefault))))
-
-(defn- long-timezone-name [timezone-id]
-  (if (seq timezone-id)
-    timezone-id
-    (str (t/zone-id))))
-
-(defn- update-send-pulse-triggers-timezone!
-  []
-  (classloader/require 'metabase.task.send-pulses)
-  ((resolve 'metabase.task.send-pulses/update-send-pulse-triggers-timezone!)))
-
-(defsetting report-timezone
-  (deferred-tru "Connection timezone to use when executing queries. Defaults to system timezone.")
-  :visibility :settings-manager
-  :export?    true
-  :audit      :getter
-  :setter
-  (fn [new-value]
-    (setting/set-value-of-type! :string :report-timezone new-value)
-    (notify-all-databases-updated)
-    (update-send-pulse-triggers-timezone!)))
-
-(defsetting report-timezone-short
-  "Current report timezone abbreviation"
-  :visibility :public
-  :export?    true
-  :setter     :none
-  :getter     (fn [] (short-timezone-name (report-timezone)))
-  :doc        false)
-
-(defsetting report-timezone-long
-  "Current report timezone string"
-  :visibility :public
-  :export?    true
-  :setter     :none
-  :getter     (fn [] (long-timezone-name (report-timezone)))
-  :doc        false)
-
+(p/import-vars
+ [metabase.driver.settings
+  report-timezone
+  report-timezone!])
 
 ;;; +----------------------------------------------------------------------------------------------------------------+
 ;;; |                                                 Current Driver                                                 |
@@ -111,7 +61,6 @@
   {:style/indent 1}
   [driver & body]
   `(do-with-driver ~driver (fn [] ~@body)))
-
 
 ;;; +----------------------------------------------------------------------------------------------------------------+
 ;;; |                             Driver Registration / Hierarchy / Multimethod Dispatch                             |
@@ -183,11 +132,15 @@
 
 (declare initialize!)
 
-(defn the-initialized-driver
+(mu/defn the-initialized-driver
   "Like [[the-driver]], but also initializes the driver if not already initialized."
-  [driver]
-  (let [driver (the-driver driver)]
-    (driver.impl/initialize-if-needed! driver initialize!)
+  [driver :- [:or :keyword :string]]
+  (let [driver (keyword driver)]
+    ;; Fastpath: an initialized driver `driver` is always already registered. Checking for `initialized?` is faster
+    ;; than doing the `registered?` check inside `load-driver-namespace-if-needed!`.
+    (when-not (driver.impl/initialized? driver)
+      (driver.impl/load-driver-namespace-if-needed! driver)
+      (driver.impl/initialize-if-needed! driver initialize!))
     driver))
 
 (defn dispatch-on-initialized-driver
@@ -196,7 +149,6 @@
   return information about the driver, but do not actually connect to any databases.)"
   [driver & _]
   (the-initialized-driver driver))
-
 
 ;;; +----------------------------------------------------------------------------------------------------------------+
 ;;; |                                       Interface (Multimethod Defintions)                                       |
@@ -243,7 +195,6 @@
   ;; implementation.
   ;;
   ;; `initialize-if-needed!` takes care to make sure a driver's parent(s) are initialized before initializing a driver.
-
 
 (defmethod initialize! :default [_]) ; no-op
 
@@ -309,13 +260,37 @@
   [_ _]
   nil)
 
+(defmulti do-with-resilient-connection
+  "Execute function `f` within a context that may recover (on-demand) from connection failures.
+  `f` must be eager."
+  {:added "0.55.9" :arglists '([driver database f])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
+(defmethod do-with-resilient-connection
+  ::driver
+  [driver database f] (f driver database))
+
+(defmulti describe-database*
+  "Impl multimethod for [[describe-database]]"
+  {:added "0.56.3" :arglists '([driver database])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
 (defmulti describe-database
   "Return a map containing information that describes all of the tables in a `database`, an instance of the `Database`
   model. It is expected that this function will be peformant and avoid draining meaningful resources of the database.
-  Results should match the [[metabase.sync.interface/DatabaseMetadata]] schema."
+  Results should match the [[metabase.sync.interface/DatabaseMetadata]] schema.
+  Multimethod for backwards compatibility, but should not be extended directly, should instead implement [[describe-database*]].
+  Default impl invokes [[describe-database*]] wrapped in [[do-with-resilient-connection]]"
   {:added "0.32.0" :arglists '([driver database])}
   dispatch-on-initialized-driver
   :hierarchy #'hierarchy)
+
+(defmethod describe-database
+  ::driver
+  [driver database]
+  (do-with-resilient-connection driver database describe-database*))
 
 (defmulti describe-table
   "Return a map containing a single field `:fields` that describes the fields in a `table`. `database` will be an
@@ -349,6 +324,20 @@
   dispatch-on-initialized-driver
   :hierarchy #'hierarchy)
 
+(defmulti describe-indexes
+  "Returns a reducible collection of maps, each containing information about the indexes of a database.
+  Currently we only sync single column indexes or the first column of a composite index. We currently only support
+   indexes on unnested fields (i.e., where parent_id is null).
+
+  Takes keyword arguments to narrow down the results to a set of
+  `schema-names` or `table-names`.
+
+  Results match [[metabase.sync.interface/FieldIndexMetadata]].
+  Results are optionally filtered by `schema-names` and `table-names` provided."
+  {:added "0.51.4" :arglists '([driver database & {:keys [schema-names table-names]}])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
 (defmulti escape-entity-name-for-metadata
   "escaping for when calling `.getColumns` or `.getTables` on table names or schema names. Useful for when a database
   driver has difference escaping rules for table or schema names when used from metadata.
@@ -361,8 +350,8 @@
 (defmethod escape-entity-name-for-metadata :default [_driver table-name] table-name)
 
 (defmulti describe-table-fks
-  "Return information about the foreign keys in a `table`. Required for drivers that support `:foreign-keys` but not
-  `:describe-fks`. Results should match the [[metabase.sync.interface/FKMetadata]] schema."
+  "Return information about the foreign keys in a `table`. Required for drivers that support :metadata/key-constraints
+  but not :describe-fks. Results should match the [[metabase.sync.interface/FKMetadata]] schema."
   {:added "0.32.0" :deprecated "0.49.0" :arglists '([driver database table])}
   dispatch-on-initialized-driver
   :hierarchy #'hierarchy)
@@ -395,8 +384,7 @@
     "Schema for a map containing information about a connection property we should ask the user to supply when setting up
   a new database, as returned by an implementation of `connection-properties`."
     (s/constrained
-     {
-      ;; The key that should be used to store this property in the `details` map.
+     {;; The key that should be used to store this property in the `details` map.
       :name su/NonBlankString
 
       ;; Human-readable name that should be displayed to the User in UI for editing this field.
@@ -442,6 +430,14 @@
   dispatch-on-uninitialized-driver
   :hierarchy #'hierarchy)
 
+(defmulti extra-info
+  "extra driver info"
+  {:added "0.56.0" :arglists '([driver])}
+  dispatch-on-uninitialized-driver
+  :hierarchy #'hierarchy)
+
+(defmethod extra-info ::driver [_] nil)
+
 (defmulti execute-reducible-query
   "Execute a native query against that database and return rows that can be reduced using `transduce`/`reduce`.
 
@@ -465,15 +461,60 @@
   dispatch-on-initialized-driver
   :hierarchy #'hierarchy)
 
+(defmulti query-result-metadata
+  "Optional. Efficiently calculate metadata about the columns that would be returned if we were to run a
+  `query` (hopefully without actually running), for example:
+
+    (query-results-metadata
+     :postgres
+     {:lib/type :mbql/query
+      :stages   [{:lib/type :mbql.stage/native
+                  :native   \"SELECT * FROM venues WHERE id = ?\"
+                  :args     [1]}]
+      ...})
+    =>
+    [{:lib/type      :metadata/column
+      :name          \"ID\"
+      :database-type \"BIGINT\"
+      :base-type     :type/BigInteger}
+     {:lib/type      :metadata/column
+      :name          \"NAME\"
+      :database-type \"CHARACTER VARYING\"
+      :base-type     :type/Text}
+      ...]
+
+  Metadata should be returned as a sequence of column maps matching the `:metabase.lib.schema.metadata/column` shape.
+
+  This is needed in certain circumstances such as saving native queries before they have been run; metadata for
+  MBQL-only queries can usually be determined by looking at the query itself without any driver involvement.
+
+  If this method does need to be invoked, ideally it can calculate this information without actually having to run the
+  query in question; it that is not possible, ideally we'd run a faster version of the query with the equivalent of
+  `LIMIT 0` or `LIMIT 1`.
+
+  A naive default implementation of this method lives in [[metabase.query-processor.metadata]] that runs the query in
+  question with a `LIMIT 1` added to it. Drivers that can infer result metadata in a more performant way (i.e.,
+  without actually running the query) should implement this method.
+
+  The `:sql-jdbc` parent driver provides a default implementation for JDBC-based drivers
+  in [[metabase.driver.sql-jdbc.metadata/query-result-metadata]], so you shouldn't need to implement this yourself if
+  your driver derives from `:sql-jdbc`. For other drivers, please use this implementation as a reference when working
+  on your own one.
+
+  There is no guarantee that `query` is already fully compiled from MBQL to the appropriate native query
+  language (e.g. SQL), so you should call [[metabase.query-processor.compile/compile]] to get a fully-compiled native
+  query."
+  {:added "0.51.0", :arglists '([driver query])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
 (def features
   "Set of all features a driver can support."
-  #{;; Does this database support following foreign key relationships while querying?
-    ;; Note that this is different from supporting primary key and foreign key constraints in the schema; see below.
-    :foreign-keys
-
-    ;; Does this database track and enforce primary key and foreign key constraints in the schema?
-    ;; SQL query engines like Presto and Athena do not track these, though they can query across FKs.
-    ;; See :foreign-keys above.
+  #{;; Does this database track and enforce primary key and foreign key constraints in the schema?
+    ;; Is the database capable of reporting columns as PK or FK? (Relevant during sync.)
+    ;;
+    ;; Not to be confused with Metabase's notion of foreign key columns. Those are user definable and power eg.
+    ;; implicit joins.
     :metadata/key-constraints
 
     ;; Does this database support nested fields for any and every field except primary key (e.g. Mongo)?
@@ -511,9 +552,22 @@
     ;; \"avg(x + y)\"
     :expression-aggregations
 
+    ;; Does the driver support expressions consisting of a single literal value like `1`, `\"hello\"`, and `false`.
+    :expression-literals
+
     ;; Does the driver support using a query as the `:source-query` of another MBQL query? Examples are CTEs or
     ;; subselects in SQL queries.
     :nested-queries
+
+    ;; Does this driver support native template tag parameters of type `:card`, e.g. in a native query like
+    ;;
+    ;;    SELECT * FROM {{card}}
+    ;;
+    ;; do we support substituting `{{card}}` with another compiled (nested) query?
+    ;;
+    ;; By default, this is true for drivers that support `:native-parameters` and `:nested-queries`, but drivers can opt
+    ;; out if they do not support Card ID template tag parameters.
+    :native-parameter-card-reference
 
     ;; Does the driver support persisting models
     :persist-models
@@ -531,12 +585,18 @@
     ;; DEFAULTS TO TRUE.
     :case-sensitivity-string-filter-options
 
+    ;; Implicit joins require :left-join (only) to work.
     :left-join
     :right-join
     :inner-join
     :full-join
 
     :regex
+
+    ;; Added in 57.x; whether the driver in question supports lookaheads and lookbehinds in regular expressions; by
+    ;; default this is true if the driver supports `:regex` but can be disabled for drivers where this is not true,
+    ;; like BigQuery.
+    :regex/lookaheads-and-lookbehinds
 
     ;; Does the driver support advanced math expressions such as log, power, ...
     :advanced-math-expressions
@@ -575,9 +635,21 @@
     ;; DEFAULTS TO TRUE
     :schemas
 
+    ;; Does the driver support multi-level-schema for e.g. multicatalog support in databricks
+    :multi-level-schema
+
+    ;; Does the driver support table renaming
+    :rename
+
+    ;; Does the driver support atomic multi-table renaming
+    :atomic-renames
+
     ;; Does the driver support custom writeback actions. Drivers that support this must
     ;; implement [[execute-write-query!]]
     :actions/custom
+
+    ;; Does the driver support editing data within database tables.
+    :actions/data-editing
 
     ;; Does changing the JVM timezone allow producing correct results? (See #27876 for details.)
     :test/jvm-timezone-setting
@@ -591,6 +663,7 @@
     ;; Does the driver require specifying a collection (table) for native queries? (mongo)
     :native-requires-specified-collection
 
+    ;; Index sync is turned off across the application as it is not used ATM.
     ;; Does the driver support column(s) support storing index info
     :index-info
 
@@ -601,6 +674,10 @@
     ;; Does the driver support a faster `sync-fields` step by fetching all FK metadata in a single collection?
     ;; if so, `metabase.driver/describe-fields` must be implemented instead of `metabase.driver/describe-table`
     :describe-fields
+
+    ;; Does the driver support a faster `sync-indexes` step by fetching all index metadata in a single collection?
+    ;; If true, `metabase.driver/describe-indexes` must be implemented instead of `metabase.driver/describe-table-indexes`
+    :describe-indexes
 
     ;; Does the driver support automatically adding a primary key column to a table for uploads?
     ;; If so, Metabase will add an auto-incrementing primary key column called `_mb_row_id` for any table created or
@@ -617,12 +694,111 @@
     ;; many databases in it.
     :connection/multiple-databases
 
+    ;; Does the driver support identifiers for tables and columns that contain spaces. Defaults to `false`.
+    :identifiers-with-spaces
+
+    ;; Does this driver support UUID type
+    :uuid-type
+
+    ;; Does this driver support splitting strings and extracting a part?
+    :split-part
+
+    ;; Does this driver support collation settings on text fields?
+    :collate
+
+    ;; True if this driver requires `:temporal-unit :default` on all temporal field refs, even if no temporal
+    ;; bucketing was specified in the query.
+    ;; Generally false, but a few time-series based analytics databases (eg. Druid) require it.
+    :temporal/requires-default-unit
+
     ;; Does this driver support window functions like cumulative count and cumulative sum? (default: false)
     :window-functions/cumulative
 
     ;; Does this driver support the new `:offset` MBQL clause added in 50? (i.e. SQL `lag` and `lead` or equivalent
     ;; functions)
-    :window-functions/offset})
+    :window-functions/offset
+
+    ;; Does this driver support parameterized sql, eg. in prepared statements?
+    :parameterized-sql
+
+    ;; Does this driver support the :distinct-where function?
+    :distinct-where
+
+    ;; Does this driver support sandboxing with saved questions?
+    :saved-question-sandboxing
+
+    ;; Does this driver support casting text and floats to integers? (`integer()` custom expression function)
+    :expressions/integer
+
+    ;; Does this driver support casting values to text? (`text()` custom expression function)
+    :expressions/text
+
+    ;; Does this driver support casting text to dates? (`date()` custom expression function)
+    :expressions/date
+
+    ;; Does this driver support casting text to datetimes?? (`datetime()` custom expression function)
+    :expressions/datetime
+
+    ;; Does this driver support casting text to floats? (`float()` custom expression function)
+    :expressions/float
+
+    ;; Does this driver support returning the current date? (`today()` custom expression function)
+    :expressions/today
+
+    ;; Does this driver support "temporal-unit" template tags in native queries?
+    :native-temporal-units
+
+    ;; Does this driver support creating tables on their own without adding data?
+    :test/create-table-without-data
+
+    ;; Does this driver support transforms with a table as the target?
+    :transforms/table
+
+    ;; Does this driver support executing python transforms?
+    :transforms/python
+
+    ;; Does this driver support calculating dependencies of native queries?
+    :dependencies/native
+
+    ;; Does this driver properly support the table-exists? method for checking table existence?
+    :metadata/table-existence-check
+
+    ;; Whether the driver supports loading dynamic test datasets on each test run. Eg. datasets with names like
+    ;; `checkins:4-per-minute` are created dynamically in each test run. This should be truthy for every driver we test
+    ;; against except for Athena and Databricks which currently require test data to be loaded separately.
+    :test/dynamic-dataset-loading
+
+    ;; Some DBs allow you to connect to a DB that doesn't exist by creating it for you.
+    ;; This is to allow such DBs to opt out of tests that rely on not being able to connect to non-existent DBs.
+    :test/creates-db-on-connect
+
+    ;; For some cloud DBs the test database is never created, and can't or shouldn't be destroyed.
+    ;; This is to allow avoiding destroying the test DBs of such cloud DBs.
+    :test/cannot-destroy-db
+
+    ;; There are drivers that support uuids in queries, but not in create table as eg. Athena.
+    :test/uuids-in-create-table-statements
+
+    ;; Does this driver support Metabase's database routing feature?
+    :database-routing
+
+    ;; Does this driver support replication?
+    :database-replication
+
+    ;; whether this driver supports checking table writeable permissions
+    :metadata/table-writable-check
+
+    ;; Does this driver support creating a java.sql.Statement via a Connection?
+    :jdbc/statements
+
+    ;; Does this driver provide :database-default on (describe-fields) or (describe-table)
+    :describe-default-expr
+
+    ;; Does this driver provide :database-is-nullable on (describe-fields) or (describe-table)
+    :describe-is-nullable
+
+    ;; Does this driver provide :database-is-generated on (describe-fields) or (describe-table)
+    :describe-is-generated})
 
 (defmulti database-supports?
   "Does this driver and specific instance of a database support a certain `feature`?
@@ -630,7 +806,7 @@
   Note that it's the same set of `driver-features` with respect to
   both database-supports? and [[supports?]])
 
-  Database is guaranteed to be a Database instance.
+  Database is guaranteed to be a `:metabase.lib.schema.metadata/database` instance.
 
   Most drivers can always return true or always return false for a given feature
   (e.g., :left-join is not supported by any version of Mongo DB).
@@ -657,12 +833,31 @@
                               :basic-aggregations                     true
                               :case-sensitivity-string-filter-options true
                               :date-arithmetics                       true
+                              :parameterized-sql                      false
                               :temporal-extract                       true
                               :schemas                                true
                               :test/jvm-timezone-setting              true
                               :fingerprint                            true
-                              :upload-with-auto-pk                    true}]
+                              :upload-with-auto-pk                    true
+                              :saved-question-sandboxing              true
+                              :test/create-table-without-data         true
+                              :test/dynamic-dataset-loading           true
+                              :test/uuids-in-create-table-statements  true
+                              :metadata/table-existence-check         false
+                              :metadata/table-writable-check          false}]
   (defmethod database-supports? [::driver feature] [_driver _feature _db] supported?))
+
+;;; By default a driver supports `:native-parameter-card-reference` if it supports `:native-parameters` AND
+;;; `:nested-queries`.
+(defmethod database-supports? [::driver :native-parameter-card-reference]
+  [driver _feature database]
+  (and (database-supports? driver :native-parameters database)
+       (database-supports? driver :nested-queries database)))
+
+;; by default a driver supports `:regex/lookaheads-and-lookbehinds` if it also supports `:regex` and vice versa
+(defmethod database-supports? [::driver :regex/lookaheads-and-lookbehinds]
+  [driver _feature database]
+  (database-supports? driver :regex database))
 
 (defmulti ^String escape-alias
   "Escape a `column-or-table-alias` string in a way that makes it valid for your database. This method is used for
@@ -693,13 +888,14 @@
   as keywords whenever possible. This provides for both unified error messages and categories which let us point
   users to the erroneous input fields.
   Error messages can also be strings, or localized strings, as returned by [[metabase.util.i18n/trs]] and
-  `metabase.util.i18n/tru`."
-  {:added "0.32.0" :arglists '([this message])}
+  `metabase.util.i18n/tru`.
+  Passed a collection of all non-nil exception messages that were thrown during connection attempt."
+  {:added "0.32.0" :arglists '([this messages])}
   dispatch-on-initialized-driver
   :hierarchy #'hierarchy)
 
-(defmethod humanize-connection-error-message ::driver [_ message]
-  message)
+(defmethod humanize-connection-error-message ::driver [_ messages]
+  (first messages))
 
 (defmulti mbql->native
   "Transpile an MBQL query into the appropriate native query form. `query` will match the schema for an MBQL query in
@@ -715,8 +911,11 @@
   For example, a driver like Postgres would build a valid SQL expression and return a map such as:
 
     {:query \"-- Metabase card: 10 user: 5
-              SELECT * FROM my_table\"}"
-  {:added "0.32.0", :arglists '([driver query]), :style/indent 1}
+              SELECT * FROM my_table\"}
+
+  In 0.51.0 and above, drivers should look the value of [[*compile-with-inline-parameters*]] and output a query with
+  all parameters inline when it is truthy."
+  {:added "0.32.0", :arglists '([driver query])}
   dispatch-on-initialized-driver
   :hierarchy #'hierarchy)
 
@@ -736,43 +935,49 @@
   - Use [[metabase.driver.sql.util/format-sql]] in this method's implementation, providing dialect keyword
     representation that corresponds to to their driver's formatting (eg. `:sqlserver` uses `:tsql`).
   - Completly reimplement this method with their special formatting code."
-  {:added "0.47.0", :arglists '([driver native-form]), :style/indent 1}
+  {:added "0.47.0", :arglists '([driver native-form])}
   dispatch-on-initialized-driver
   :hierarchy #'hierarchy)
 
 (defmethod prettify-native-form ::driver
- [_ native-form]
- native-form)
+  [_ native-form]
+  native-form)
+
+(def ^:dynamic ^{:added "0.51.0"} *compile-with-inline-parameters*
+  "Whether to compile an MBQL query to native with parameters spliced inline (as opposed to using placeholders like `?`
+  and passing the parameters separately.) Normally we want to pass parameters separately to protect against SQL
+  injection and whatnot, but when converting an MBQL query to SQL it's nicer for people to see
+
+    WHERE bird_type = 'cockatiel'
+
+  instead of
+
+    WHERE bird_type = ?
+
+  so we bind this to `true`.
+
+  Drivers that have some notion of parameterized queries (e.g. `:sql-jdbc`-based drivers) should look at the value of
+  this dynamic variable in their implementation of [[metabase.driver/mbql->native]] and adjust query compilation
+  behavior accordingly."
+  false)
 
 (defmulti splice-parameters-into-native-query
-  "For a native query that has separate parameters, such as a JDBC prepared statement, e.g.
+  "Deprecated and unused in 0.51.0+; multimethod declaration left here so drivers implementing it can still compile
+  until we remove this method completely in 0.54.0 or later.
 
-    {:query \"SELECT * FROM birds WHERE name = ?\", :params [\"Reggae\"]}
-
-  splice the parameters in to the native query as literals so it can be executed by the user, e.g.
-
-    {:query \"SELECT * FROM birds WHERE name = 'Reggae'\"}
-
-  This is used to power features such as 'Convert this Question to SQL' in the Query Builder. Normally when executing
-  the query we'd like to leave the statement as a prepared one and pass parameters that way instead of splicing them
-  in as literals so as to avoid SQL injection vulnerabilities. Thus the results of this method are not normally
-  executed by the Query Processor when processing an MBQL query. However when people convert a
-  question to SQL they can see what they will be executing and edit the query as needed.
-
-  Input to this function follows the same shape as output of `mbql->native` -- that is, it will be a so-called 'inner'
-  native query, with `:query` and `:params` keys, as in the example code above; output should be of the same format.
-  This method might be called even if no splicing needs to take place, e.g. if `:params` is empty; implementations
-  should be sure to handle this situation correctly.
-
-  For databases that do not feature concepts like 'prepared statements', this method need not be implemented; the
-  default implementation is an identity function."
-  {:added "0.32.0", :arglists '([driver inner-query]), :style/indent 1}
+  Instead of implementing this method, you should instead look at the value
+  of [[metabase.driver/*compile-with-inline-parameters*]] in your implementation of [[metabase.driver/mbql->native]]
+  and adjust behavior accordingly."
+  {:added "0.32.0", :arglists '([driver inner-query]), :deprecated "0.51.0"}
   dispatch-on-initialized-driver
   :hierarchy #'hierarchy)
 
+#_{:clj-kondo/ignore [:deprecated-var]}
 (defmethod splice-parameters-into-native-query ::driver
-  [_ query]
-  query)
+  [_driver _query]
+  (throw (ex-info (str "metabase.driver/splice-parameters-into-native-query is deprecated, bind"
+                       " metabase.driver/*compile-with-inline-parameters* during query compilation instead.")
+                  {:type ::qp.error-type/driver})))
 
 ;; TODO -- shouldn't this be called `notify-database-updated!`, since the expectation is that it is done for side
 ;; effects? issue: https://github.com/metabase/metabase/issues/39367
@@ -794,7 +999,7 @@
     (defn sync-in-context [driver database f]
       (with-connection [_ database]
         (f)))"
-  {:added "0.32.0", :arglists '([driver database f]), :style/indent 2}
+  {:added "0.32.0", :arglists '([driver database f])}
   dispatch-on-initialized-driver
   :hierarchy #'hierarchy)
 
@@ -839,7 +1044,7 @@
 (defmulti substitute-native-parameters
   "For drivers that support `:native-parameters`. Substitute parameters in a normalized 'inner' native query.
 
-    {:query \"SELECT count(*) FROM table WHERE id = {{param}}\"
+    {:query         \"SELECT count(*) FROM table WHERE id = {{param}}\"
      :template-tags {:param {:name \"param\", :display-name \"Param\", :type :number}}
      :parameters    [{:type   :number
                       :target [:variable [:template-tag \"param\"]]
@@ -850,8 +1055,8 @@
   Much of the implementation for this method is shared across drivers and lives in the
   `metabase.driver.common.parameters.*` namespaces. See the `:sql` and `:mongo` drivers for sample implementations of
   this method.`Driver-agnostic end-to-end native parameter tests live in
-  [[metabase.query-processor-test.parameters-test]] and other namespaces."
-  {:added "0.34.0" :arglists '([driver inner-query])}
+  [[metabase.query-processor.parameters-test]] and other namespaces."
+  {:added "0.34.0" :arglists '([driver inner-native-query])}
   dispatch-on-initialized-driver
   :hierarchy #'hierarchy)
 
@@ -878,10 +1083,34 @@
 
   WARNING! Implementations of this method may create new SSH tunnels, which need to be cleaned up. DO NOT USE THIS
   METHOD DIRECTLY UNLESS YOU ARE GOING TO BE CLEANING UP ANY CREATED TUNNELS! Instead, you probably want to
-  use [[metabase.util.ssh/with-ssh-tunnel]]. See #24445 for more information."
+  use [[metabase.driver.sql-jdbc.connection.ssh-tunnel/with-ssh-tunnel]]. See #24445 for more information."
   {:added "0.39.0" :arglists '([driver db-details])}
   dispatch-on-uninitialized-driver
   :hierarchy #'hierarchy)
+
+(defmulti incorporate-auth-provider-details
+  "A multimethod for driver specific behavior required to incorporate response of an auth-provider into the DB details.
+   In most cases this means setting the :password and/or :username based on the auth-provider and its response."
+  {:added "0.50.17" :arglists '([driver auth-provider auth-provider-response details])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
+(defmethod incorporate-auth-provider-details :default
+  [_driver _auth-provider _auth-provider-response details]
+  details)
+
+(defmethod incorporate-auth-provider-details :sql-jdbc
+  [_driver auth-provider auth-provider-response details]
+  (case auth-provider
+    (:oauth :azure-managed-identity)
+    (let [{:keys [access_token expires_in]} auth-provider-response]
+      (cond-> (assoc details :password access_token)
+        expires_in (assoc :password-expiry-timestamp (+ (System/currentTimeMillis)
+                                                        (* (- (parse-long expires_in)
+                                                              auth-provider/azure-auth-token-renew-slack-seconds)
+                                                           1000)))))
+
+    (merge details auth-provider-response)))
 
 ;;; TODO:
 ;;;
@@ -900,9 +1129,29 @@
   :hierarchy #'hierarchy)
 
 (defmethod normalize-db-details ::driver
-  [_ db-details]
+  [_ database]
   ;; no normalization by default
-  db-details)
+  database)
+
+(defmulti db-details-to-test-and-migrate
+  "When `details` are in an ambiguous state, this should return a sequence of modified `details` of the
+   possible, normalized, unambiguous states.
+
+   The result of this function will be used to test each new `details`, in order,
+   and the first one that succeeds will be saved in the database.
+
+   If none of the details succeed, nothing will change.
+   Returning `nil` will skip the test.
+
+   This should, in practice, supersede `normalize-db-details`."
+  {:added "0.52.12" :arglists '([driver details])}
+  dispatch-on-initialized-driver-safe-keys
+  :hierarchy #'hierarchy)
+
+(defmethod db-details-to-test-and-migrate ::driver
+  [_ _database]
+  ;; nothing by default
+  nil)
 
 (defmulti superseded-by
   "Returns the driver that supersedes the given `driver`.  A non-nil return value means that the given `driver` is
@@ -921,16 +1170,152 @@
   nil)
 
 (defmulti execute-write-query!
-  "Execute a writeback query e.g. one powering a custom `QueryAction` (see [[metabase.models.action]]).
+  "Execute a writeback query e.g. one powering a custom `QueryAction` (see [[metabase.actions.models]]).
   Drivers that support `:actions/custom` must implement this method."
   {:changelog-test/ignore true, :added "0.44.0", :arglists '([driver query])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
+(defmulti compile-transform
+  "Compiles the sql for a transform statement (CREATE TABLE AS), given a compiled inner sql query and a destination."
+  {:added "0.57.0", :arglists '([driver {:keys [query output-table]}])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
+(defmulti compile-insert
+  "Compiles the sql for an insert statement (INSERT INTO ... SELECT), given a compiled inner sql query and a destination."
+  {:added "0.58.0", :arglists '([driver {:keys [query output-table]}])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
+(defmulti compile-drop-table
+  "Compiles the sql for a drop table statement for a given table."
+  {:added "0.57.0", :arglists '([driver table])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
+(defmulti execute-raw-queries!
+  "Executes a series of 'raw' queries.  A raw query is a vector of a sql string and arguments, in the case of sql
+  drivers.
+
+  Drivers that support any of the `:transforms/...` features must implement this method."
+  {:added "0.57.0", :arglists '([driver conn-spec queries])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
+(defmulti run-transform!
+  "Runs a transform.
+
+  Drivers that support any of the `:transforms/...` features must implement this method for the appropriate transform
+  types."
+  {:added "0.57.0",
+   :arglists '([driver
+                {:keys [transform-type conn-spec query output-table] :as _transform-details}
+                {:keys [overwrite?] :as _opts}])}
+  (fn [driver transform-details _opts]
+    [(dispatch-on-initialized-driver driver) (:transform-type transform-details)])
+  :hierarchy #'hierarchy)
+
+(defmulti drop-transform-target!
+  "Drops the target of a transform.
+
+  Drivers that support any of the `:transforms/...` features must implement this method for the appropriate transform
+  types."
+  {:added "0.57.0",
+   :arglists '([driver database {:keys [type schema name] :as _transform-details}])}
+  (fn [driver _database transform-details]
+    [(dispatch-on-initialized-driver driver) (:type transform-details)])
+  :hierarchy #'hierarchy)
+
+(defmethod drop-transform-target! [::driver :table-incremental]
+  [driver database target]
+  ((get-method drop-transform-target! [driver :table]) driver database target))
+
+(mr/def ::native-query-deps.table-dep
+  [:map
+   {:closed true}
+   [:schema {:optional true} :string]
+   [:table  [:or
+             ;; not really clear how a driver would be able to work out the ID of a Table
+             ;; but [[metabase-enterprise.dependencies.native-validation-test/basic-deps-test]] says they can.
+             :metabase.lib.schema.id/table
+             :string]]])
+
+(mr/def ::native-query-deps.transform-dep
+  [:map
+   {:closed true}
+   [:transform :metabase.lib.schema.id/transform]])
+
+(mr/def ::native-query-deps
+  [:set [:or
+         ::native-query-deps.table-dep
+         ::native-query-deps.transform-dep]])
+
+(defmulti native-query-deps
+  "Gets the table dependencies of a given sql string (or equivalent).
+
+  Drivers that support any of the `:transforms/...` features must implement this method.
+
+  `query` is a Lib `:metabase.lib.schema/native-only-query`; you can use [[metabase.driver-api.core/raw-native-query]]
+  to get the raw native query as needed.
+
+  The return value should match the `:metabase.driver/native-query-deps` schema."
+  {:added "0.57.0" :arglists '([driver query])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
+(defmethod native-query-deps :default
+  [driver & args]
+  (if (database-supports? driver :dependencies/native nil)
+    (throw (ex-info "Database that supports :dependencies/native does not provide an implementation of driver/native-query-deps"
+                    {:driver driver
+                     :args args}))
+    #{}))
+
+(defmulti native-result-metadata
+  "Gets the result-metadata for a native query using static analysis (i.e., without actually
+  going to the database).
+
+  `native-query` is a `:metabase.lib.schema/native-only-query`."
+  {:added "0.57.0" :arglists '([driver native-query])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
+(defmulti validate-native-query-fields
+  "Validates a native query and returns a list of all 'bad' field references.
+
+  `native-query` is a Lib `:metabase.lib.schema/native-only-query`."
+  {:added "0.57.0" :arglists '([driver native-query])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
+(defmulti schema-exists?
+  "Checks if a schema exists in the given database."
+  {:added "0.57.0" :arglists '([driver db-id schema])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
+(defmethod schema-exists? :default [_driver _db-id _schema] false)
+
+(defmulti create-schema-if-needed!
+  "Creates a schema if it does not already exist.
+   Used to create new schemas for transforms."
+  {:added "0.57.0" :arglists '([driver conn-spec schema])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
+(defmethod create-schema-if-needed! :default [_driver _conn-spec _schema] nil)
+
+(defmulti connection-spec
+  "Get connection details for a given driver and db object"
+  {:added "0.57.0", :arglists '([driver db])}
   dispatch-on-initialized-driver
   :hierarchy #'hierarchy)
 
 (defmulti table-rows-sample
   "Processes a sample of rows produced by `driver`, from the `table`'s `fields`
   using the query result processing function `rff`.
-  The default implementation defined in [[metabase.db.metadata-queries]] runs a
+  The default implementation defined in [[[metabase.driver.common.table-rows-sample]] runs a
   row sampling MBQL query using the regular query processor to produce the
   sample rows. This is good enough in most cases so this multimethod should not
   be implemented unless really necessary.
@@ -948,7 +1333,6 @@
   dispatch-on-initialized-driver
   :hierarchy #'hierarchy)
 
-
 ;;; +----------------------------------------------------------------------------------------------------------------+
 ;;; |                                                    Upload                                                      |
 ;;; +----------------------------------------------------------------------------------------------------------------+
@@ -958,10 +1342,20 @@
   nil)
 
 (defmulti table-name-length-limit
-  "Return the maximum number of characters allowed in a table name, or `nil` if there is no limit."
+  "Return the maximum number of bytes allowed in a table name, or `nil` if there is no limit."
   {:changelog-test/ignore true, :added "0.47.0", :arglists '([driver])}
   dispatch-on-initialized-driver
   :hierarchy #'hierarchy)
+
+(defmulti column-name-length-limit
+  "Return the maximum number of bytes allowed in a column name, or `nil` if there is no limit."
+  {:changelog-test/ignore true, :added "0.49.19", :arglists '([driver])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
+(defmethod column-name-length-limit :default [driver]
+  ;; For most databases, the same limit is used for all identifier types.
+  (table-name-length-limit driver))
 
 (defmulti create-table!
   "Create a table named `table-name`. If the table already exists it will throw an error.
@@ -971,9 +1365,26 @@
   dispatch-on-initialized-driver
   :hierarchy #'hierarchy)
 
+(defmulti drop-index!
+  "Drops an index named `index-name` created by [[metabase.driver/create-index!]]. Throws if the index does not exist."
+  {:added "0.58.0", :arglists '([driver database-id schema table-name index-name & args])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
+(defmulti create-index!
+  "Create a (sorted/btree) index named `index-name`.
+  Should be assumed to block until the index is created.
+  Throws if the index already exists."
+  {:added "0.58.0", :arglists '([driver database-id schema table-name index-name column-names & args])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
 (defmulti drop-table!
-  "Drop a table named `table-name`. If the table doesn't exist it will not be dropped."
-  {:added "0.47.0", :arglists '([driver db-id table-name])}
+  "Drop a table named `table-name`. If the table doesn't exist it will not be dropped. `table-name` may be qualified
+  by schema e.g.
+
+    schema.table"
+  {:added "0.47.0", :arglists '([driver db-id ^String table-name])}
   dispatch-on-initialized-driver
   :hierarchy #'hierarchy)
 
@@ -986,6 +1397,38 @@
   {:added "0.50.0", :arglists '([driver db-id table-name])}
   dispatch-on-initialized-driver
   :hierarchy #'hierarchy)
+
+(defmulti rename-tables!*
+  "Driver-specific implementation of table renaming. Takes a pre-sorted map of {from-table to-table}.
+   The input map has already been topologically sorted by the public rename-tables! function.
+   Implementations should perform the actual rename operations atomically as supported by the database.
+   NOTE: Do not call this directly - use rename-tables! instead which handles the topological sort."
+  {:added "0.57.0", :arglists '([driver db-id sorted-rename-map])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
+(defn rename-tables!
+  "Rename multiple tables atomically. Takes a map of {from-table to-table}.
+   Performs topological sort to determine correct rename order, then delegates to driver-specific implementation.
+   Implementations should use transactions, compound operations, or metadata locks as supported by the database.
+   Table names may be qualified by schema e.g. :schema/table"
+  {:added "0.57.0"}
+  [driver db-id rename-map]
+  (let [sorted-rename-map (-> rename-map
+                              (update-vals vector)
+                              u/topological-sort
+                              (update-vals first))]
+    (rename-tables!* driver db-id sorted-rename-map)))
+
+(defmulti rename-table!
+  "Rename a single table."
+  {:added "0.57.0", :arglists '([driver db-id old-table-name new-table-name])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
+(defmethod rename-table! ::driver
+  [driver db-id from-table to-table]
+  (rename-tables!* driver db-id {from-table to-table}))
 
 (defmulti insert-into!
   "Insert `values` into a table named `table-name`. `values` is a lazy sequence of rows, where each row's order matches
@@ -1003,6 +1446,57 @@
   dispatch-on-initialized-driver
   :hierarchy #'hierarchy)
 
+(defmulti insert-col->val
+  "Parse a value for insertion based on driver, data source type and column definition.
+
+  Takes:
+  - driver: The database driver
+  - data-source-type: The data source type, see [[insert-from-source!]]
+  - column-def: Column definition map with `:type` and optionally `:database-type`/`:nullable?`
+  - val: The value to parse. Format is data-source-type specific.
+
+  Drivers should implement this when their insertion mechanism needs values converted to proper types.
+
+  Default implementation returns the value unchanged"
+  {:added "0.57.0", :arglists '([driver data-source-type column-def string-val])}
+  (fn [driver type _ _] [(dispatch-on-initialized-driver driver) type])
+  :hierarchy #'hierarchy)
+
+(defmulti insert-from-source!
+  "Inserts data from a data source into an existing table. Table must exist. Blocks until completion.
+
+  `table-definition` is a map with `:name` (may be schema-qualified) and `:columns`
+  (vector of maps with `:name` and optional `:type`, `:database-type`). Column order must match data row order.
+
+  `data-source` dispatches on `:type`. Built-in types include `:jsonl-file` (with `:file`) and `:rows`
+  (with `:data` as reducible of row vectors). Drivers may implement additional types.
+
+  Implementations may leave partial data on failure, the method makes no rollback guarantees.
+  Data visibility to other connections is not guaranteed immediately.
+
+  Default implementation for `jsonl-file` data-source is provided, which delegate to a `:rows`
+  data-source. Non-jdbc drivers must at least implement a `:rows` datasource."
+  {:added "0.57.0", :arglists '([driver database-id table-definition data-source])}
+  (fn [driver _ _ data-source]
+    [(dispatch-on-initialized-driver driver) (:type data-source)])
+  :hierarchy #'hierarchy)
+
+(defmethod insert-col->val [::driver :jsonl-file] [_driver _ _column-def val]
+  val)
+
+(defmethod insert-from-source! [::driver :jsonl-file]
+  [driver db-id {:keys [columns] :as table-definition} {:keys [file]}]
+  (with-open [rdr (io/reader file)]
+    (let [lines     (line-seq rdr)
+          data-rows (map (fn [line]
+                           (let [m (json/decode line)]
+                             (mapv (fn [column]
+                                     (let [raw-val (get m (:name column))]
+                                       (insert-col->val driver :jsonl-file column raw-val)))
+                                   columns)))
+                         (filter (comp not empty?) lines))]
+      (insert-from-source! driver db-id table-definition {:type :rows :data data-rows}))))
+
 (defmulti add-columns!
   "Add columns given by `column-definitions` to a table named `table-name`. If the table doesn't exist it will throw an error.
   `args` is an optional map with an optional key `primary-key`. The `primary-key` value is a vector of column names
@@ -1013,10 +1507,43 @@
 
 (defmulti alter-columns!
   "Alter columns given by `column-definitions` to a table named `table-name`. If the table doesn't exist it will throw an error.
-  Currently we do not currently support changing the the primary key, or take any guidance on how to coerce values."
-  {:added "0.49.0", :arglists '([driver db-id table-name column-definitions])}
+  Currently, we do not currently support changing the primary key, or take any guidance on how to coerce values."
+  {:added "0.49.0"
+   :arglists '([driver db-id table-name column-definitions])
+   :deprecated "0.54.0"}
   dispatch-on-initialized-driver
   :hierarchy #'hierarchy)
+
+(defmulti alter-table-columns!
+  "Alter columns given by `column-definitions` to a table named `table-name`. If the table doesn't exist it will throw an error.
+  Currently, we do not currently support changing the primary key.
+
+  Used to change the types of columns when appending to or replacing uploads with a new .csv that infers a different type.
+
+  `column-definitions` should be supplied as a map of column-name keyword to column type.
+  e.g. `{:my-column [:varchar 255]}`
+
+  Note: column types may be supplied as honeysql vectors (e.g. `[:varchar 255]`) or a raw string.
+  Both should be handled by implementations.
+
+  Options:
+
+  - `:old-types`: a map of the existing column definitions, e.g `{:my-column [:bigint]}`
+     Can be useful to infer an expression to convert old values to the new type
+     where the database engine does not support it natively.
+     Implementations are free to ignore this parameter if they cannot do anything with it.
+
+  Replaces `alter-columns!` that was previously used for the same purpose in versions < `0.54.0`"
+  {:added "0.54.0", :arglists '([driver db-id table-name column-definitions & opts])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
+;; used for compatibility with drivers only implementing alter-columns!
+;; remove once alter-columns! is deleted (v0.57+)
+#_{:clj-kondo/ignore [:deprecated-var]}
+(defmethod alter-table-columns! ::driver
+  [driver db-id table-name column-definitions & _opts]
+  (alter-columns! driver db-id table-name column-definitions))
 
 (defmulti syncable-schemas
   "Returns the set of syncable schemas in the database (as strings)."
@@ -1036,6 +1563,44 @@
   {:changelog-test/ignore true, :added "0.47.0", :arglists '([driver upload-type])}
   dispatch-on-initialized-driver
   :hierarchy #'hierarchy)
+
+(defmulti type->database-type
+  "Returns the database type for a given Metabase type as a HoneySQL spec."
+  {:added "0.57.0", :arglists '([driver base-type])}
+  (fn [driver _base-type] driver)
+  :hierarchy #'hierarchy)
+
+(defmulti allowed-promotions
+  "Returns a mapping of which types a column can be implicitly relaxed to, based on the content of appended values.
+  In the context of uploads, this permits certain appends or replacements of an existing csv table
+  to change column types with `alter-table-columns!`.
+
+  e.g. `{:metabase.upload/int #{:metabase.upload/float}}` would allow int columns to be migrated to floats.
+  If we require a relaxation which is not allowed here, we will reject the corresponding file.
+
+  It is expected that the returned map is transitively closed.
+  If type A can be relaxed to B, and B can be relaxed to C, then A must also explicitly list C as a valid relaxation.
+  This is to avoid situations where promotions are reachable but require additional user effort,
+  such as filtering and re-uploading csv files.
+
+  e.g.
+
+  Valid (transitively closed):
+  {:metabase.upload/int #{:metabase.upload/float}
+   :metabase.upload/boolean #{:metabase.upload/int, :metabase.upload/float}}
+  Since boolean -> int and int -> float, we also include boolean -> float.
+
+  Invalid (not transitively closed):
+  {:metabase.upload/int #{:metabase.upload/float}
+   :metabase.upload/boolean #{:metabase.upload/int}}
+  This would reject a boolean -> float transition, despite boolean reaching float through int."
+  {:added "0.54.0", :arglists '([driver])}
+  dispatch-on-uninitialized-driver
+  :hierarchy #'hierarchy)
+
+(defmethod allowed-promotions ::driver [_]
+  ;; for compatibility with older drivers, in which this promotion was assumed
+  {:metabase.upload/int #{:metabase.upload/float}})
 
 (defmulti create-auto-pk-with-append-csv?
   "Returns true if the driver should create an auto-incrementing primary key column when appending CSV data to an existing
@@ -1068,3 +1633,67 @@
   {:added "0.48.0", :arglists '([driver database & args])}
   dispatch-on-initialized-driver
   :hierarchy #'hierarchy)
+
+(defmulti dynamic-database-types-lookup
+  "Generate mapping of `database-types` to base types for dynamic database types (eg. defined by user; postgres enums).
+
+  The `sql-jdbc.sync/database-type->base-type` is used as simple look-up, while this method is expected to do database
+  calls when necessary. At the time it was added, its purpose was to check for postgres enum types. Its meant to
+  be extended also for other dynamic types when necessary."
+  {:added "0.53.0" :arglists '([driver database database-types])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
+(defmethod dynamic-database-types-lookup ::driver
+  [_driver _database _database-types]
+  nil)
+
+(defmulti adjust-schema-qualification
+  "Adjust the given schema to either add or remove further schema qualification.
+
+   In general, the database detail property `multi-level-schema` ought to drive whether a schema gets qualified or not.
+   If it is true, schemas should be fully qualified to `catalog` or other addressable hierarchical concept. If false, they should not be.
+
+   Returns a string either of the unchanged `schema` or the adjusted value."
+  {:added "0.55.0" :arglists '([driver database schema])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
+(defmulti query-canceled?
+  "Test if an exception is due to a query being canceled due to user action. For JDBC drivers this can
+  happen when setting `.setQueryTimeout`."
+  {:added "0.53.12" :arglists '([driver ^Throwable e])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
+(defmethod query-canceled? ::driver [_ _] false)
+
+(defmulti table-known-to-not-exist?
+  "Test if an exception is due to a table not existing."
+  {:added "0.54.10" :arglists '([driver ^Throwable e])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
+(defmethod table-known-to-not-exist? ::driver [_ _] false)
+
+(defmulti table-exists?
+  "Check if a table exists in the database. Returns true if the table exists, false otherwise.
+
+   If you need proactively to check for table existence, this is the preferred method.
+   The default implementation uses describe-table and catches exceptions, but drivers can override
+   this with more efficient implementations for databases that support them.."
+  {:added "0.57.0" :arglists '([driver database table])}
+  dispatch-on-initialized-driver
+  :hierarchy #'hierarchy)
+
+(defmethod table-exists? ::driver
+  [driver database table]
+  (try
+    (let [table-info (describe-table driver database table)]
+      ;; Some drivers (e.g., BigQuery) return nil for non-existent tables. Others return a map with fields.
+      (boolean (seq (:fields table-info))))
+    (catch Exception e
+      ;; If an exception was thrown, check if it's because the table doesn't exist
+      (if (table-known-to-not-exist? driver e)
+        false
+        (throw e)))))

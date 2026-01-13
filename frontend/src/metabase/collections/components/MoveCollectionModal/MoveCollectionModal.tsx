@@ -1,11 +1,15 @@
 import { useCallback } from "react";
 import { t } from "ttag";
 
-import type { OnMoveWithSourceAndDestination } from "metabase/collections/types";
+import type {
+  MoveDestination,
+  OnMoveWithSourceAndDestination,
+} from "metabase/collections/types";
+import { LoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper";
+import { MoveModal } from "metabase/common/components/MoveModal";
+import type { CollectionPickerItem } from "metabase/common/components/Pickers/CollectionPicker";
 import { useCollectionQuery } from "metabase/common/hooks";
-import LoadingAndErrorWrapper from "metabase/components/LoadingAndErrorWrapper";
-import { MoveModal } from "metabase/containers/MoveModal";
-import Collections from "metabase/entities/collections";
+import { Collections } from "metabase/entities/collections";
 import { useDispatch } from "metabase/lib/redux";
 import * as Urls from "metabase/lib/urls";
 import type { Collection, CollectionId } from "metabase-types/api";
@@ -22,20 +26,27 @@ const MoveCollectionModalView = ({
   onClose,
 }: MoveCollectionModalProps): JSX.Element => {
   const handleMove = useCallback(
-    async (destination: { id: CollectionId }) => {
+    async (destination: MoveDestination) => {
       await onMove(collection, destination);
       onClose();
     },
     [collection, onMove, onClose],
   );
 
+  const recentsAndSearchFilter = (item: CollectionPickerItem) =>
+    item.model === "collection" && item.id === collection.parent_id;
+
   return (
     <MoveModal
       title={t`Move "${collection.name}"?`}
       initialCollectionId={collection.parent_id ?? "root"}
       movingCollectionId={collection.id}
+      movingCollectionNamespace={collection.namespace ?? undefined}
+      entityType="collection"
       onMove={handleMove}
       onClose={onClose}
+      recentAndSearchFilter={recentsAndSearchFilter}
+      savingModel="collection"
     />
   );
 };

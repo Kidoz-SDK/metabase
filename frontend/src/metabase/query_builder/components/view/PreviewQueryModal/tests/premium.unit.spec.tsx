@@ -5,8 +5,8 @@ import { setup as baseSetup } from "./setup";
 
 function setup(opts: SetupOpts) {
   baseSetup({
-    hasEnterprisePlugins: true,
     tokenFeatures: { whitelabel: true },
+    enterprisePlugins: ["whitelabel"],
     ...opts,
   });
 }
@@ -17,7 +17,7 @@ describe("PreviewQueryModal (EE with token)", () => {
 
     expect(await screen.findByText("Query preview")).toBeInTheDocument();
     expect(
-      screen.getByText("Learn how to debug SQL errors"),
+      await screen.findByText("Learn how to debug SQL errors"),
     ).toBeInTheDocument();
   });
 

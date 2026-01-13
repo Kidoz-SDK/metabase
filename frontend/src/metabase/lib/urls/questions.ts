@@ -6,6 +6,7 @@ import type { QuestionCreatorOpts } from "metabase-lib/v1/Question";
 import Question from "metabase-lib/v1/Question";
 import * as ML_Urls from "metabase-lib/v1/urls";
 import type { CardId, Card as SavedCard } from "metabase-types/api";
+import type { EntityToken } from "metabase-types/api/entity";
 
 import { appendSlug, getEncodedUrlSearchParams } from "./utils";
 
@@ -15,7 +16,7 @@ type Card = Partial<SavedCard> & {
 };
 
 export type QuestionUrlBuilderParams = {
-  mode?: "view" | "notebook";
+  mode?: "view" | "notebook" | "query";
   hash?: Card | string;
   query?: Record<string, unknown> | string;
   objectId?: number | string;
@@ -23,7 +24,16 @@ export type QuestionUrlBuilderParams = {
 
 export function question(
   card: Partial<
-    Pick<Card, "id" | "name" | "type" | "card_id" | "model">
+    Pick<
+      Card,
+      | "id"
+      | "name"
+      | "type"
+      | "card_id"
+      | "model"
+      | "collection_id"
+      | "dashboard_id"
+    >
   > | null,
   {
     mode = "view",
@@ -78,6 +88,12 @@ export function question(
 
   if (mode === "notebook") {
     path = `${path}/notebook`;
+  } else if (mode === "query") {
+    if (card.type === "model" || card.type === "metric") {
+      path = `${path}/query`;
+    } else {
+      path = `${path}/notebook`;
+    }
   } else if (objectId) {
     path = `${path}/${objectId}`;
   }
@@ -90,7 +106,7 @@ export function serializedQuestion(card: Card, opts = {}) {
 }
 
 type NewQuestionUrlBuilderParams = QuestionCreatorOpts & {
-  mode?: "view" | "notebook" | "query";
+  mode?: "view" | "notebook" | "query" | "ask";
   creationType?: string;
   objectId?: number | string;
 };
@@ -100,7 +116,11 @@ export function newQuestion({
   creationType,
   objectId,
   ...options
-}: NewQuestionUrlBuilderParams = {}) {
+}: NewQuestionUrlBuilderParams) {
+  if (mode === "ask") {
+    return `/question/ask`;
+  }
+
   const question = Question.create(options);
   const url = ML_Urls.getUrl(question, {
     creationType,
@@ -135,7 +155,7 @@ export function publicQuestion({
   );
 }
 
-export function embedCard(token: string, type: string | null = null) {
+export function embedCard(token: EntityToken, type: string | null = null) {
   return `/embed/question/${token}` + (type ? `.${type}` : ``);
 }
 

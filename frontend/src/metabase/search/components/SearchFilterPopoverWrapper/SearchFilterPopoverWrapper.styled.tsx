@@ -1,4 +1,6 @@
+// eslint-disable-next-line no-restricted-imports
 import { css } from "@emotion/react";
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
 
 import { Stack } from "metabase/ui";
@@ -10,10 +12,10 @@ export const SearchPopoverContainer = styled(Stack)`
 export const DropdownApplyButtonDivider = styled.hr<{ width?: string }>`
   border-width: 1px 0 0 0;
   border-style: solid;
-  ${({ theme, width }) => {
+  ${({ width }) => {
     const dividerWidth = width ?? "100%";
     return css`
-      border-color: ${theme.fn.themeColor("border")};
+      border-color: var(--mb-color-border);
       width: ${dividerWidth};
     `;
   }}

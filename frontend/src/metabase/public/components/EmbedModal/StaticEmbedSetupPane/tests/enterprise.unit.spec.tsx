@@ -1,6 +1,4 @@
-import { screen } from "@testing-library/react";
-
-import { getBrokenUpTextMatcher } from "__support__/ui";
+import { getBrokenUpTextMatcher, screen } from "__support__/ui";
 
 import { setup } from "./setup";
 
@@ -13,14 +11,14 @@ describe("Static Embed Setup phase - EE, no token", () => {
       resourceType: "question" as const,
     },
   ])("$resourceType", ({ resourceType }) => {
-    describe("Appearance tab", () => {
+    describe("Look and Feel tab", () => {
       it("should not render Font selector", async () => {
         await setup({
           props: {
             resourceType,
           },
-          activeTab: "Appearance",
-          hasEnterprisePlugins: true,
+          activeTab: "Look and Feel",
+          enterprisePlugins: ["whitelabel"],
         });
 
         expect(
@@ -33,19 +31,15 @@ describe("Static Embed Setup phase - EE, no token", () => {
       it('should render "Powered by Metabase" banner caption', async () => {
         await setup({
           props: {},
-          activeTab: "Appearance",
-          hasEnterprisePlugins: true,
+          activeTab: "Look and Feel",
+          enterprisePlugins: ["whitelabel"],
         });
 
-        expect(
-          screen.getByText("Removing the “Powered by Metabase” banner"),
-        ).toBeVisible();
+        expect(screen.getByText("Removing the banner")).toBeVisible();
 
         expect(
           screen.getByText(
-            getBrokenUpTextMatcher(
-              "This banner appears on all static embeds created with the Metabase open source version. You’ll need to upgrade to a paid plan to remove the banner.",
-            ),
+            "The “Powered by Metabase” banner appears on all guest embeds created with your current version. Upgrade to remove it (and customize a lot more)",
           ),
         ).toBeVisible();
       });

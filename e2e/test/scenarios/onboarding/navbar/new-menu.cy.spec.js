@@ -1,8 +1,8 @@
-import { restore, popover } from "e2e/support/helpers";
+const { H } = cy;
 
 describe("metabase > scenarios > navbar > new menu", () => {
   beforeEach(() => {
-    restore();
+    H.restore();
     cy.signInAsAdmin();
 
     cy.visit("/");
@@ -11,7 +11,7 @@ describe("metabase > scenarios > navbar > new menu", () => {
   });
 
   it("question item opens question notebook editor", () => {
-    popover().within(() => {
+    H.popover().within(() => {
       cy.findByText("Question").click();
     });
 
@@ -19,33 +19,11 @@ describe("metabase > scenarios > navbar > new menu", () => {
   });
 
   it("question item opens SQL query editor", () => {
-    popover().within(() => {
+    H.popover().within(() => {
       cy.findByText("SQL query").click();
     });
 
     cy.url("should.contain", "/question#");
-    cy.get(".ace_content");
-  });
-
-  it("collection opens modal and redirects to a created collection after saving", () => {
-    popover().within(() => {
-      cy.findByText("Collection").click();
-    });
-
-    cy.findByTestId("new-collection-modal").then(modal => {
-      cy.findByTestId("collection-picker-button").findByText("Our analytics");
-
-      cy.findByPlaceholderText("My new fantastic collection").type(
-        "Test collection",
-      );
-      cy.findByLabelText("Description").type("Test collection description");
-
-      cy.findByText("Create").click();
-    });
-
-    cy.findByTestId("collection-name-heading").should(
-      "have.text",
-      "Test collection",
-    );
+    H.NativeEditor.get().should("be.visible");
   });
 });

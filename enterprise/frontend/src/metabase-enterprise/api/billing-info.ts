@@ -1,8 +1,9 @@
-import { Api } from "metabase/api";
 import type { BillingInfo } from "metabase-types/api";
 
-export const billingInfoApi = Api.injectEndpoints({
-  endpoints: builder => ({
+import { EnterpriseApi } from "./api";
+
+export const billingInfoApi = EnterpriseApi.injectEndpoints({
+  endpoints: (builder) => ({
     getBillingInfo: builder.query<BillingInfo, void>({
       query: () => ({
         method: "GET",

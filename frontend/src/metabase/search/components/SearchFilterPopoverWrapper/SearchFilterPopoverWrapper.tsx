@@ -6,7 +6,7 @@ import type {
   SearchFilterPropTypes,
 } from "metabase/search/types";
 import type { StackProps } from "metabase/ui";
-import { Button, Center, Group, Loader, FocusTrap } from "metabase/ui";
+import { Button, Center, FocusTrap, Group, Loader } from "metabase/ui";
 
 import {
   DropdownApplyButtonDivider,
@@ -34,17 +34,17 @@ export const SearchFilterPopoverWrapper = ({
   if (isLoading) {
     return (
       <Center p="lg">
-        <Loader data-testid="loading-spinner" />
+        <Loader data-testid="loading-indicator" />
       </Center>
     );
   }
 
   return (
     <FocusTrap active>
-      <SearchPopoverContainer spacing={0} {...stackProps}>
+      <SearchPopoverContainer gap={0} {...stackProps}>
         {children}
         <DropdownApplyButtonDivider />
-        <Group position="right" align="center" px="sm" pb="sm">
+        <Group justify="flex-end" align="center" px="sm" pb="sm">
           <SearchFilterApplyButton onApply={onApply} />
         </Group>
       </SearchPopoverContainer>

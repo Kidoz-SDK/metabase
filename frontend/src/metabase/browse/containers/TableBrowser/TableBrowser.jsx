@@ -1,7 +1,7 @@
-import { connect } from "react-redux";
 import _ from "underscore";
 
-import Tables from "metabase/entities/tables";
+import { Tables } from "metabase/entities/tables";
+import { connect } from "metabase/lib/redux";
 import { isSyncInProgress } from "metabase/lib/syncing";
 import * as Urls from "metabase/lib/urls";
 import { getMetadata } from "metabase/selectors/metadata";
@@ -9,8 +9,8 @@ import { getSetting } from "metabase/selectors/settings";
 import { SAVED_QUESTIONS_VIRTUAL_DB_ID } from "metabase-lib/v1/metadata/utils/saved-questions";
 import * as ML_Urls from "metabase-lib/v1/urls";
 
-import TableBrowser from "../../components/TableBrowser";
 import { RELOAD_INTERVAL } from "../../constants";
+import TableBrowser from "../../tables/TableBrowser";
 
 const getDatabaseId = (props, { includeVirtual } = {}) => {
   const { params } = props;
@@ -28,14 +28,14 @@ const getDatabaseId = (props, { includeVirtual } = {}) => {
   }
 };
 
-const getSchemaName = props => {
+const getSchemaName = (props) => {
   return props.schemaName || props.params.schemaName;
 };
 
 const getReloadInterval = (_state, _props, tables = []) =>
-  tables.some(t => isSyncInProgress(t)) ? RELOAD_INTERVAL : 0;
+  tables.some((t) => isSyncInProgress(t)) ? RELOAD_INTERVAL : 0;
 
-const getTableUrl = (table, metadata) => {
+export const getTableUrl = (table, metadata) => {
   const metadataTable = metadata?.table(table.id);
   return ML_Urls.getUrl(metadataTable?.newQuestion(), { clean: false });
 };

@@ -1,16 +1,22 @@
 import * as ML from "cljs/metabase.lib.js";
+import { metadataProvider } from "metabase-lib/metadata";
+import type Metadata from "metabase-lib/v1/metadata/Metadata";
 import type {
+  CardId,
   CardType,
-  DatabaseId,
   DatasetQuery,
+  LegacyDatasetQuery,
+  OpaqueDatasetQuery,
   TableId,
 } from "metabase-types/api";
 
 import type {
   CardMetadata,
   Clause,
+  ClauseType,
   ColumnMetadata,
   Join,
+  MeasureMetadata,
   MetadataProvider,
   MetricMetadata,
   Query,
@@ -18,17 +24,9 @@ import type {
   TableMetadata,
 } from "./types";
 
-export function fromLegacyQuery(
-  databaseId: DatabaseId | null,
-  metadataProvider: MetadataProvider,
-  datasetQuery: DatasetQuery,
-): Query {
-  return ML.query(databaseId, metadataProvider, datasetQuery);
-}
-
 /**
  * Use this in combination with Lib.metadataProvider(databaseId, legacyMetadata) and
-   Lib.tableOrCardMetadata(metadataProvider, tableOrCardId);
+ Lib.tableOrCardMetadata(metadataProvider, tableOrCardId);
  */
 export function queryFromTableOrCardMetadata(
   metadataProvider: MetadataProvider,
@@ -37,7 +35,7 @@ export function queryFromTableOrCardMetadata(
   return ML.query(metadataProvider, tableOrCardMetadata);
 }
 
-export function toLegacyQuery(query: Query): DatasetQuery {
+export function toLegacyQuery(query: Query): LegacyDatasetQuery {
   return ML.legacy_query(query);
 }
 
@@ -51,6 +49,13 @@ export function suggestedName(query: Query): string {
 
 export function stageCount(query: Query): number {
   return ML.stage_count(query);
+}
+
+export function stageIndexes(query: Query): number[] {
+  return Array.from(
+    { length: stageCount(query) },
+    (_, stageIndex) => stageIndex,
+  );
 }
 
 export const hasClauses = (query: Query, stageIndex: number): boolean => {
@@ -69,6 +74,10 @@ export function dropEmptyStages(query: Query): Query {
   return ML.drop_empty_stages(query);
 }
 
+export function ensureFilterStage(query: Query): Query {
+  return ML.ensure_filter_stage(query);
+}
+
 export function removeClause(
   query: Query,
   stageIndex: number,
@@ -81,7 +90,13 @@ export function replaceClause(
   query: Query,
   stageIndex: number,
   targetClause: Clause | Join,
-  newClause: Clause | ColumnMetadata | MetricMetadata | SegmentMetadata | Join,
+  newClause:
+    | Clause
+    | ColumnMetadata
+    | MeasureMetadata
+    | MetricMetadata
+    | SegmentMetadata
+    | Join,
 ): Query {
   return ML.replace_clause(query, stageIndex, targetClause, newClause);
 }
@@ -103,10 +118,6 @@ export function canRun(query: Query, cardType: CardType): boolean {
   return ML.can_run(query, cardType);
 }
 
-export function canPreview(query: Query): boolean {
-  return ML.can_preview(query);
-}
-
 export function canSave(query: Query, cardType: CardType): boolean {
   return ML.can_save(query, cardType);
 }
@@ -114,6 +125,34 @@ export function canSave(query: Query, cardType: CardType): boolean {
 export function asReturned(
   query: Query,
   stageIndex: number,
+  cardId: CardId | undefined,
 ): { query: Query; stageIndex: number } {
-  return ML.as_returned(query, stageIndex);
+  return ML.as_returned(query, stageIndex, cardId);
+}
+
+export function previewQuery(
+  query: Query,
+  stageIndex: number,
+  clauseType: ClauseType,
+  clauseIndex: number | null,
+): Query | null {
+  return ML.preview_query(query, stageIndex, clauseType, clauseIndex);
+}
+
+export function fromJsQuery(
+  metadataProvider: MetadataProvider,
+  jsQuery: OpaqueDatasetQuery | DatasetQuery,
+): Query {
+  return ML.from_js_query(metadataProvider, jsQuery);
+}
+
+export function fromJsQueryAndMetadata(
+  metadata: Metadata,
+  jsQuery: OpaqueDatasetQuery | DatasetQuery,
+): Query {
+  return fromJsQuery(metadataProvider(jsQuery.database, metadata), jsQuery);
+}
+
+export function toJsQuery(query: Query): OpaqueDatasetQuery {
+  return ML.to_js_query(query);
 }

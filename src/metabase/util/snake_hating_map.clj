@@ -6,11 +6,13 @@
   instances. After 51 we can remove this, everything should be updated by then."
   (:require
    [clojure.string :as str]
-   [metabase.config :as config]
+   [metabase.config.core :as config]
    [metabase.util :as u]
    [metabase.util.log :as log]
    [potemkin :as p]
    [pretty.core :as pretty]))
+
+(set! *warn-on-reflection* true)
 
 (defn- snake-cased-key? [k]
   (some-> k (str/includes? "_")))
@@ -50,11 +52,21 @@
     (keys m))
   (meta [_this]
     (meta m))
+  (entryAt [this k]
+    (when (contains? m k)
+      (potemkin.PersistentMapProxy$MapEntry. this k)))
   (with-meta [this metta]
     (let [m' (with-meta m metta)]
       (if (identical? m m')
         this
         (->SnakeHatingMap m'))))
+
+  clojure.lang.IKVReduce
+  (kvreduce [this f init]
+    (reduce-kv f init m))
+
+  clojure.lang.Counted
+  (count [this] (count m))
 
   pretty/PrettyPrintable
   (pretty [_this]
@@ -72,3 +84,8 @@
        ->SnakeHatingMap))
   ([k v & more]
    (snake-hating-map (into {k v} (partition-all 2) more))))
+
+(defn snake-hating-map?
+  "Return true if `m` is a SnakeHatingMap."
+  [m]
+  (instance? SnakeHatingMap m))

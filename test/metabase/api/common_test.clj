@@ -3,7 +3,7 @@
    [clojure.test :refer :all]
    [mb.hawk.assert-exprs.approximately-equal :as hawk.approx]
    [metabase.api.common :as api]
-   [metabase.events :as events]
+   [metabase.events.core :as events]
    [metabase.models.interface :as mi]
    [metabase.server.middleware.exceptions :as mw.exceptions]
    [metabase.server.middleware.misc :as mw.misc]
@@ -14,8 +14,9 @@
 
 ;;; TESTS FOR CHECK (ETC)
 
-(def ^:private four-oh-four
+(defn- four-oh-four
   "The expected format of a 404 response."
+  []
   {:status  404
    :body    "Not found."
    :headers {"Cache-Control"                     "max-age=0, no-cache, must-revalidate, proxy-revalidate"
@@ -56,12 +57,12 @@
              (my-mock-api-fn)))))
 
   (testing "check that 404 is returned otherwise"
-    (is (= four-oh-four
+    (is (= (four-oh-four)
            (-> (my-mock-api-fn)
                (update-in [:headers "Last-Modified"] string?)))))
 
   (testing "let-404 should return nil if test fails"
-    (is (= four-oh-four
+    (is (= (four-oh-four)
            (-> (mock-api-fn
                 (fn [_]
                   (api/let-404 [user nil]
@@ -135,3 +136,27 @@
       (underive :event/write-permission-failure ::permission-failure-event)
       (underive :event/update-permission-failure ::permission-failure-event)
       (underive :event/create-permission-failure ::permission-failure-event))))
+
+(deftest present-items-works
+  (testing "order is preserved"
+    (is (= [{:id 1 :model :foo} {:id 2 :model :foo} {:id 3 :model :foo}]
+           (api/present-items (fn [_ vs]
+                                (reverse vs))
+                              [{:id 1 :model :foo}
+                               {:id 2 :model :foo}
+                               {:id 3 :model :foo}]))))
+  (testing "duplicate IDs across different models are fine, order is maintained"
+    (is (= [{:id 1 :model :foo}
+            {:id 1 :model :bar}
+            {:id 2 :model :foo}
+            {:id 2 :model :bar}
+            {:id 3 :model :foo}
+            {:id 3 :model :bar}]
+           (api/present-items (fn [_ vs]
+                                (reverse vs))
+                              [{:id 1 :model :foo}
+                               {:id 1 :model :bar}
+                               {:id 2 :model :foo}
+                               {:id 2 :model :bar}
+                               {:id 3 :model :foo}
+                               {:id 3 :model :bar}])))))

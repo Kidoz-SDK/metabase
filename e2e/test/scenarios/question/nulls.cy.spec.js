@@ -1,26 +1,16 @@
+const { H } = cy;
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
-import {
-  restore,
-  openOrdersTable,
-  popover,
-  summarize,
-  visitDashboard,
-  rightSidebar,
-  updateDashboardCards,
-  addOrUpdateDashboardCard,
-  cartesianChartCircle,
-} from "e2e/support/helpers";
 
 const { ORDERS, ORDERS_ID } = SAMPLE_DATABASE;
 
 describe("scenarios > question > null", () => {
   beforeEach(() => {
-    restore();
+    H.restore();
     cy.signInAsAdmin();
   });
 
   it("should display rows whose value is `null` (metabase#13571)", () => {
-    cy.createQuestion({
+    H.createQuestion({
       name: "13571",
       query: {
         "source-table": ORDERS_ID,
@@ -38,16 +28,16 @@ describe("scenarios > question > null", () => {
     cy.findByText("13571").click();
 
     cy.log("'No Results since at least v0.34.3");
-    cy.findByTestId("detail-shortcut").click();
+    H.openObjectDetail(0);
     cy.findByRole("dialog").within(() => {
-      cy.findByText(/Discount/i);
-      cy.findByText("Empty");
+      cy.findByText(/Discount/i).should("be.visible");
+      cy.findByText("empty").should("be.visible");
     });
   });
 
   it("pie chart should handle `0`/`null` values (metabase#13626)", () => {
     // Preparation for the test: "Arrange and Act phase" - see repro steps in #13626
-    cy.createQuestionAndDashboard({
+    H.createQuestionAndDashboard({
       questionDetails: {
         name: "13626",
         query: {
@@ -77,7 +67,7 @@ describe("scenarios > question > null", () => {
         ],
       },
     }).then(({ body: { card_id, dashboard_id } }) => {
-      addOrUpdateDashboardCard({
+      H.addOrUpdateDashboardCard({
         card_id,
         dashboard_id,
         card: {
@@ -99,31 +89,29 @@ describe("scenarios > question > null", () => {
 
       cy.log("Reported failing in v0.37.0.2");
       cy.findByTestId("dashcard-container").within(() => {
-        cy.findByTestId("loading-spinner").should("not.exist");
+        cy.findByTestId("loading-indicator").should("not.exist");
         cy.findByTestId("legend-caption-title").should("have.text", "13626");
-        cy.findByTestId("pie-chart").should("be.visible");
-        cy.findByTestId("detail-value")
-          .should("be.visible")
-          .and("have.text", "0");
+        cy.findByText("Total").should("be.visible");
+        cy.findByText("0").should("be.visible");
       });
     });
   });
 
   it("dashboard should handle cards with null values (metabase#13801)", () => {
-    cy.createNativeQuestion({
+    H.createNativeQuestion({
       name: "13801_Q1",
       native: { query: "SELECT null", "template-tags": {} },
       display: "scalar",
     }).then(({ body: { id: Q1_ID } }) => {
-      cy.createNativeQuestion({
+      H.createNativeQuestion({
         name: "13801_Q2",
         native: { query: "SELECT 0", "template-tags": {} },
         display: "scalar",
       }).then(({ body: { id: Q2_ID } }) => {
-        cy.createDashboard().then(({ body: { id: DASHBOARD_ID } }) => {
+        H.createDashboard().then(({ body: { id: DASHBOARD_ID } }) => {
           cy.log("Add both previously created questions to the dashboard");
 
-          updateDashboardCards({
+          H.updateDashboardCards({
             dashboard_id: DASHBOARD_ID,
             cards: [
               { card_id: Q1_ID, row: 0, col: 0, size_x: 8, size_y: 4 },
@@ -131,9 +119,9 @@ describe("scenarios > question > null", () => {
             ],
           });
 
-          visitDashboard(DASHBOARD_ID);
+          H.visitDashboard(DASHBOARD_ID);
           cy.log("P0 regression in v0.37.1!");
-          cy.findByTestId("loading-spinner").should("not.exist");
+          cy.findByTestId("loading-indicator").should("not.exist");
           cy.findByText("13801_Q1");
           cy.findAllByTestId("scalar-value").should("contain", "0");
           cy.findByText("13801_Q2");
@@ -143,19 +131,20 @@ describe("scenarios > question > null", () => {
   });
 
   it("should filter by clicking on the row with `null` value (metabase#18386)", () => {
-    openOrdersTable();
+    H.openOrdersTable();
 
     // Total of "39.72", and the next cell is the `discount` (which is empty)
     // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
     cy.findByText("39.72")
-      .closest(".test-TableInteractive-cellWrapper")
+      .closest("[role=gridcell]")
+      .parent()
       .next()
       .find("div")
       .should("be.empty")
       // Open the context menu that lets us apply filter using this column directly
       .click({ force: true });
 
-    popover().contains("=").click();
+    H.popover().contains("=").click();
 
     // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
     cy.findByText("39.72");
@@ -166,17 +155,17 @@ describe("scenarios > question > null", () => {
 
   describe("aggregations with null values", () => {
     it("summarize with null values (metabase#12585)", () => {
-      openOrdersTable();
+      H.openOrdersTable();
 
-      summarize();
-      rightSidebar().within(() => {
+      H.summarize();
+      H.rightSidebar().within(() => {
         // remove pre-selected "Count"
         cy.icon("close").click();
       });
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Add a metric").click();
+      cy.findByText("Add a function or metric").click();
       // dropdown immediately opens with the new set of metrics to choose from
-      popover().within(() => {
+      H.popover().within(() => {
         cy.findByText("Cumulative sum of ...").click();
         cy.findByText("Discount").click();
       });
@@ -191,7 +180,7 @@ describe("scenarios > question > null", () => {
         "not.exist",
       );
 
-      cartesianChartCircle().should("have.length.of.at.least", 40);
+      H.cartesianChartCircle().should("have.length.of.at.least", 40);
     });
   });
 });

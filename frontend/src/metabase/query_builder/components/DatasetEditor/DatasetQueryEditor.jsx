@@ -1,16 +1,24 @@
-import styled from "@emotion/styled";
+import cx from "classnames";
 import PropTypes from "prop-types";
 import { memo, useMemo, useState } from "react";
 
 import { isReducedMotionPreferred } from "metabase/lib/dom";
 import NativeQueryEditor from "metabase/query_builder/components/NativeQueryEditor";
+import { Box } from "metabase/ui";
 import * as Lib from "metabase-lib";
 
-import ResizableNotebook from "./ResizableNotebook";
+import { DatasetNotebook } from "./DatasetNotebook";
+import S from "./DatasetQueryEditor.module.css";
 
-const QueryEditorContainer = styled.div`
-  visibility: ${props => (props.isActive ? "visible" : "hidden")};
-`;
+// eslint-disable-next-line react/prop-types
+const QueryEditorContainer = ({ isActive, ...props }) => {
+  return (
+    <Box
+      className={cx(S.QueryEditorContainer, { [S.isHidden]: !isActive })}
+      {...props}
+    />
+  );
+};
 
 const SMOOTH_RESIZE_STYLE = { transition: "height 0.25s" };
 
@@ -33,12 +41,12 @@ function DatasetQueryEditor({
   const [isResizing, setResizing] = useState(false);
 
   const resizableBoxProps = useMemo(() => {
-    // Disables resizing by removing a handle in "metadata" mode
+    // Disables resizing by removing a handle in "columns" mode
     const resizeHandles = isActive ? ["s"] : [];
 
     // The editor can change its size in two cases:
     // 1. By manually resizing the window with a handle
-    // 2. Automatically when editor mode is changed between "query" and "metadata"
+    // 2. Automatically when editor mode is changed between "query" and "columns"
     // For the 2nd case, we're smoothing the resize effect by adding a `transition` style
     // For the 1st case, we need to make sure it's not included, so resizing doesn't lag
     const style =
@@ -69,21 +77,16 @@ function DatasetQueryEditor({
         <NativeQueryEditor
           {...props}
           question={question}
-          query={question.legacyQuery()} // memoized query
+          query={question.legacyNativeQuery()} // memoized query
           isInitiallyOpen
           hasTopBar={isActive}
           hasEditingSidebar={isActive}
           hasParametersList={false}
           resizableBoxProps={resizableBoxProps}
-          // We need to rerun the query after saving changes or canceling edits
-          // By default, NativeQueryEditor cancels an active query on unmount,
-          // which can also cancel the expected query rerun
-          // (see https://github.com/metabase/metabase/issues/19180)
-          cancelQueryOnLeave={false}
           onSetDatabaseId={onSetDatabaseId}
         />
       ) : (
-        <ResizableNotebook
+        <DatasetNotebook
           {...props}
           question={question}
           isResizing={isResizing}

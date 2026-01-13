@@ -1,32 +1,33 @@
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
 
-import { color } from "metabase/lib/colors";
 import { Icon } from "metabase/ui";
+import { color } from "metabase/ui/utils/colors";
 
 export const NoticeRoot = styled.div`
   display: flex;
   padding: 1rem 1rem 1rem 1.5rem;
   align-items: center;
-  background-color: ${color("bg-light")};
+  background-color: var(--mb-color-bg-light);
 `;
 
 export const NoticeContent = styled.div`
   flex: 1 1 auto;
   margin: 0 0.75rem;
-  color: ${color("text-dark")};
+  color: var(--mb-color-text-dark);
 `;
 
 export const NoticeWarningIcon = styled(Icon)`
-  color: ${color("accent5")};
+  color: ${() => color("accent5")};
   width: 1.5rem;
   height: 1.5rem;
 `;
 
 export const NoticeCloseIcon = styled(Icon)`
-  color: ${color("bg-dark")};
+  color: var(--mb-color-bg-dark);
   cursor: pointer;
 
   &:hover {
-    color: ${color("admin-navbar")};
+    color: ${() => color("admin-navbar")};
   }
 `;

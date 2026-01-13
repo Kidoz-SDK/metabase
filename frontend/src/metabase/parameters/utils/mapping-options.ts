@@ -1,14 +1,20 @@
-import { tag_names } from "cljs/metabase.shared.parameters.parameters";
-import { isActionDashCard } from "metabase/actions/utils";
-import { getColumnGroupName } from "metabase/common/utils/column-groups";
+import { t } from "ttag";
+import _ from "underscore";
+
+import { tag_names } from "cljs/metabase.parameters.shared";
 import { getColumnIcon } from "metabase/common/utils/columns";
-import { isVirtualDashCard } from "metabase/dashboard/utils";
+import {
+  isActionDashCard,
+  isQuestionDashCard,
+  isVirtualDashCard,
+} from "metabase/dashboard/utils";
+import { getGroupName } from "metabase/querying/filters/utils/groups";
+import { getAllowedIframeAttributes } from "metabase/visualizations/visualizations/IFrameViz/utils";
 import * as Lib from "metabase-lib";
 import { TemplateTagDimension } from "metabase-lib/v1/Dimension";
 import type { DimensionOptionsSection } from "metabase-lib/v1/DimensionOptions/types";
 import type Question from "metabase-lib/v1/Question";
 import {
-  columnFilterForParameter,
   dimensionFilterForParameter,
   variableFilterForParameter,
 } from "metabase-lib/v1/parameters/utils/filters";
@@ -17,18 +23,23 @@ import {
   buildDimensionTarget,
   buildTemplateTagVariableTarget,
   buildTextTagTarget,
+  getParameterColumns,
 } from "metabase-lib/v1/parameters/utils/targets";
+import { normalize } from "metabase-lib/v1/queries/utils/normalize";
 import type TemplateTagVariable from "metabase-lib/v1/variables/TemplateTagVariable";
 import type {
   BaseDashboardCard,
   Card,
+  DimensionReference,
   NativeParameterDimensionTarget,
   Parameter,
   ParameterTarget,
   ParameterVariableTarget,
   StructuredParameterDimensionTarget,
+  VirtualCard,
   WritebackParameter,
 } from "metabase-types/api";
+import { isStructuredDimensionTarget } from "metabase-types/guards";
 
 export type StructuredQuerySectionOption = {
   sectionName: string;
@@ -42,15 +53,15 @@ function buildStructuredQuerySectionOptions(
   query: Lib.Query,
   stageIndex: number,
   group: Lib.ColumnGroup,
+  columns: Lib.ColumnMetadata[],
 ): StructuredQuerySectionOption[] {
   const groupInfo = Lib.displayInfo(query, stageIndex, group);
-  const columns = Lib.getColumnsFromColumnGroup(group);
 
-  return columns.map(column => {
+  return columns.map((column) => {
     const columnInfo = Lib.displayInfo(query, stageIndex, column);
 
     return {
-      sectionName: getColumnGroupName(groupInfo),
+      sectionName: getGroupName(groupInfo, stageIndex) ?? t`Summaries`,
       name: columnInfo.displayName,
       icon: getColumnIcon(column),
       target: buildColumnTarget(query, stageIndex, column),
@@ -61,16 +72,17 @@ function buildStructuredQuerySectionOptions(
 
 function buildNativeQuerySectionOptions(
   section: DimensionOptionsSection,
+  stageIndex: number,
 ): NativeParameterMappingOption[] {
   return section.items
     .flatMap(({ dimension }) =>
       dimension instanceof TemplateTagDimension ? [dimension] : [],
     )
-    .map(dimension => ({
+    .map((dimension) => ({
       name: dimension.displayName(),
       icon: dimension.icon() ?? "",
       isForeign: false,
-      target: buildDimensionTarget(dimension),
+      target: buildDimensionTarget(dimension, stageIndex),
     }));
 }
 
@@ -122,20 +134,57 @@ export type ParameterMappingOption =
 export function getParameterMappingOptions(
   question: Question | undefined,
   parameter: Parameter | null | undefined = null,
-  card: Card,
+  card: Card | VirtualCard,
   dashcard: BaseDashboardCard | null | undefined = null,
+  parameterDashcard: BaseDashboardCard | null | undefined = null,
 ): ParameterMappingOption[] {
-  if (
-    dashcard &&
-    isVirtualDashCard(dashcard) &&
-    ["heading", "text"].includes(card.display)
-  ) {
-    const tagNames = tag_names(dashcard.visualization_settings.text || "");
-    return tagNames ? tagNames.map(buildTextTagOption) : [];
+  const isInlineParameterOnCardFromOtherTab =
+    parameterDashcard != null &&
+    parameterDashcard.dashboard_tab_id !== dashcard?.dashboard_tab_id;
+  if (isInlineParameterOnCardFromOtherTab) {
+    return [];
+  }
+
+  const isInlineParameterOfAnotherQuestionCard =
+    parameterDashcard != null &&
+    isQuestionDashCard(parameterDashcard) &&
+    parameterDashcard.id !== dashcard?.id;
+
+  // Check if there's an existing connection between this parameter and this specific dashcard/card combo
+  const hasExistingConnection =
+    parameter != null &&
+    dashcard != null &&
+    isQuestionDashCard(dashcard) &&
+    "id" in card &&
+    dashcard.parameter_mappings?.some(
+      (mapping) =>
+        mapping.parameter_id === parameter.id && mapping.card_id === card.id,
+    );
+
+  // Only block if it's an inline parameter of another card AND there's no existing connection
+  // to allow users to see and potentially disconnect existing connections
+  if (isInlineParameterOfAnotherQuestionCard && !hasExistingConnection) {
+    return [];
+  }
+
+  if (dashcard && isVirtualDashCard(dashcard)) {
+    if (["heading", "text"].includes(card.display)) {
+      const tagNames = tag_names(dashcard.visualization_settings.text || "");
+      return tagNames?.map(buildTextTagOption) ?? [];
+    } else if (card.display === "iframe") {
+      const iframeAttributes = getAllowedIframeAttributes(
+        dashcard.visualization_settings.iframe,
+      );
+      const tagNames = tag_names(iframeAttributes?.src || "");
+      return tagNames?.map(buildTextTagOption) ?? [];
+    } else if (card.display === "link") {
+      const tagNames = tag_names(dashcard.visualization_settings.link?.url);
+      return tagNames?.map(buildTextTagOption) ?? [];
+    }
   }
 
   if (dashcard && isActionDashCard(dashcard)) {
-    const actionParams = dashcard?.action?.parameters?.map(param => ({
+    const actionParams = dashcard?.action?.parameters?.map((param) => ({
       icon: "variable",
       isForeign: false,
       ...param,
@@ -153,43 +202,127 @@ export function getParameterMappingOptions(
   }
 
   const { isNative } = Lib.queryDisplayInfo(question.query());
-  const isQuestion = question.type() === "question";
-  if (!isNative || !isQuestion) {
-    // treat the dataset/model question like it is already composed so that we can apply
-    // dataset/model-specific metadata to the underlying dimension options
-    const query = !isQuestion
-      ? question.composeQuestionAdhoc().query()
-      : question.query();
-    const stageIndex = -1;
-    const availableColumns = Lib.filterableColumns(query, stageIndex);
-    const parameterColumns = parameter
-      ? availableColumns.filter(columnFilterForParameter(parameter))
-      : availableColumns;
-    const columnGroups = Lib.groupColumns(parameterColumns);
+  if (!isNative) {
+    const { query, columns } = getParameterColumns(
+      question,
+      parameter ?? undefined,
+    );
 
-    const options = columnGroups.flatMap(group =>
-      buildStructuredQuerySectionOptions(query, stageIndex, group),
+    const columnsByStageIndex = _.groupBy(columns, "stageIndex");
+    const options = Object.entries(columnsByStageIndex).flatMap(
+      ([stageIndexString, columns]) => {
+        const groups = Lib.groupColumns(columns.map(({ column }) => column));
+        const stageIndex = parseInt(stageIndexString, 10);
+
+        return groups.flatMap((group) =>
+          buildStructuredQuerySectionOptions(
+            query,
+            stageIndex,
+            group,
+            Lib.getColumnsFromColumnGroup(group),
+          ),
+        );
+      },
     );
 
     return options;
   }
 
-  const legacyQuery = question.legacyQuery();
+  const legacyNativeQuery = question.legacyNativeQuery();
   const options: NativeParameterMappingOption[] = [];
+  const stageIndex = Lib.stageCount(question.query()) - 1;
+
+  if (!legacyNativeQuery) {
+    return options;
+  }
 
   options.push(
-    ...legacyQuery
+    ...legacyNativeQuery
       .variables(parameter ? variableFilterForParameter(parameter) : undefined)
       .map(buildVariableOption),
   );
   options.push(
-    ...legacyQuery
+    ...legacyNativeQuery
       .dimensionOptions(
         parameter ? dimensionFilterForParameter(parameter) : undefined,
       )
       .sections()
-      .flatMap(section => buildNativeQuerySectionOptions(section)),
+      .flatMap((section) =>
+        buildNativeQuerySectionOptions(section, stageIndex),
+      ),
   );
 
   return options;
+}
+
+export function getMappingOptionByTarget(
+  mappingOptions: ParameterMappingOption[],
+  target?: ParameterTarget | null,
+  question?: Question,
+  parameter?: Parameter,
+): ParameterMappingOption | undefined {
+  if (!target) {
+    return;
+  }
+
+  const matchedMappingOptions = mappingOptions.filter((mappingOption) =>
+    _.isEqual(mappingOption.target, target),
+  );
+  // Native queries - targets CAN be tested for equality
+  // MBQL queries - targets generally CANNOT be tested for equality, but if there is an exact match, we use it to
+  // optimize performance
+  if (matchedMappingOptions.length === 1) {
+    return matchedMappingOptions[0];
+  }
+  // `Lib.findColumnIndexesFromLegacyRefs` throws for non-MBQL references, so we
+  // need to ignore such references here
+  if (!question || !isStructuredDimensionTarget(target)) {
+    return undefined;
+  }
+
+  const { query, columns } = getParameterColumns(question, parameter);
+  const stageCount = Lib.stageCount(query);
+  const lastStageIndex = stageCount - 1;
+  const stageIndex = getStageIndexFromTarget(target) ?? lastStageIndex;
+  if (stageIndex >= stageCount) {
+    return;
+  }
+
+  const stageColumns = columns
+    .filter((column) => column.stageIndex === stageIndex)
+    .map(({ column }) => column);
+  const stageMappingOptions = mappingOptions.filter(
+    ({ target }) => getStageIndexFromTarget(target) === stageIndex,
+  );
+
+  const normalizedTarget = normalize(target);
+  const fieldRef = normalizedTarget[1];
+  const [columnByTargetIndex] = Lib.findColumnIndexesFromLegacyRefs(
+    query,
+    stageIndex,
+    stageColumns,
+    [fieldRef],
+  );
+
+  if (columnByTargetIndex !== -1) {
+    const mappingColumnIndexes = Lib.findColumnIndexesFromLegacyRefs(
+      query,
+      stageIndex,
+      stageColumns,
+      stageMappingOptions.map(({ target }) => target[1] as DimensionReference),
+    );
+
+    const mappingIndex = mappingColumnIndexes.indexOf(columnByTargetIndex);
+    if (mappingIndex >= 0) {
+      return stageMappingOptions[mappingIndex];
+    }
+  }
+
+  return undefined;
+}
+
+function getStageIndexFromTarget(target: ParameterTarget): number | undefined {
+  if (isStructuredDimensionTarget(target)) {
+    return target[2]?.["stage-number"];
+  }
 }

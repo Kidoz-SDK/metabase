@@ -1,18 +1,12 @@
+const { H } = cy;
 import { USERS } from "e2e/support/cypress_data";
-import {
-  commandPalette,
-  commandPaletteButton,
-  commandPaletteInput,
-  restore,
-  visitFullAppEmbeddingUrl,
-} from "e2e/support/helpers";
 
-["admin", "normal"].forEach(user => {
+["admin", "normal"].forEach((user) => {
   describe(`search > ${user} user`, () => {
     beforeEach(() => {
-      restore();
+      H.restore();
       cy.signIn(user);
-      visitFullAppEmbeddingUrl({
+      H.visitFullAppEmbeddingUrl({
         url: "/",
         qs: { top_nav: true, search: true },
       });
@@ -24,7 +18,7 @@ import {
         user === "admin" ? Object.entries(USERS).length : 1;
 
       cy.findByPlaceholderText("Search…").type("pers");
-      cy.findByTestId("loading-spinner").should("not.exist");
+      cy.findByTestId("loading-indicator").should("not.exist");
       cy.findByTestId("search-results-list").within(() => {
         cy.findAllByText(/personal collection$/i).should(
           "have.length",
@@ -37,18 +31,16 @@ import {
 
 describe("command palette", () => {
   beforeEach(() => {
-    restore();
+    H.restore();
     cy.signInAsAdmin();
-    cy.request("PUT", "/api/setting/search-typeahead-enabled", {
-      value: false,
-    });
+    H.updateSetting("search-typeahead-enabled", false);
     cy.visit("/");
   });
 
   it("should not display search results in the palette when search-typeahead-enabled is false", () => {
-    commandPaletteButton().click();
-    commandPaletteInput().type("ord");
-    commandPalette()
+    H.commandPaletteButton().click();
+    H.commandPaletteInput().type("ord");
+    H.commandPalette()
       .findByRole("option", { name: /View search results/ })
       .should("exist");
   });

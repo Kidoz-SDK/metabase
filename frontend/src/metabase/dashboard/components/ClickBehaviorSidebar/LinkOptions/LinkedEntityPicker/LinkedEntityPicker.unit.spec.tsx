@@ -5,12 +5,12 @@ import {
   setupCollectionByIdEndpoint,
   setupCollectionItemsEndpoint,
   setupCollectionsEndpoints,
-  setupRecentViewsEndpoints,
+  setupDatabasesEndpoints,
+  setupRecentViewsAndSelectionsEndpoints,
   setupSearchEndpoints,
 } from "__support__/server-mocks";
 import {
   mockGetBoundingClientRect,
-  mockScrollBy,
   renderWithProviders,
   screen,
 } from "__support__/ui";
@@ -87,12 +87,10 @@ function setup({
   searchResults = [],
   collectionItems = [],
 }: SetupOpts) {
-  mockScrollBy();
   mockGetBoundingClientRect();
   setupCollectionsEndpoints({ collections: COLLECTIONS });
-
-  setupCollectionByIdEndpoint({ collections: COLLECTIONS }),
-    setupSearchEndpoints(searchResults);
+  setupCollectionByIdEndpoint({ collections: COLLECTIONS });
+  setupSearchEndpoints(searchResults);
   setupCollectionItemsEndpoint({
     collection: ROOT_COLLECTION,
     collectionItems,
@@ -105,7 +103,8 @@ function setup({
     collection: PUBLIC_COLLECTION,
     collectionItems: [],
   });
-  setupRecentViewsEndpoints([]);
+  setupRecentViewsAndSelectionsEndpoints([]);
+  setupDatabasesEndpoints([]);
 
   fetchMock.get("path:/api/user/recipients", { data: [] });
 
@@ -197,10 +196,11 @@ describe("LinkedEntityPicker", () => {
             await screen.findByText(dashboardSearchResult.name),
           ).toBeInTheDocument();
 
-          const call = fetchMock.lastCall("path:/api/search");
+          const call = fetchMock.callHistory.lastCall("path:/api/search");
           const urlObject = new URL(checkNotNull(call?.request?.url));
           expect(urlObject.pathname).toEqual("/api/search");
           expect(urlSearchParamsToObject(urlObject.searchParams)).toEqual({
+            context: "entity-picker",
             models: "dashboard",
             q: typedText,
             filter_items_in_personal_collection: "exclude",
@@ -257,10 +257,11 @@ describe("LinkedEntityPicker", () => {
             await screen.findByText(dashboardSearchResult.name),
           ).toBeInTheDocument();
 
-          const call = fetchMock.lastCall("path:/api/search");
+          const call = fetchMock.callHistory.lastCall("path:/api/search");
           const urlObject = new URL(checkNotNull(call?.request?.url));
           expect(urlObject.pathname).toEqual("/api/search");
           expect(urlSearchParamsToObject(urlObject.searchParams)).toEqual({
+            context: "entity-picker",
             models: "dashboard",
             q: typedText,
           });
@@ -328,12 +329,13 @@ describe("LinkedEntityPicker", () => {
             await screen.findByPlaceholderText(/search/i),
             typedText,
           );
+          await userEvent.click(await screen.findByText("Everywhere"));
 
           expect(
             await screen.findByText(questionSearchResult.name),
           ).toBeInTheDocument();
 
-          const call = fetchMock.lastCall("path:/api/search");
+          const call = fetchMock.callHistory.lastCall("path:/api/search");
           const urlObject = new URL(checkNotNull(call?.request?.url));
           expect(urlObject.pathname).toEqual("/api/search");
 
@@ -342,6 +344,7 @@ describe("LinkedEntityPicker", () => {
             "dataset",
           ]);
           expect(urlSearchParamsToObject(urlObject.searchParams)).toEqual({
+            context: "entity-picker",
             models: ["card", "dataset"],
             q: typedText,
             filter_items_in_personal_collection: "exclude",
@@ -390,15 +393,17 @@ describe("LinkedEntityPicker", () => {
             await screen.findByPlaceholderText(/search/i),
             typedText,
           );
+          await userEvent.click(screen.getByText("Everywhere"));
 
           expect(
             await screen.findByText(questionSearchResult.name),
           ).toBeInTheDocument();
 
-          const call = fetchMock.lastCall("path:/api/search");
+          const call = fetchMock.callHistory.lastCall("path:/api/search");
           const urlObject = new URL(checkNotNull(call?.request?.url));
           expect(urlObject.pathname).toEqual("/api/search");
           expect(urlSearchParamsToObject(urlObject.searchParams)).toEqual({
+            context: "entity-picker",
             models: ["card", "dataset"],
             q: typedText,
           });

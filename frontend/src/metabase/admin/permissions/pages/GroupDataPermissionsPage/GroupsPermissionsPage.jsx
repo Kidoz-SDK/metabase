@@ -1,45 +1,47 @@
 import { bindActionCreators } from "@reduxjs/toolkit";
 import PropTypes from "prop-types";
 import { Fragment, useCallback } from "react";
-import { connect } from "react-redux";
 import { push } from "react-router-redux";
 import { useAsync } from "react-use";
 import { t } from "ttag";
 import _ from "underscore";
 
 import { PermissionsEditorLegacyNoSelfServiceWarning } from "metabase/admin/permissions/components/PermissionsEditor/PermissionsEditorLegacyWarning";
-import { useSelector, useDispatch } from "metabase/lib/redux";
+import { connect, useDispatch, useSelector } from "metabase/lib/redux";
 import { PLUGIN_ADVANCED_PERMISSIONS } from "metabase/plugins";
+import { getSetting } from "metabase/selectors/settings";
 import { PermissionsApi } from "metabase/services";
-import { Loader, Center } from "metabase/ui";
+import { Center, Loader } from "metabase/ui";
 
 import {
   PermissionsEditor,
   PermissionsEditorEmptyState,
 } from "../../components/PermissionsEditor";
+import { PermissionsEditorSplitPermsMessage } from "../../components/PermissionsEditor/PermissionsEditorSplitPermsMessage";
 import { PermissionsSidebar } from "../../components/PermissionsSidebar";
 import {
-  updateDataPermission,
   LOAD_DATA_PERMISSIONS_FOR_GROUP,
+  updateDataPermission,
 } from "../../permissions";
 import {
   getDatabasesPermissionEditor,
+  getGroupsSidebar,
   getIsLoadingDatabaseTables,
   getLoadingDatabaseTablesError,
-  getGroupsSidebar,
 } from "../../selectors/data-permissions";
 import {
-  getGroupFocusPermissionsUrl,
   GROUPS_BASE_PATH,
+  getGroupFocusPermissionsUrl,
 } from "../../utils/urls";
 
-const mapDispatchToProps = dispatch => ({
+const mapDispatchToProps = (dispatch) => ({
   dispatch,
   ...bindActionCreators(
     {
       updateDataPermission,
-      switchView: entityType => push(`/admin/permissions/data/${entityType}/`),
-      navigateToItem: item => push(`${GROUPS_BASE_PATH}/${item.id}`),
+      switchView: (entityType) =>
+        push(`/admin/permissions/data/${entityType}/`),
+      navigateToItem: (item) => push(`${GROUPS_BASE_PATH}/${item.id}`),
       navigateToTableItem: (item, { groupId }) => {
         return push(getGroupFocusPermissionsUrl(groupId, item.entityId));
       },
@@ -98,26 +100,29 @@ function GroupsPermissionsPage({
     }
   }, [params.groupId]);
 
-  const permissionEditor = useSelector(state =>
+  const permissionEditor = useSelector((state) =>
     getDatabasesPermissionEditor(state, { params }),
+  );
+  const showSplitPermsMessage = useSelector((state) =>
+    getSetting(state, "show-updated-permission-banner"),
   );
 
   const handleEntityChange = useCallback(
-    entityType => {
+    (entityType) => {
       switchView(entityType);
     },
     [switchView],
   );
 
   const handleSidebarItemSelect = useCallback(
-    item => {
+    (item) => {
       navigateToItem(item, params);
     },
     [navigateToItem, params],
   );
 
   const handleTableItemSelect = useCallback(
-    item => {
+    (item) => {
       navigateToTableItem(item, params);
     },
     [navigateToTableItem, params],
@@ -140,7 +145,7 @@ function GroupsPermissionsPage({
     dispatch(action.actionCreator(item.entityId, params.groupId, "group"));
   };
 
-  const handleBreadcrumbsItemSelect = item => dispatch(push(item.url));
+  const handleBreadcrumbsItemSelect = (item) => dispatch(push(item.url));
 
   const showEmptyState = !permissionEditor && !isEditorLoading && !editorError;
   const showLegacyNoSelfServiceWarning =
@@ -177,7 +182,12 @@ function GroupsPermissionsPage({
           onChange={handlePermissionChange}
           onAction={handleAction}
           onBreadcrumbsItemSelect={handleBreadcrumbsItemSelect}
-          warnings={() => (
+          preHeaderContent={() => (
+            <>
+              {showSplitPermsMessage && <PermissionsEditorSplitPermsMessage />}
+            </>
+          )}
+          postHeaderContent={() => (
             <>
               {showLegacyNoSelfServiceWarning && (
                 <PermissionsEditorLegacyNoSelfServiceWarning />

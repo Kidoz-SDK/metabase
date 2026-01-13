@@ -1,5 +1,8 @@
 (ns metabase.lib.util.match.impl
-  "Internal implementation of the MBQL `match` and `replace` macros. Don't use these directly.")
+  "Internal implementation of the MBQL `match` and `replace` macros. Don't use these directly."
+  (:refer-clojure :exclude [mapv get-in])
+  (:require
+   [metabase.util.performance :refer [mapv get-in]]))
 
 ;; have to do this at runtime because we don't know if a symbol is a class or pred or whatever when we compile the macro
 (defn match-with-pred-or-class
@@ -26,23 +29,32 @@
   {:pre [(fn? match-fn) (vector? clause-parents)]}
   (cond
     (map? form)
-    (mapcat (fn [[k v]]
-              (match-fn (conj clause-parents k) v))
-            form)
+    (reduce-kv (fn [acc k v]
+                 (if-let [match (match-fn (conj clause-parents k) v)]
+                   ;; Deliberately not using into to avoid converting to transient and back.
+                   (reduce conj acc match)
+                   acc))
+               [] form)
 
     (sequential? form)
-    (mapcat (partial match-fn (if (keyword? (first form))
-                                (conj clause-parents (first form))
-                                clause-parents))
-            form)))
+    (let [fst (first form)
+          k (if (keyword? fst)
+              (conj clause-parents fst)
+              clause-parents)]
+      (reduce (fn [acc v]
+                (if-let [match (match-fn k v)]
+                  (reduce conj acc match)
+                  acc))
+              [] form))))
 
 (defn replace-in-collection
   "Inernal impl for `replace`. Recursively replace values in a collection using a `replace-fn`."
   [replace-fn clause-parents form]
   (cond
     (map? form)
-    (into form (for [[k v] form]
-                 [k (replace-fn (conj clause-parents k) v)]))
+    (reduce-kv (fn [form k v]
+                 (assoc form k (replace-fn (conj clause-parents k) v)))
+               form form)
 
     (sequential? form)
     (mapv (partial replace-fn (if (keyword? (first form))
@@ -57,3 +69,35 @@
   (if-not (seq (get-in m ks))
     m
     (apply update-in m ks f args)))
+
+(defn vector!
+  "Return nil if `obj` is not a vector, otherwise return `obj`."
+  [obj]
+  (when (vector? obj) obj))
+
+(defn map!
+  "Return nil if `obj` is not a map, otherwise return `obj`."
+  [obj]
+  (when (map? obj) obj))
+
+(defn count=
+  "Return true if collection `coll` has precisely `cnt` elements in it."
+  [coll cnt]
+  (= (count coll) cnt))
+
+(defn match-lite-in-collection
+  "Internal impl for `match-lite`. If `form` is a collection, call `match-fn` to recursively look for matches in it."
+  [match-fn form]
+  {:pre [(fn? match-fn)]}
+  (cond
+    (map? form)
+    (reduce-kv (fn [_ _ v]
+                 (when-let [match (match-fn v)]
+                   (reduced match)))
+               nil form)
+
+    (sequential? form)
+    (reduce (fn [_ v]
+              (when-let [match (match-fn v)]
+                (reduced match)))
+            nil form)))

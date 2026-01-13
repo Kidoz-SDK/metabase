@@ -4,9 +4,7 @@ import type { AxisBaseOptionCommon } from "echarts/types/src/coord/axisCommonTyp
 import { parseNumberValue } from "metabase/lib/number";
 import { CHART_STYLE } from "metabase/visualizations/echarts/cartesian/constants/style";
 import type {
-  CartesianChartModel,
-  DataKey,
-  Extent,
+  BaseCartesianChartModel,
   NumericAxisScaleTransforms,
   NumericXAxisModel,
   TimeSeriesXAxisModel,
@@ -31,19 +29,21 @@ export const getAxisNameGap = (ticksWidth: number): number => {
 };
 
 const getCustomAxisRange = (
-  axisExtent: Extent,
   customMin: number | null,
   customMax: number | null,
+  isNormalized: boolean | undefined,
 ) => {
-  const [extentMin, extentMax] = axisExtent;
-  // if min/max are not specified or within series extents return `undefined`
-  // so that ECharts compute a rounded range automatically
-  const finalMin =
-    customMin != null && customMin < extentMin ? customMin : undefined;
-  const finalMax =
-    customMax != null && customMax > extentMax ? customMax : undefined;
+  // If this is a normalized range, respect custom min & max
+  // This also accommodates non-normalized custom min & max values
+  // Allows users to supply e.g. 10 for 10% min as opposed to 0.1
+  if (isNormalized) {
+    return {
+      min: customMin != null ? customMin / 100 : undefined,
+      max: customMax != null ? customMax / 100 : undefined,
+    };
+  }
 
-  return { min: finalMin, max: finalMax };
+  return { min: customMin, max: customMax };
 };
 
 export const getYAxisRange = (
@@ -61,11 +61,11 @@ export const getYAxisRange = (
     yAxisScaleTransforms,
   );
 
-  return getCustomAxisRange(axisModel.extent, customMin, customMax);
+  return getCustomAxisRange(customMin, customMax, axisModel.isNormalized);
 };
 
 export const getAxisNameDefaultOption = (
-  { getColor, fontFamily }: RenderingContext,
+  { getColor, fontFamily, theme }: RenderingContext,
   nameGap: number,
   name: string | undefined,
   rotate?: number,
@@ -75,21 +75,22 @@ export const getAxisNameDefaultOption = (
   nameLocation: "middle",
   nameRotate: rotate,
   nameTextStyle: {
-    color: getColor("text-dark"),
-    fontSize: CHART_STYLE.axisName.size,
+    color: getColor("text-primary"),
+    fontSize: theme.cartesian.label.fontSize,
     fontWeight: CHART_STYLE.axisName.weight,
     fontFamily,
   },
 });
 
 export const getTicksDefaultOption = ({
+  theme,
   getColor,
   fontFamily,
 }: RenderingContext) => {
   return {
     hideOverlap: true,
-    color: getColor("text-dark"),
-    fontSize: CHART_STYLE.axisTicks.size,
+    color: getColor("text-primary"),
+    fontSize: theme.cartesian.label.fontSize,
     fontWeight: CHART_STYLE.axisTicks.weight,
     fontFamily,
   };
@@ -107,10 +108,13 @@ export const getDimensionTicksDefaultOption = (
 };
 
 const getHistogramTicksOptions = (
-  chartModel: CartesianChartModel,
+  chartModel: BaseCartesianChartModel,
   settings: ComputedVisualizationSettings,
   chartMeasurements: ChartMeasurements,
+  { theme }: RenderingContext,
 ) => {
+  const { fontSize } = theme.cartesian.label;
+
   if (settings["graph.x_axis.scale"] !== "histogram") {
     return {};
   }
@@ -120,16 +124,14 @@ const getHistogramTicksOptions = (
   const options = { showMinLabel: false, showMaxLabel: true };
 
   if (settings["graph.x_axis.axis_enabled"] === "rotate-45") {
-    const topOffset =
-      (histogramDimensionWidth + CHART_STYLE.axisTicks.size / 2) * Math.SQRT1_2;
+    const topOffset = (histogramDimensionWidth + fontSize / 2) * Math.SQRT1_2;
     return {
       ...options,
       padding: [0, topOffset, 0, 0],
       margin: -histogramDimensionWidth / 2 + CHART_STYLE.axisTicksMarginX,
     };
   } else if (settings["graph.x_axis.axis_enabled"] === "rotate-90") {
-    const rightOffset =
-      histogramDimensionWidth / 2 - CHART_STYLE.axisTicks.size / 2;
+    const rightOffset = histogramDimensionWidth / 2 - fontSize / 2;
     return {
       ...options,
       verticalAlign: "bottom",
@@ -169,6 +171,7 @@ const getCommonDimensionAxisOptions = (
         : undefined,
     ),
     mainType: "xAxis" as const,
+    nameMoveOverlap: false,
     axisTick: {
       show: false,
     },
@@ -185,7 +188,7 @@ const getCommonDimensionAxisOptions = (
 };
 
 export const buildDimensionAxis = (
-  chartModel: CartesianChartModel,
+  chartModel: BaseCartesianChartModel,
   width: number,
   settings: ComputedVisualizationSettings,
   chartMeasurements: ChartMeasurements,
@@ -308,7 +311,7 @@ export const buildTimeSeriesDimensionAxis = (
 };
 
 export const buildCategoricalDimensionAxis = (
-  chartModel: CartesianChartModel,
+  chartModel: BaseCartesianChartModel,
   originalSettings: ComputedVisualizationSettings,
   chartMeasurements: ChartMeasurements,
   renderingContext: RenderingContext,
@@ -334,7 +337,12 @@ export const buildCategoricalDimensionAxis = (
     axisLabel: {
       margin: CHART_STYLE.axisTicksMarginX,
       ...getDimensionTicksDefaultOption(settings, renderingContext),
-      ...getHistogramTicksOptions(chartModel, settings, chartMeasurements),
+      ...getHistogramTicksOptions(
+        chartModel,
+        settings,
+        chartMeasurements,
+        renderingContext,
+      ),
       interval: () => true,
       formatter: (value: string) => {
         const numberValue = parseNumberValue(value);
@@ -355,41 +363,41 @@ export const buildMetricAxis = (
   settings: ComputedVisualizationSettings,
   position: "left" | "right",
   hasSplitLine: boolean,
-  hoveredSeriesDataKey: DataKey | null,
   renderingContext: RenderingContext,
 ): YAXisOption => {
   const shouldFlipAxisName = position === "right";
   const nameGap = getAxisNameGap(ticksWidth);
 
   const range = getYAxisRange(axisModel, yAxisScaleTransforms, settings);
-  let isFocused = false;
-  let isBlurred = false;
 
-  if (hoveredSeriesDataKey != null) {
-    isFocused = axisModel.seriesKeys.includes(hoveredSeriesDataKey);
-    isBlurred = !isFocused;
-  }
+  const {
+    type: _omitType,
+    mainType: _omitMainType,
+    ...axisNameOptions
+  } = getAxisNameDefaultOption(
+    renderingContext,
+    nameGap,
+    axisModel.label,
+    shouldFlipAxisName ? -90 : undefined,
+  );
 
   return {
-    show: !isBlurred,
+    show: true,
+    nameMoveOverlap: false,
     scale: !!settings["graph.y_axis.unpin_from_zero"],
     type: "value",
+    splitNumber: axisModel.splitNumber,
     ...range,
-    ...getAxisNameDefaultOption(
-      renderingContext,
-      nameGap,
-      axisModel.label,
-      shouldFlipAxisName ? -90 : undefined,
-    ),
-    splitLine:
-      (hasSplitLine || isFocused) && !!settings["graph.y_axis.axis_enabled"]
-        ? {
-            lineStyle: {
-              type: 5,
-              color: renderingContext.getColor("border"),
-            },
-          }
-        : undefined,
+    ...axisNameOptions,
+    splitLine: settings["graph.y_axis.axis_enabled"]
+      ? {
+          lineStyle: {
+            type: "solid",
+            opacity: hasSplitLine ? 1 : 0,
+            ...renderingContext.theme.cartesian.splitLine.lineStyle,
+          },
+        }
+      : undefined,
     position,
     axisLine: {
       show: false,
@@ -401,8 +409,7 @@ export const buildMetricAxis = (
       margin: CHART_STYLE.axisTicksMarginY,
       show: !!settings["graph.y_axis.axis_enabled"],
       ...getTicksDefaultOption(renderingContext),
-      // @ts-expect-error TODO: figure out EChart types
-      formatter: rawValue =>
+      formatter: (rawValue) =>
         axisModel.formatter(
           yAxisScaleTransforms.fromEChartsAxisValue(rawValue),
         ),
@@ -411,10 +418,9 @@ export const buildMetricAxis = (
 };
 
 const buildMetricsAxes = (
-  chartModel: CartesianChartModel,
+  chartModel: BaseCartesianChartModel,
   chartMeasurements: ChartMeasurements,
   settings: ComputedVisualizationSettings,
-  hoveredSeriesDataKey: DataKey | null,
   renderingContext: RenderingContext,
 ): YAXisOption[] => {
   const axes: YAXisOption[] = [];
@@ -429,7 +435,6 @@ const buildMetricsAxes = (
         settings,
         "left",
         true,
-        hoveredSeriesDataKey,
         renderingContext,
       ),
     );
@@ -445,7 +450,6 @@ const buildMetricsAxes = (
         settings,
         "right",
         isOnlyAxis,
-        hoveredSeriesDataKey,
         renderingContext,
       ),
     );
@@ -455,12 +459,11 @@ const buildMetricsAxes = (
 };
 
 export const buildAxes = (
-  chartModel: CartesianChartModel,
+  chartModel: BaseCartesianChartModel,
   width: number,
   chartMeasurements: ChartMeasurements,
   settings: ComputedVisualizationSettings,
   hasTimelineEvents: boolean,
-  hoveredSeriesDataKey: DataKey | null,
   renderingContext: RenderingContext,
 ) => {
   return {
@@ -476,8 +479,18 @@ export const buildAxes = (
       chartModel,
       chartMeasurements,
       settings,
-      hoveredSeriesDataKey,
       renderingContext,
     ),
   };
 };
+
+export const createAxisVisibilityOption = ({
+  show,
+  splitLineVisible,
+}: {
+  show: boolean;
+  splitLineVisible: boolean;
+}) => ({
+  show,
+  splitLine: { lineStyle: { opacity: splitLineVisible ? 1 : 0 } },
+});

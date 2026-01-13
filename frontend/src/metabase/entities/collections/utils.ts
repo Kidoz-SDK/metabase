@@ -2,15 +2,16 @@ import {
   isRootCollection,
   isRootPersonalCollection,
   isRootTrashCollection,
+  isSyncedCollection,
 } from "metabase/collections/utils";
 import { color } from "metabase/lib/colors";
-import { PLUGIN_COLLECTIONS } from "metabase/plugins";
+import { PLUGIN_COLLECTIONS, PLUGIN_DATA_STUDIO } from "metabase/plugins";
 import { getUserPersonalCollectionId } from "metabase/selectors/user";
 import type { IconName, IconProps } from "metabase/ui";
 import type { Collection, CollectionContentModel } from "metabase-types/api";
 import type { State } from "metabase-types/store";
 
-import { ROOT_COLLECTION, PERSONAL_COLLECTIONS } from "./constants";
+import { PERSONAL_COLLECTIONS, ROOT_COLLECTION } from "./constants";
 
 export function normalizedCollection(collection: Collection) {
   return isRootCollection(collection) ? ROOT_COLLECTION : collection;
@@ -18,7 +19,7 @@ export function normalizedCollection(collection: Collection) {
 
 export function getCollectionIcon(
   collection: Partial<Collection>,
-  { tooltip = "default" } = {},
+  { tooltip = "default", isTenantUser = false } = {},
 ): {
   name: IconName;
   color?: string;
@@ -36,8 +37,21 @@ export function getCollectionIcon(
     return { name: "person" };
   }
 
-  const type = PLUGIN_COLLECTIONS.getCollectionType(collection);
+  if (isSyncedCollection(collection) && !isTenantUser) {
+    // tenant users see the normal icon, they don't know what a synced collection is
+    return { name: "synced_collection" };
+  }
 
+  switch (PLUGIN_DATA_STUDIO.getLibraryCollectionType(collection.type)) {
+    case "root":
+      return { name: "repository" };
+    case "data":
+      return { name: "table" };
+    case "metrics":
+      return { name: "metric" };
+  }
+
+  const type = PLUGIN_COLLECTIONS.getCollectionType(collection);
   return type
     ? {
         name: type.icon as unknown as IconName,
@@ -68,9 +82,15 @@ export interface CollectionTreeItem extends Collection {
 
 export function buildCollectionTree(
   collections: Collection[] = [],
-  modelFilter?: (model: CollectionContentModel) => boolean,
+  {
+    modelFilter,
+    isTenantUser = false,
+  }: {
+    modelFilter?: (model: CollectionContentModel) => boolean;
+    isTenantUser?: boolean;
+  } = {},
 ): CollectionTreeItem[] {
-  return collections.flatMap(collection => {
+  return collections.flatMap((collection) => {
     const isPersonalRoot = collection.id === PERSONAL_COLLECTIONS.id;
 
     const isMatchedByFilter =
@@ -84,8 +104,8 @@ export function buildCollectionTree(
 
     const children = !isRootTrashCollection(collection)
       ? buildCollectionTree(
-          collection.children?.filter(child => !child.archived) || [],
-          modelFilter,
+          collection.children?.filter((child) => !child.archived) || [],
+          { modelFilter, isTenantUser },
         )
       : [];
 
@@ -96,7 +116,7 @@ export function buildCollectionTree(
     return {
       ...collection,
       schemaName: collection.originalName || collection.name,
-      icon: getCollectionIcon(collection),
+      icon: getCollectionIcon(collection, { isTenantUser }),
       children,
     };
   });

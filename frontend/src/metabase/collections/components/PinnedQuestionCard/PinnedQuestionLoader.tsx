@@ -1,12 +1,17 @@
-import { useRef } from "react";
+import { useMemo } from "react";
 
-import QuestionResultLoader from "metabase/containers/QuestionResultLoader";
-import Questions from "metabase/entities/questions";
+import { useGetCardQuery } from "metabase/api";
+import QuestionResultLoader from "metabase/common/components/QuestionResultLoader";
+import { getResponseErrorMessage } from "metabase/lib/errors";
+import { useSelector } from "metabase/lib/redux";
+import { getMetadata } from "metabase/selectors/metadata";
+import type { IconName } from "metabase/ui";
 import {
   getGenericErrorMessage,
   getPermissionErrorMessage,
 } from "metabase/visualizations/lib/errors";
-import type Question from "metabase-lib/v1/Question";
+import Question from "metabase-lib/v1/Question";
+import type { RawSeries } from "metabase-types/api";
 
 export interface PinnedQuestionLoaderProps {
   id: number;
@@ -16,14 +21,9 @@ export interface PinnedQuestionLoaderProps {
 export interface PinnedQuestionChildrenProps {
   loading: boolean;
   question?: Question;
-  rawSeries?: any[];
+  rawSeries?: RawSeries;
   error?: string;
-  errorIcon?: string;
-}
-
-export interface QuestionLoaderProps {
-  loading: boolean;
-  question: Question;
+  errorIcon?: IconName;
 }
 
 export interface QuestionResultLoaderProps {
@@ -31,51 +31,64 @@ export interface QuestionResultLoaderProps {
   error?: any;
   result?: any;
   results?: any;
-  rawSeries?: any[];
+  rawSeries?: RawSeries;
 }
 
 const PinnedQuestionLoader = ({
   id,
   children,
 }: PinnedQuestionLoaderProps): JSX.Element => {
-  const questionRef = useRef<Question>();
+  const {
+    data: card,
+    error,
+    isLoading,
+  } = useGetCardQuery({
+    id,
+    context: "collection",
+  });
+
+  const metadata = useSelector(getMetadata);
+  const question = useMemo(() => {
+    return card ? new Question(card, metadata) : undefined;
+  }, [card, metadata]);
+
+  if (isLoading) {
+    return children({
+      loading: true,
+    });
+  }
+
+  if (!question) {
+    return children({
+      error: getResponseErrorMessage(error),
+      errorIcon: "warning",
+      loading: false,
+    });
+  }
 
   return (
-    <Questions.Loader id={id} loadingAndErrorWrapper={false}>
-      {({ loading, question: loadedQuestion }: QuestionLoaderProps) => {
-        if (loading !== false) {
-          return children({ loading: true });
-        }
-
-        const question = questionRef.current ?? loadedQuestion;
-        questionRef.current = question;
-
-        return (
-          <QuestionResultLoader question={question} collectionPreview>
-            {({
-              loading,
-              error,
-              result,
-              results,
-              rawSeries,
-            }: QuestionResultLoaderProps) =>
-              children({
-                question,
-                loading: loading || results == null,
-                rawSeries: getRawSeries(rawSeries),
-                error: getError(error, result),
-                errorIcon: getErrorIcon(error, result),
-              })
-            }
-          </QuestionResultLoader>
-        );
-      }}
-    </Questions.Loader>
+    <QuestionResultLoader question={question} collectionPreview>
+      {({
+        loading,
+        error,
+        result,
+        results,
+        rawSeries,
+      }: QuestionResultLoaderProps) =>
+        children({
+          question,
+          loading: loading || results == null,
+          rawSeries: getRawSeries(rawSeries),
+          error: getError(error, result),
+          errorIcon: getErrorIcon(error, result),
+        })
+      }
+    </QuestionResultLoader>
   );
 };
 
 const getRawSeries = (rawSeries?: any[]) => {
-  return rawSeries?.map(series => ({
+  return rawSeries?.map((series) => ({
     ...series,
     card: {
       ...series.card,

@@ -1,14 +1,12 @@
 import cx from "classnames";
-import { t, jt } from "ttag";
+import { jt, t } from "ttag";
 
-import Code from "metabase/components/Code";
-import Button from "metabase/core/components/Button";
-import ExternalLink from "metabase/core/components/ExternalLink";
+import Button from "metabase/common/components/Button";
+import Code from "metabase/common/components/Code";
+import ExternalLink from "metabase/common/components/ExternalLink";
+import { useDocsUrl } from "metabase/common/hooks";
 import CS from "metabase/css/core/index.css";
-import { useSelector } from "metabase/lib/redux";
-import MetabaseSettings from "metabase/lib/settings";
 import { uuid } from "metabase/lib/uuid";
-import { getShowMetabaseLinks } from "metabase/selectors/whitelabel";
 import type Database from "metabase-lib/v1/metadata/Database";
 import type { DatabaseId, NativeDatasetQuery } from "metabase-types/api";
 
@@ -238,8 +236,6 @@ export const TagEditorHelp = ({
   const examples = engine === "mongo" ? MONGO_EXAMPLES : SQL_EXAMPLES;
   const datasetId = engine === "mongo" ? database?.id : sampleDatabaseId;
 
-  const showMetabaseLinks = useSelector(getShowMetabaseLinks);
-
   let setQueryWithDatasetId;
 
   if (datasetId != null) {
@@ -258,8 +254,12 @@ export const TagEditorHelp = ({
     };
   }
 
+  const { url: docsUrl, showMetabaseLinks } = useDocsUrl(
+    "questions/native-editor/sql-parameters",
+  );
+
   return (
-    <div className={cx(CS.px3, CS.textSpaced)}>
+    <div className={CS.textSpaced}>
       <h4>{t`What's this for?`}</h4>
       <p>
         {t`Variables in native queries let you dynamically replace values in your queries using filter widgets or through the URL.`}
@@ -316,9 +316,7 @@ export const TagEditorHelp = ({
       {showMetabaseLinks && (
         <p className={cx(CS.pt2, CS.link)}>
           <ExternalLink
-            href={MetabaseSettings.docsUrl(
-              "questions/native-editor/sql-parameters",
-            )}
+            href={docsUrl}
             target="_blank"
           >{t`Read the full documentation`}</ExternalLink>
         </p>

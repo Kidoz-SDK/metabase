@@ -1,22 +1,26 @@
-import { Ellipsified } from "metabase/core/components/Ellipsified";
+import type { PropsWithChildren } from "react";
+import { t } from "ttag";
+
+import { Ellipsified } from "metabase/common/components/Ellipsified";
+import Link from "metabase/common/components/Link";
 import type { IconName } from "metabase/ui";
 import { Icon } from "metabase/ui";
 
 import useStatusVisibility from "../../hooks/use-status-visibility";
 
 import {
-  StatusCardRoot,
-  StatusCardIcon,
+  StatusBody,
   StatusCardBody,
-  StatusCardTitle,
   StatusCardDescription,
-  StatusCardSpinner,
+  StatusCardIcon,
   StatusCardIconContainer,
-  StatusRoot,
+  StatusCardRoot,
+  StatusCardSpinner,
+  StatusCardTitle,
   StatusHeader,
+  StatusRoot,
   StatusTitle,
   StatusToggle,
-  StatusBody,
 } from "./StatusLarge.styled";
 
 type Status = {
@@ -26,6 +30,7 @@ type Status = {
 
 type StatusItem = {
   id?: number;
+  href?: string;
   title: string | JSX.Element;
   icon: string;
   description?: string | JSX.Element;
@@ -54,24 +59,34 @@ const StatusLarge = ({
           <Ellipsified>{status.title}</Ellipsified>
         </StatusTitle>
         {onCollapse && (
-          <StatusToggle onClick={onCollapse}>
+          <StatusToggle onClick={onCollapse} aria-label={t`Collapse`}>
             <Icon name="chevrondown" />
           </StatusToggle>
         )}
         {onDismiss && (
-          <StatusToggle onClick={onDismiss}>
+          <StatusToggle onClick={onDismiss} aria-label={t`Dismiss`}>
             <Icon name="close" />
           </StatusToggle>
         )}
       </StatusHeader>
       <StatusBody>
-        {status.items.map(item => (
-          <StatusCard item={item} isActive={isActive} key={item.id} />
+        {status.items.map((item) => (
+          <StatusCard
+            item={item}
+            isActive={isActive}
+            key={item.id ?? String(item.title)}
+          />
         ))}
       </StatusBody>
     </StatusRoot>
   );
 };
+
+const LinkWrapper = ({
+  children,
+  item,
+}: PropsWithChildren<{ item: StatusItem }>) =>
+  item?.href ? <Link to={item.href}>{children}</Link> : children;
 
 interface StatusCardProps {
   item: StatusItem;
@@ -92,28 +107,30 @@ const StatusCard = ({
   }
 
   return (
-    <StatusCardRoot key={id} hasBody={!!description}>
-      <StatusCardIcon>
-        <Icon name={icon as unknown as IconName} />
-      </StatusCardIcon>
-      <StatusCardBody>
-        <StatusCardTitle>
-          <Ellipsified>{title}</Ellipsified>
-        </StatusCardTitle>
-        <StatusCardDescription>{description}</StatusCardDescription>
-      </StatusCardBody>
-      {isInProgress && <StatusCardSpinner size={24} borderWidth={3} />}
-      {isCompleted && (
-        <StatusCardIconContainer>
-          <Icon name="check" size={12} />
-        </StatusCardIconContainer>
-      )}
-      {isAborted && (
-        <StatusCardIconContainer isError={true}>
-          <Icon name="warning" size={12} />
-        </StatusCardIconContainer>
-      )}
-    </StatusCardRoot>
+    <LinkWrapper item={item} key={id}>
+      <StatusCardRoot hasBody={!!description}>
+        <StatusCardIcon>
+          <Icon name={icon as unknown as IconName} />
+        </StatusCardIcon>
+        <StatusCardBody>
+          <StatusCardTitle>
+            <Ellipsified>{title}</Ellipsified>
+          </StatusCardTitle>
+          <StatusCardDescription>{description}</StatusCardDescription>
+        </StatusCardBody>
+        {isInProgress && <StatusCardSpinner size={24} borderWidth={3} />}
+        {isCompleted && (
+          <StatusCardIconContainer>
+            <Icon name="check" size={12} />
+          </StatusCardIconContainer>
+        )}
+        {isAborted && (
+          <StatusCardIconContainer isError={true}>
+            <Icon name="warning" size={12} />
+          </StatusCardIconContainer>
+        )}
+      </StatusCardRoot>
+    </LinkWrapper>
   );
 };
 

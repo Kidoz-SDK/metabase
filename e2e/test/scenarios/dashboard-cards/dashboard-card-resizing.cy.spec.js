@@ -1,16 +1,8 @@
 import _ from "underscore";
 
+const { H } = cy;
 import { SAMPLE_DB_ID } from "e2e/support/cypress_data";
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
-import {
-  editDashboard,
-  getDashboardCard,
-  popover,
-  resizeDashboardCard,
-  restore,
-  saveDashboard,
-  visitDashboard,
-} from "e2e/support/helpers";
 import { GRID_WIDTH } from "metabase/lib/dashboard_grid";
 
 const VISUALIZATION_SIZES = {
@@ -104,16 +96,16 @@ const VISUALIZATION_SIZES = {
   },
 };
 
-const getMinSize = visualizationType =>
+const getMinSize = (visualizationType) =>
   _.get(VISUALIZATION_SIZES, [visualizationType, "min"], undefined);
-const getDefaultSize = visualizationType =>
+const getDefaultSize = (visualizationType) =>
   _.get(VISUALIZATION_SIZES, [visualizationType, "default"], undefined);
 
 const { ORDERS, ORDERS_ID, PEOPLE } = SAMPLE_DATABASE;
 
-const getMockQuestionName = vizType => `MOCK_${vizType}_QUESTION`;
+const getMockQuestionName = (vizType) => `MOCK_${vizType}_QUESTION`;
 
-const getCommonQuestionFields = vizType => ({
+const getCommonQuestionFields = (vizType) => ({
   name: getMockQuestionName(vizType),
   query: {
     "source-table": ORDERS_ID,
@@ -124,7 +116,7 @@ const getCommonQuestionFields = vizType => ({
 });
 
 // covers table, bar, line, pie, row, area, combo, pivot, funnel, detail, and waterfall questions
-const createMockChartQuestion = vizType => {
+const createMockChartQuestion = (vizType) => {
   const question = getCommonQuestionFields(vizType);
   return {
     ...question,
@@ -135,7 +127,7 @@ const createMockChartQuestion = vizType => {
     display: vizType,
     visualization_settings: {
       "graph.dimensions": [
-        Object.keys(ORDERS).find(key => ORDERS[key] === ORDERS.CREATED_AT),
+        Object.keys(ORDERS).find((key) => ORDERS[key] === ORDERS.CREATED_AT),
       ],
       "graph.series_order_dimension": null,
       "graph.series_order": null,
@@ -145,7 +137,7 @@ const createMockChartQuestion = vizType => {
 };
 
 // covers scalar, gauge, and progress questions
-const createMockScalarQuestion = vizType => {
+const createMockScalarQuestion = (vizType) => {
   const question = getCommonQuestionFields(vizType);
   return {
     ...question,
@@ -180,8 +172,8 @@ const TEST_QUESTIONS = [
     "object",
     "smartscalar",
     "waterfall",
-  ].map(vizType => createMockChartQuestion(vizType)),
-  ...["scalar", "gauge", "progress"].map(vizType =>
+  ].map((vizType) => createMockChartQuestion(vizType)),
+  ...["scalar", "gauge", "progress"].map((vizType) =>
     createMockScalarQuestion(vizType),
   ),
   createMockMapQuestion(),
@@ -196,26 +188,24 @@ const viewports = [
   [1440, 800],
 ];
 
-describe("scenarios > dashboard card resizing", () => {
-  beforeEach(() => {
-    restore();
-    cy.signInAsAdmin();
-  });
+describe(
+  "scenarios > dashboard card resizing",
+  { requestTimeout: 15000 },
+  () => {
+    beforeEach(() => {
+      H.restore();
+      cy.signInAsAdmin();
+    });
 
-  it(
-    "should display all visualization cards with their default sizes",
-    { requestTimeout: 15000, tags: "@slow" },
-    () => {
-      TEST_QUESTIONS.forEach(question => {
-        cy.createQuestion(question);
+    it("should display all visualization cards with their default sizes", () => {
+      TEST_QUESTIONS.forEach((question) => {
+        H.createQuestion(question);
       });
-      cy.createDashboard().then(({ body: { id: dashId } }) => {
-        visitDashboard(dashId);
+      H.createDashboard().then(({ body: { id: dashId } }) => {
+        H.visitDashboard(dashId);
 
-        cy.findByTestId("dashboard-header").within(() => {
-          cy.findByLabelText("Edit dashboard").click();
-          cy.findByLabelText("Add questions").click();
-        });
+        H.editDashboard();
+        H.openQuestionsSidebar();
 
         /**
          * Metabase sorts all questions in the sidebar alphabetically.
@@ -235,12 +225,12 @@ describe("scenarios > dashboard card resizing", () => {
          * because Cypress is too fast.
          */
         cy.intercept("POST", "/api/card/**/query").as("cardQuery");
-        sortedCards.forEach(question => {
+        sortedCards.forEach((question) => {
           cy.findByLabelText(question.name).should("be.visible").click();
           cy.wait("@cardQuery");
         });
 
-        saveDashboard();
+        H.saveDashboard();
 
         cy.request("GET", `/api/dashboard/${dashId}`).then(({ body }) => {
           body.dashcards.forEach(({ card, size_x, size_y }) => {
@@ -250,65 +240,39 @@ describe("scenarios > dashboard card resizing", () => {
           });
         });
       });
-    },
-  );
+    });
 
-  it(
-    "should not allow cards to be resized smaller than min height",
-    { requestTimeout: 15000, tags: "@slow" },
-    () => {
+    it("should not allow cards to be resized smaller than min height", () => {
       const cardIds = [];
-      TEST_QUESTIONS.forEach(question => {
-        cy.createQuestion(question).then(({ body: { id } }) => {
+      TEST_QUESTIONS.forEach((question) => {
+        H.createQuestion(question).then(({ body: { id } }) => {
           cardIds.push(id);
         });
       });
-      cy.createDashboard().then(({ body: { id: dashId } }) => {
+      H.createDashboard().then(({ body: { id: dashId } }) => {
         cy.request("PUT", `/api/dashboard/${dashId}`, {
           dashcards: cardIds.map((cardId, index) => ({
             id: index,
             card_id: cardId,
-            row: index * 2,
+            row: index * 10,
             col: 0,
-            size_x: 2,
-            size_y: 2,
+            size_x: 18,
+            size_y: 10,
           })),
         });
-        visitDashboard(dashId);
-        editDashboard();
+        H.visitDashboard(dashId);
+        H.editDashboard();
 
         cy.request("GET", `/api/dashboard/${dashId}`).then(({ body }) => {
-          const dashcards = body.dashcards;
-          dashcards.forEach(({ card }) => {
-            const dashcard = cy.contains(
-              "[data-testid=dashcard-container]",
-              card.name,
-            );
-            resizeDashboardCard({
-              card: dashcard,
-              x: getDefaultSize(card.display).width * 100,
-              y: getDefaultSize(card.display).height * 100,
+          body.dashcards.forEach(({ card }, index) => {
+            H.resizeDashboardCard({
+              card: H.getDashboardCard(index),
+              x: -getDefaultSize(card.display).width * 200,
+              y: -getDefaultSize(card.display).height * 200,
             });
           });
 
-          saveDashboard();
-          editDashboard();
-
-          dashcards.forEach(({ card }) => {
-            const dashcard = cy.contains(
-              "[data-testid=dashcard-container]",
-              card.name,
-            );
-            dashcard.within(() => {
-              resizeDashboardCard({
-                card: dashcard,
-                x: -getDefaultSize(card.display).width * 200,
-                y: -getDefaultSize(card.display).height * 200,
-              });
-            });
-          });
-
-          saveDashboard();
+          H.saveDashboard();
 
           cy.request("GET", `/api/dashboard/${dashId}`).then(({ body }) => {
             body.dashcards.forEach(({ card, size_x, size_y }) => {
@@ -319,86 +283,166 @@ describe("scenarios > dashboard card resizing", () => {
           });
         });
       });
-    },
-  );
+    });
+  },
+);
 
-  describe("metabase#31701 - preventing link dashboard card overflows", () => {
-    viewports.forEach(([width, height]) => {
-      describe(`Testing on resolution ${width} x ${height}`, () => {
-        beforeEach(() => {
-          restore();
-          cy.signInAsAdmin();
-          cy.intercept("GET", "/api/search*").as("search");
-          cy.viewport(width, height);
-        });
+describe("trend charts", () => {
+  beforeEach(() => {
+    H.restore();
+    cy.signInAsAdmin();
+  });
 
-        it("should not allow links to overflow when editing dashboard", () => {
-          createLinkDashboard();
-          const entityCard = getDashboardCard(0);
-          const customCard = getDashboardCard(1);
+  it("comparisons that do not fit should only be shown in a tooltip", () => {
+    H.createDashboardWithQuestions({
+      dashboardDetails: {},
+      questions: [
+        {
+          display: "smartscalar",
+          query: {
+            "source-table": ORDERS_ID,
+            aggregation: [
+              ["count"],
+              ["sum", ["field", ORDERS.TOTAL, null]],
+              [
+                "aggregation-options",
+                ["*", ["count"], 10000],
+                { name: "Mega Count", "display-name": "Mega Count" },
+              ],
+            ],
+            breakout: [
+              ["field", ORDERS.CREATED_AT, { "temporal-unit": "month" }],
+            ],
+          },
+          visualization_settings: {
+            "scalar.comparisons": [
+              {
+                id: "fecd2c69-4d43-57d0-6d60-6781a54beceb",
+                type: "previousPeriod",
+              },
+              {
+                id: "e8b8d831-d2a9-9fd7-17a7-db8b4834ac5a",
+                type: "periodsAgo",
+                value: 2,
+              },
+              {
+                id: "9712f309-6849-20ba-7cef-54ae899a0e41",
+                type: "anotherColumn",
+                label: "Sum of Total",
+                column: "sum",
+              },
+            ],
+          },
+        },
+      ],
+    }).then(({ dashboard, questions: cards }) => {
+      const [card] = cards;
 
-          const editLinkContainer = cy.findByTestId("entity-edit-display-link");
-          const linkContainer = cy.findByTestId("custom-edit-text-link");
-
-          assertLinkCardOverflow(editLinkContainer, entityCard);
-          assertLinkCardOverflow(linkContainer, customCard);
-        });
-
-        it("should not allow links to overflow when viewing saved dashboard", () => {
-          createLinkDashboard();
-          saveDashboard();
-          const entityCard = getDashboardCard(0);
-          const customCard = getDashboardCard(1);
-
-          const editLinkContainer = cy.findByTestId("entity-view-display-link");
-          const linkContainer = cy.findByTestId("custom-view-text-link");
-
-          assertLinkCardOverflow(editLinkContainer, entityCard);
-          assertLinkCardOverflow(linkContainer, customCard);
-        });
+      H.updateDashboardCards({
+        dashboard_id: dashboard.id,
+        cards: [{ card_id: card.id, size_x: 4, size_y: 3 }],
       });
+
+      H.visitDashboard(dashboard.id);
+    });
+
+    H.getDashboardCard().within(() => {
+      cy.findByText("34.72%").should("be.visible");
+      cy.findByText("36.65%").should("not.exist");
+      cy.findByText("98.88%").should("not.exist");
+
+      cy.findByText("34.72%").realHover();
+    });
+
+    H.tooltip().within(() => {
+      cy.findByText("34.72%").should("be.visible");
+      cy.findByText("36.65%").should("be.visible");
+      cy.findByText("98.88%").should("be.visible");
     });
   });
 });
 
-const createLinkDashboard = () => {
-  cy.createQuestion({
-    name: TEST_QUESTION_NAME,
-    query: {
-      "source-table": ORDERS_ID,
-    },
+describe("issue 31701", () => {
+  const entityCard = () => H.getDashboardCard(0);
+  const customCard = () => H.getDashboardCard(1);
+
+  const editEntityLinkContainer = () =>
+    cy.findByTestId("entity-edit-display-link");
+  const editCustomLinkContainer = () =>
+    cy.findByTestId("custom-edit-text-link");
+
+  const viewEntityLinkContainer = () =>
+    cy.findByTestId("entity-view-display-link");
+  const viewCustomLinkContainer = () =>
+    cy.findByTestId("custom-view-text-link");
+
+  beforeEach(() => {
+    H.restore();
+    cy.signInAsAdmin();
+
+    H.createQuestion({
+      name: TEST_QUESTION_NAME,
+      query: {
+        "source-table": ORDERS_ID,
+      },
+    });
+
+    H.createDashboard({
+      name: TEST_DASHBOARD_NAME,
+    }).then(({ body: { id: dashId } }) => {
+      H.visitDashboard(dashId);
+    });
+
+    H.editDashboard();
+
+    cy.log("Add first link card (connected to an entity");
+    cy.findByLabelText("Add a link or iframe").click();
+    H.popover().findByText("Link").click();
+    H.getDashboardCard(0).as("entityCard").click().type(TEST_QUESTION_NAME);
+    H.popover()
+      .findAllByTestId("search-result-item-name")
+      .first()
+      .trigger("click");
+
+    cy.log("Add second link card (text only)");
+    cy.findByLabelText("Add a link or iframe").click();
+    H.popover().findByText("Link").click();
+    H.getDashboardCard(1)
+      .as("customCard")
+      .click()
+      .type(TEST_QUESTION_NAME)
+      .realPress("Tab");
   });
 
-  cy.createDashboard({
-    name: TEST_DASHBOARD_NAME,
-  }).then(({ body: { id: dashId } }) => {
-    visitDashboard(dashId);
-  });
+  it("should prevent link dashboard card overflows (metabase#31701)", () => {
+    cy.log("when editing dashboard");
+    viewports.forEach(([width, height]) => {
+      cy.log(`Testing on resolution ${width} x ${height}`);
+      cy.viewport(width, height);
 
-  editDashboard();
-  cy.icon("link").click();
-  cy.icon("link").click();
+      assertLinkCardOverflow(editEntityLinkContainer(), entityCard());
+      assertLinkCardOverflow(editCustomLinkContainer(), customCard());
+    });
 
-  const entityCard = getDashboardCard(0);
-  const customCard = getDashboardCard(1);
+    H.saveDashboard();
 
-  entityCard.click().type(TEST_QUESTION_NAME);
-  popover().within(() => {
-    cy.findAllByTestId("search-result-item-name").first().trigger("click");
-  });
-  customCard.click().type(TEST_QUESTION_NAME);
+    cy.log("when viewing a saved dashboard");
+    viewports.forEach(([width, height]) => {
+      cy.log(`Testing on resolution ${width} x ${height}`);
+      cy.viewport(width, height);
 
-  closeLinkSearchDropdown();
-};
-
-const assertLinkCardOverflow = (card1, card2) => {
-  card1.then(linkElem => {
-    card2.then(dashCardElem => {
-      expect(linkElem[0].scrollHeight).to.eq(dashCardElem[0].scrollHeight);
+      assertLinkCardOverflow(viewEntityLinkContainer(), entityCard());
+      assertLinkCardOverflow(viewCustomLinkContainer(), customCard());
     });
   });
-};
+});
 
-const closeLinkSearchDropdown = () => {
-  cy.findByTestId("dashboard-parameters-and-cards").click(0, 0);
+const assertLinkCardOverflow = (link, card) => {
+  link.then((linkElem) => {
+    card.then((dashCardElem) => {
+      expect(linkElem[0].scrollHeight).to.eq(
+        dashCardElem[0].firstChild.scrollHeight,
+      );
+    });
+  });
 };

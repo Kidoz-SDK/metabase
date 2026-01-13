@@ -16,7 +16,7 @@ If you're running Metabase on Elastic Beanstalk, we recommend you switch to a di
 
 ### Metabase Cloud
 
-We recommend [Metabase Cloud](https://www.metabase.com/pricing) (obviously).
+We recommend [Metabase Cloud](https://www.metabase.com/pricing/) (obviously).
 
 ### Self-hosted setups
 
@@ -65,7 +65,7 @@ Return to RDS and select the **Snapshots** option on the left of the page. You s
 
 Select that snapshot and click on **Actions** > **Restore Snapshot**.
 
-From this step on, you can follow the same steps as the [Configuring RDS for Metabase](./creating-RDS-database-on-AWS.md). 
+From this step on, you can follow the same steps as the [Configuring RDS for Metabase](./creating-RDS-database-on-AWS.md).
 
 ## Upgrade your Elastic Beanstalk deployment
 

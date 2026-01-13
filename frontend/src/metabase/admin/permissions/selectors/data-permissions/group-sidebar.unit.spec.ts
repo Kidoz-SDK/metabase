@@ -64,7 +64,7 @@ describe("getGroupsDataPermissionEditor", () => {
     })?.entities;
 
     expect(entities).toHaveLength(3);
-    expect(entities?.map(entity => entity.name)).toEqual([
+    expect(entities?.map((entity) => entity.name)).toEqual([
       "All Users",
       "Group starting with full access",
       "Group starting with no access at all",
@@ -105,14 +105,14 @@ describe("getGroupsDataPermissionEditor", () => {
         iconColor: "success",
       },
       {
-        label: `Granular`,
-        value: DataPermissionValue.CONTROLLED,
+        label: `Query builder only`,
+        value: DataPermissionValue.QUERY_BUILDER,
         icon: "permissions_limited",
         iconColor: "warning",
       },
       {
-        label: `Query builder only`,
-        value: DataPermissionValue.QUERY_BUILDER,
+        label: `Granular`,
+        value: DataPermissionValue.CONTROLLED,
         icon: "permissions_limited",
         iconColor: "warning",
       },

@@ -1,16 +1,16 @@
-import type { Theme } from "@emotion/react";
+// eslint-disable-next-line no-restricted-imports
 import { css } from "@emotion/react";
 
-export const getRootStyle = (theme: Theme) => css`
+export const rootStyle = css`
   font-family: var(--mb-default-font-family), sans-serif;
   font-weight: 400;
   font-style: normal;
-  color: ${theme.fn.themeColor("text-dark")};
+  color: var(--mb-color-text-primary);
   margin: 0;
   height: 100%; /* ensure the entire page will fill the window */
   display: flex;
   flex-direction: column;
-  background-color: ${theme.fn.themeColor("bg-light")};
+  background-color: var(--mb-color-bg-light);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 `;
@@ -45,40 +45,11 @@ export const baseStyle = css`
     list-style-type: none;
   }
 
-  /*
-  explicitly set the th text alignment to left. this is required for IE
-  which follows the suggested rendering and defaults to center, whereas
-  chrome and others do not
-*/
-  th {
-    text-align: left;
-  }
-
-  /* reset button element */
-  button {
-    font-size: 100%;
-    -webkit-appearance: none;
-    border: 0;
-    padding: 0;
-    margin: 0;
-    outline: none;
-    background-color: transparent;
-  }
-
-  a {
-    color: inherit;
-    cursor: pointer;
-    text-decoration: none;
-  }
-
-  button,
-  input,
-  textarea {
-    font-family: var(--mb-default-font-family), "Helvetica Neue", Helvetica,
-      sans-serif;
-  }
-
-  textarea {
-    min-height: 110px;
+  // Mobile Safari sets the opacity of disabled inputs to 0.4 which we don't want
+  // https://github.com/metabase/metabase/issues/49170
+  @supports (-webkit-touch-callout: none) {
+    input:disabled {
+      opacity: 1;
+    }
   }
 `;

@@ -7,11 +7,19 @@ import type {
   CreateBookmark,
   DeleteBookmark,
 } from "metabase/collections/types";
-import Tooltip from "metabase/core/components/Tooltip";
-import ModelDetailLink from "metabase/models/components/ModelDetailLink";
-import type { IconName } from "metabase/ui";
+import EventSandbox from "metabase/common/components/EventSandbox";
+import { getIcon } from "metabase/lib/icon";
+import { modelToUrl } from "metabase/lib/urls";
+import { PLUGIN_MODERATION } from "metabase/plugins";
+import { Tooltip } from "metabase/ui";
+import { Flex, type IconName, Skeleton } from "metabase/ui";
 import type Database from "metabase-lib/v1/metadata/Database";
-import type { Bookmark, Collection, CollectionItem } from "metabase-types/api";
+import type {
+  Bookmark,
+  Collection,
+  CollectionItem,
+  RecentCollectionItem,
+} from "metabase-types/api";
 
 import {
   ActionsContainer,
@@ -24,24 +32,52 @@ import {
   Title,
 } from "./PinnedItemCard.styled";
 
-type Props = {
+type ItemOrSkeleton =
+  | {
+      /** If `item` is undefined, the `skeleton` prop must be true */
+      item: CollectionItem | RecentCollectionItem;
+      skeleton?: never;
+      iconForSkeleton?: never;
+    }
+  | {
+      item?: never;
+      skeleton: true;
+      iconForSkeleton: IconName;
+    };
+
+export type PinnedItemCardProps = {
   databases?: Database[];
   bookmarks?: Bookmark[];
-  createBookmark: CreateBookmark;
-  deleteBookmark: DeleteBookmark;
+  createBookmark?: CreateBookmark;
+  deleteBookmark?: DeleteBookmark;
   className?: string;
-  item: CollectionItem;
-  collection: Collection;
-  onCopy: (items: CollectionItem[]) => void;
-  onMove: (items: CollectionItem[]) => void;
-};
+  collection?: Collection;
+  onCopy?: (items: CollectionItem[]) => void;
+  onMove?: (items: CollectionItem[]) => void;
+  onClick?: () => void;
+} & ItemOrSkeleton;
 
 const TOOLTIP_MAX_WIDTH = 450;
 
 const DEFAULT_DESCRIPTION: Record<string, string> = {
-  card: t`A question`,
-  dashboard: t`A dashboard`,
-  dataset: t`A model`,
+  get card() {
+    return t`A question`;
+  },
+  get metric() {
+    return t`A metric`;
+  },
+  get dashboard() {
+    return t`A dashboard`;
+  },
+  get dataset() {
+    return t`A model`;
+  },
+};
+
+const isCollectionItem = (
+  item: CollectionItem | RecentCollectionItem,
+): item is CollectionItem => {
+  return !("parent_collection" in item);
 };
 
 function PinnedItemCard({
@@ -54,11 +90,16 @@ function PinnedItemCard({
   collection,
   onCopy,
   onMove,
-}: Props) {
+  onClick,
+  iconForSkeleton,
+}: PinnedItemCardProps) {
   const [showTitleTooltip, setShowTitleTooltip] = useState(false);
-  const icon = item.getIcon().name;
-  const { description, name, model } = item;
-  const defaultedDescription = description || DEFAULT_DESCRIPTION[model] || "";
+  const icon =
+    iconForSkeleton ??
+    getIcon({
+      model: item.model,
+      moderated_status: item.moderated_status,
+    }).name;
 
   const maybeEnableTooltip = (
     event: MouseEvent<HTMLDivElement>,
@@ -71,42 +112,73 @@ function PinnedItemCard({
     }
   };
 
+  const hasActions =
+    item &&
+    isCollectionItem(item) &&
+    (onCopy || onMove || createBookmark || deleteBookmark || collection);
+
   return (
-    <ItemLink className={className} to={item.getUrl()}>
+    <ItemLink
+      className={className}
+      to={item ? (modelToUrl(item) ?? "/") : undefined}
+      onClick={onClick}
+    >
       <ItemCard flat>
         <Body>
           <Header>
             <ItemIcon name={icon as unknown as IconName} />
-            <ActionsContainer>
-              {item.model === "dataset" && <ModelDetailLink model={item} />}
-              <ActionMenu
-                databases={databases}
-                bookmarks={bookmarks}
-                createBookmark={createBookmark}
-                deleteBookmark={deleteBookmark}
-                item={item}
-                collection={collection}
-                onCopy={onCopy}
-                onMove={onMove}
-              />
+            <ActionsContainer h={item ? undefined : "2rem"}>
+              {hasActions && (
+                // This component is used within a `<Link>` component,
+                // so we must prevent events from triggering the activation of the link
+                <EventSandbox preventDefault sandboxedEvents={["onClick"]}>
+                  <ActionMenu
+                    databases={databases}
+                    bookmarks={bookmarks}
+                    createBookmark={createBookmark}
+                    deleteBookmark={deleteBookmark}
+                    item={item}
+                    collection={collection}
+                    onCopy={onCopy}
+                    onMove={onMove}
+                  />
+                </EventSandbox>
+              )}
             </ActionsContainer>
           </Header>
-          <Tooltip
-            tooltip={name}
-            placement="bottom"
-            maxWidth={TOOLTIP_MAX_WIDTH}
-            isEnabled={showTitleTooltip}
-          >
-            <Title
-              onMouseEnter={e => maybeEnableTooltip(e, setShowTitleTooltip)}
-            >
-              {name}
-            </Title>
-          </Tooltip>
-
-          <Description tooltipMaxWidth={TOOLTIP_MAX_WIDTH}>
-            {defaultedDescription}
-          </Description>
+          {item ? (
+            <>
+              <Tooltip
+                label={item.name}
+                position="bottom"
+                disabled={!showTitleTooltip}
+                maw={TOOLTIP_MAX_WIDTH}
+              >
+                <Title
+                  onMouseEnter={(e) =>
+                    maybeEnableTooltip(e, setShowTitleTooltip)
+                  }
+                >
+                  <Flex align="center" gap="0.5rem">
+                    {item.name}
+                    <PLUGIN_MODERATION.ModerationStatusIcon
+                      status={item.moderated_status}
+                      filled
+                      size={14}
+                    />
+                  </Flex>
+                </Title>
+              </Tooltip>
+              <Description tooltipMaxWidth={TOOLTIP_MAX_WIDTH}>
+                {item.description || DEFAULT_DESCRIPTION[item.model] || ""}
+              </Description>
+            </>
+          ) : (
+            <>
+              <Skeleton natural h="1.5rem" />
+              <Skeleton natural mt="xs" mb="4px" h="1rem" />
+            </>
+          )}
         </Body>
       </ItemCard>
     </ItemLink>

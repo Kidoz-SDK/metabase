@@ -82,16 +82,30 @@ export function getDashboardDrillUrl(clicked) {
     clickBehavior,
   );
 
+  const targetDashboard = extraData.dashboards[targetId];
+  const targetDefaultParameters = Object.fromEntries(
+    targetDashboard.parameters.map((parameter) => [
+      parameter.slug,
+      parameter.default ?? "",
+    ]),
+  );
+
   const baseQueryParams = getParameterValuesBySlug(parameterMapping, {
     data,
     extraData,
     clickBehavior,
   });
 
-  const queryParams =
+  const tabParams =
     typeof clickBehavior.tabId === "undefined"
-      ? baseQueryParams
-      : { ...baseQueryParams, tab: clickBehavior.tabId };
+      ? {}
+      : { tab: clickBehavior.tabId };
+
+  const queryParams = {
+    ...targetDefaultParameters,
+    ...baseQueryParams,
+    ...tabParams,
+  };
 
   const path = Urls.dashboard({ id: targetId });
   return `${path}?${querystring.stringify(queryParams)}`;
@@ -104,10 +118,15 @@ export function getDashboardDrillQuestionUrl(question, clicked) {
     clickBehavior,
   );
 
-  const targetQuestion = new Question(
+  const baseQuestion = new Question(
     extraData.questions[targetId],
     question.metadata(),
   ).lockDisplay();
+  const targetQuestion =
+    // Pivot tables cannot work when there is an extra stage added on top of breakouts and aggregations
+    baseQuestion.display() === "pivot"
+      ? baseQuestion
+      : baseQuestion.setQuery(Lib.ensureFilterStage(baseQuestion.query()));
 
   const parameters = _.chain(parameterMapping)
     .values()
@@ -128,9 +147,15 @@ export function getDashboardDrillQuestionUrl(question, clicked) {
   const isTargetQuestionNative = Lib.queryDisplayInfo(
     targetQuestion.query(),
   ).isNative;
+  const originalQuestion = targetQuestion;
 
   return !isTargetQuestionNative
-    ? ML_Urls.getUrlWithParameters(targetQuestion, parameters, queryParams)
+    ? ML_Urls.getUrlWithParameters(
+        targetQuestion,
+        originalQuestion,
+        parameters,
+        queryParams,
+      )
     : `${ML_Urls.getUrl(targetQuestion)}?${querystring.stringify(queryParams)}`;
 }
 
@@ -174,21 +199,24 @@ function getParameterValuesBySlug(
   parameterMapping,
   { data, extraData, clickBehavior },
 ) {
-  return _.chain(parameterMapping)
-    .values()
-    .map(({ source, target }) => [
-      getTargetForQueryParams(target, { extraData, clickBehavior }),
-      formatSourceForTarget(source, target, { data, extraData, clickBehavior }),
-    ])
-    .filter(([key, value]) => value != null)
-    .object()
-    .value();
+  return Object.fromEntries(
+    Object.values(parameterMapping)
+      .map(({ source, target }) => [
+        getTargetForQueryParams(target, { extraData, clickBehavior }),
+        formatSourceForTarget(source, target, {
+          data,
+          extraData,
+          clickBehavior,
+        }),
+      ])
+      .filter(([key, value]) => key != null && value != null),
+  );
 }
 
 function getTypeForSource(source, data, extraData) {
   if (source.type === "parameter") {
     const parameters = getIn(extraData, ["dashboard", "parameters"]) || [];
-    const { type = "text" } = parameters.find(p => p.id === source.id) || {};
+    const { type = "text" } = parameters.find((p) => p.id === source.id) || {};
     return type;
   }
 

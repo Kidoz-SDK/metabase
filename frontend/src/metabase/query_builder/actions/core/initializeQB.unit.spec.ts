@@ -2,10 +2,10 @@ import fetchMock from "fetch-mock";
 import type { LocationDescriptorObject } from "history";
 
 import { createMockEntitiesState } from "__support__/store";
-import * as alert from "metabase/alert/alert";
-import Databases from "metabase/entities/databases";
-import Snippets from "metabase/entities/snippets";
+import { Databases } from "metabase/entities/databases";
+import { Snippets } from "metabase/entities/snippets";
 import * as CardLib from "metabase/lib/card";
+import { checkNotNull } from "metabase/lib/types";
 import * as Urls from "metabase/lib/urls";
 import * as questionActions from "metabase/questions/actions";
 import { setErrorPage } from "metabase/redux/app";
@@ -13,7 +13,6 @@ import { getMetadata } from "metabase/selectors/metadata";
 import * as Lib from "metabase-lib";
 import Question from "metabase-lib/v1/Question";
 import type NativeQuery from "metabase-lib/v1/queries/NativeQuery";
-import type StructuredQuery from "metabase-lib/v1/queries/StructuredQuery";
 import type {
   Card,
   DatabaseId,
@@ -23,22 +22,27 @@ import type {
   UnsavedCard,
   User,
 } from "metabase-types/api";
-import { createMockSegment, createMockUser } from "metabase-types/api/mocks";
 import {
-  createSampleDatabase,
-  createAdHocCard,
-  createSavedStructuredCard,
-  createAdHocNativeCard,
-  createSavedNativeCard,
-  createStructuredModelCard,
-  createNativeModelCard,
+  createMockSegment,
+  createMockUser,
+  createMockUserPermissions,
+} from "metabase-types/api/mocks";
+import {
   ORDERS_ID,
   SAMPLE_DB_ID,
+  createAdHocCard,
+  createAdHocNativeCard,
+  createNativeModelCard,
+  createSampleDatabase,
+  createSavedNativeCard,
+  createSavedStructuredCard,
+  createStructuredModelCard,
 } from "metabase-types/api/mocks/presets";
 import { createMockState } from "metabase-types/store/mocks";
 
 import * as querying from "../querying";
 
+import * as cardActions from "./card";
 import * as core from "./core";
 import { initializeQB } from "./initializeQB";
 
@@ -61,25 +65,30 @@ async function baseSetup({
   hasDataPermissions = true,
 }: BaseSetupOpts) {
   jest.useFakeTimers();
-
-  const dispatch = jest.fn().mockReturnValue({ mock: "mock" });
-
   const state = createMockState({
     entities: createMockEntitiesState({
       databases: hasDataPermissions ? [createSampleDatabase()] : [],
       segments: [SEGMENT],
     }),
-    currentUser: user === undefined ? createMockUser() : user,
+    currentUser:
+      user === undefined
+        ? createMockUser({
+            permissions: createMockUserPermissions({
+              can_create_queries: hasDataPermissions,
+            }),
+          })
+        : user,
   });
 
   const metadata = getMetadata(state);
   const getState = () => state;
 
+  const dispatch = jest.fn();
   await initializeQB(location, params)(dispatch, getState);
   jest.runAllTimers();
 
   const actions = dispatch.mock.calls.find(
-    call => call[0]?.type === "metabase/qb/INITIALIZE_QB",
+    (call) => call[0]?.type === "metabase/qb/INITIALIZE_QB",
   );
   const hasDispatchedInitAction = Array.isArray(actions);
   const result = hasDispatchedInitAction ? actions[0].payload : null;
@@ -131,7 +140,9 @@ async function setup({
     fetchMock.get(`path:/api/card/${card.id}`, card);
   }
 
-  jest.spyOn(CardLib, "loadCard").mockReturnValue(Promise.resolve({ ...card }));
+  jest
+    .spyOn(cardActions, "loadCard")
+    .mockReturnValue(Promise.resolve({ ...card }));
 
   return baseSetup({ location, params, ...opts });
 }
@@ -224,7 +235,7 @@ describe("QB Actions > initializeQB", () => {
   ];
 
   describe("common", () => {
-    ALL_TEST_CASES.forEach(testCase => {
+    ALL_TEST_CASES.forEach((testCase) => {
       const { card, questionType } = testCase;
 
       describe(questionType, () => {
@@ -314,21 +325,10 @@ describe("QB Actions > initializeQB", () => {
   });
 
   describe("saved questions and models", () => {
-    [...SAVED_QUESTION_TEST_CASES, ...MODEL_TEST_CASES].forEach(testCase => {
+    [...SAVED_QUESTION_TEST_CASES, ...MODEL_TEST_CASES].forEach((testCase) => {
       const { card, questionType } = testCase;
 
       describe(questionType, () => {
-        it("fetches alerts", async () => {
-          const fetchAlertsForQuestionSpy = jest.spyOn(
-            alert,
-            "fetchAlertsForQuestion",
-          );
-
-          await setup({ card: card });
-
-          expect(fetchAlertsForQuestionSpy).toHaveBeenCalledWith(card.id);
-        });
-
         it("passes object ID from params correctly", async () => {
           const params = getQueryParamsForCard(card, { objectId: 123 });
           const { result } = await setup({ card: card, params });
@@ -382,7 +382,7 @@ describe("QB Actions > initializeQB", () => {
   });
 
   describe("saved questions", () => {
-    SAVED_QUESTION_TEST_CASES.forEach(testCase => {
+    SAVED_QUESTION_TEST_CASES.forEach((testCase) => {
       const { card, questionType } = testCase;
 
       describe(questionType, () => {
@@ -414,7 +414,7 @@ describe("QB Actions > initializeQB", () => {
   });
 
   describe("unsaved questions", () => {
-    UNSAVED_QUESTION_TEST_CASES.forEach(testCase => {
+    UNSAVED_QUESTION_TEST_CASES.forEach((testCase) => {
       const { card, questionType } = testCase;
 
       const ORIGINAL_CARD_ID = 321;
@@ -440,7 +440,7 @@ describe("QB Actions > initializeQB", () => {
         fetchMock.get(`path:/api/card/${originalCard.id}`, originalCard);
 
         jest
-          .spyOn(CardLib, "loadCard")
+          .spyOn(cardActions, "loadCard")
           .mockReturnValueOnce(Promise.resolve({ ...originalCard }));
 
         return setup({ card: q, ...opts });
@@ -478,17 +478,6 @@ describe("QB Actions > initializeQB", () => {
         it("does not lock question display", async () => {
           const { result } = await setup({ card: card });
           expect(result.card.displayIsLocked).toBeFalsy();
-        });
-
-        it("does not try to fetch alerts", async () => {
-          const fetchAlertsForQuestionSpy = jest.spyOn(
-            alert,
-            "fetchAlertsForQuestion",
-          );
-
-          await setup({ card: card });
-
-          expect(fetchAlertsForQuestionSpy).not.toHaveBeenCalled();
         });
 
         it("does not show qbnewb modal", async () => {
@@ -536,7 +525,7 @@ describe("QB Actions > initializeQB", () => {
   });
 
   describe("models", () => {
-    MODEL_TEST_CASES.forEach(testCase => {
+    MODEL_TEST_CASES.forEach((testCase) => {
       const { card, questionType } = testCase;
 
       describe(questionType, () => {
@@ -581,6 +570,18 @@ describe("QB Actions > initializeQB", () => {
           expect(result.uiControls.datasetEditorTab).toBe("query");
         });
 
+        it("sets UI state correctly for /columns route", async () => {
+          const baseUrl = Urls.question(card);
+          const location = getLocationForCard(card, {
+            pathname: `${baseUrl}/columns`,
+          });
+
+          const { result } = await setup({ card, location });
+
+          expect(result.uiControls.queryBuilderMode).toBe("dataset");
+          expect(result.uiControls.datasetEditorTab).toBe("columns");
+        });
+
         it("sets UI state correctly for /metadata route", async () => {
           const baseUrl = Urls.question(card);
           const location = getLocationForCard(card, {
@@ -597,7 +598,7 @@ describe("QB Actions > initializeQB", () => {
   });
 
   describe("native questions with snippets", () => {
-    NATIVE_SNIPPETS_TEST_CASES.forEach(testCase => {
+    NATIVE_SNIPPETS_TEST_CASES.forEach((testCase) => {
       const { card, questionType } = testCase;
 
       type SnippetsSetupOpts = Omit<SetupOpts, "card"> & {
@@ -650,7 +651,7 @@ describe("QB Actions > initializeQB", () => {
             },
           });
           const formattedQuestion = new Question(result.card, metadata);
-          const query = formattedQuestion.legacyQuery() as NativeQuery;
+          const query = formattedQuestion.legacyNativeQuery() as NativeQuery;
 
           expect(query.queryText().toLowerCase()).toBe(
             "select * from orders {{snippet: bar}}",
@@ -703,9 +704,7 @@ describe("QB Actions > initializeQB", () => {
       });
 
       const question = new Question(result.card, metadata);
-      const query = question.legacyQuery({
-        useStructuredQuery: true,
-      }) as StructuredQuery;
+      const query = question.query();
 
       return {
         question,
@@ -718,31 +717,45 @@ describe("QB Actions > initializeQB", () => {
 
     it("constructs a card based on provided 'db' param", async () => {
       const expectedCard = Question.create({
-        databaseId: SAMPLE_DB_ID,
+        DEPRECATED_RAW_MBQL_databaseId: SAMPLE_DB_ID,
       }).card();
 
       const { result, metadata } = await setupBlank({ db: SAMPLE_DB_ID });
       const question = new Question(result.card, metadata);
       const query = question.query();
 
-      expect(result.card).toEqual(expectedCard);
+      expect(
+        Lib.areLegacyQueriesEqual(
+          result.card.dataset_query,
+          expectedCard.dataset_query,
+        ),
+      ).toBe(true);
       expect(Lib.sourceTableOrCardId(query)).toBe(null);
       expect(result.originalCard).toBeUndefined();
     });
 
     it("constructs a card based on provided 'db' and 'table' params", async () => {
       const { result, metadata } = await setupOrdersTable();
-      const expectedCard = metadata.table(ORDERS_ID)?.question().card();
+      const expectedCard = checkNotNull(
+        metadata.table(ORDERS_ID)?.question().card(),
+      );
 
-      expect(result.card).toEqual(expectedCard);
+      expect(
+        Lib.areLegacyQueriesEqual(
+          result.card.dataset_query,
+          expectedCard.dataset_query,
+        ),
+      ).toBe(true);
       expect(result.originalCard).toBeUndefined();
     });
 
     it("applies 'segment' param correctly", async () => {
       const { query } = await setupOrdersTable({ segment: SEGMENT.id });
-      const [filter] = query.filters();
+      const stageIndex = -1;
+      const [filter] = Lib.filters(query, stageIndex);
+      const filterInfo = Lib.displayInfo(query, stageIndex, filter);
 
-      expect(filter.raw()).toEqual(["segment", SEGMENT.id]);
+      expect(filterInfo.displayName).toEqual(SEGMENT.name);
     });
 
     it("fetches question metadata", async () => {
@@ -768,17 +781,6 @@ describe("QB Actions > initializeQB", () => {
     it("does not lock question display", async () => {
       const { result } = await setupOrdersTable();
       expect(result.card.displayIsLocked).toBeFalsy();
-    });
-
-    it("does not try to fetch alerts", async () => {
-      const fetchAlertsForQuestionSpy = jest.spyOn(
-        alert,
-        "fetchAlertsForQuestion",
-      );
-
-      await setupOrdersTable();
-
-      expect(fetchAlertsForQuestionSpy).not.toHaveBeenCalled();
     });
 
     it("does not show qbnewb modal", async () => {

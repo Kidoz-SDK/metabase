@@ -1,15 +1,23 @@
 import { assocIn, updateIn } from "icepick";
+import { useMemo } from "react";
 
-import { databaseApi } from "metabase/api";
-import Questions from "metabase/entities/questions";
+import {
+  databaseApi,
+  skipToken,
+  useListDatabaseSchemaTablesQuery,
+  useListDatabaseSchemasQuery,
+  useListSyncableDatabaseSchemasQuery,
+  useListVirtualDatabaseTablesQuery,
+} from "metabase/api";
+import { Questions } from "metabase/entities/questions";
 import { createEntity, entityCompatibleQuery } from "metabase/lib/entities";
 import { SchemaSchema } from "metabase/schema";
 import { getMetadata } from "metabase/selectors/metadata";
 import {
+  SAVED_QUESTIONS_VIRTUAL_DB_ID,
   getCollectionVirtualSchemaId,
   getCollectionVirtualSchemaName,
   getQuestionVirtualTableId,
-  SAVED_QUESTIONS_VIRTUAL_DB_ID,
 } from "metabase-lib/v1/metadata/utils/saved-questions";
 import {
   generateSchemaId,
@@ -21,9 +29,17 @@ import {
 /**
  * @deprecated use "metabase/api" instead
  */
-export default createEntity({
+export const Schemas = createEntity({
   name: "schemas",
   schema: SchemaSchema,
+
+  rtk: {
+    getUseGetQuery: () => ({
+      useGetQuery,
+    }),
+    useListQuery,
+  },
+
   api: {
     list: async ({ dbId, getAll = false, ...args }, dispatch) => {
       if (!dbId) {
@@ -41,7 +57,7 @@ export default createEntity({
             databaseApi.endpoints.listDatabaseSchemas,
           );
 
-      return schemaNames.map(schemaName => ({
+      return schemaNames.map((schemaName) => ({
         // NOTE: needs unique IDs for entities to work correctly
         id: generateSchemaId(dbId, schemaName),
         name: schemaName,
@@ -81,10 +97,6 @@ export default createEntity({
     getObject: (state, { entityId }) => getMetadata(state).schema(entityId),
   },
 
-  objectSelectors: {
-    getIcon: () => ({ name: "folder" }),
-  },
-
   reducer: (state = {}, { type, payload, error }) => {
     if (type === Questions.actionTypes.CREATE && !error) {
       const { question, status, data } = payload;
@@ -96,7 +108,7 @@ export default createEntity({
           return state;
         }
         const virtualQuestionId = getQuestionVirtualTableId(question.id);
-        return updateIn(state, [schema, "tables"], tables =>
+        return updateIn(state, [schema, "tables"], (tables) =>
           addTableAvoidingDuplicates(tables, virtualQuestionId),
         );
       }
@@ -138,13 +150,13 @@ export default createEntity({
         });
       }
 
-      return updateIn(state, [virtualSchemaId, "tables"], tables => {
+      return updateIn(state, [virtualSchemaId, "tables"], (tables) => {
         if (!tables) {
           return tables;
         }
 
         if (card.archived) {
-          return tables.filter(id => id !== virtualQuestionId);
+          return tables.filter((id) => id !== virtualQuestionId);
         }
         return addTableAvoidingDuplicates(tables, virtualQuestionId);
       });
@@ -159,7 +171,7 @@ function getPreviousSchemaContainingTheQuestion(
   schemaId,
   virtualQuestionId,
 ) {
-  return Object.values(state).find(schema => {
+  return Object.values(state).find((schema) => {
     if (schema.id === schemaId) {
       return false;
     }
@@ -169,8 +181,8 @@ function getPreviousSchemaContainingTheQuestion(
 }
 
 function removeVirtualQuestionFromSchema(state, schemaId, virtualQuestionId) {
-  return updateIn(state, [schemaId, "tables"], tables =>
-    tables.filter(tableId => tableId !== virtualQuestionId),
+  return updateIn(state, [schemaId, "tables"], (tables) =>
+    tables.filter((tableId) => tableId !== virtualQuestionId),
   );
 }
 
@@ -179,4 +191,74 @@ function addTableAvoidingDuplicates(tables, tableId) {
     return [tableId];
   }
   return tables.includes(tableId) ? tables : [...tables, tableId];
+}
+
+const useGetQuery = (query, options) => {
+  const { id, ...args } = query;
+  const [dbId, schemaName, schemaOptions] = parseSchemaId(id);
+
+  if (query !== skipToken && (!dbId || schemaName === undefined)) {
+    throw new Error("Schemas ID is of the form dbId:schemaName");
+  }
+
+  const finalQuery =
+    query === skipToken ? skipToken : { id: dbId, schema: schemaName, ...args };
+
+  const virtualDatabaseTables = useListVirtualDatabaseTablesQuery(
+    schemaOptions?.isDatasets ? finalQuery : skipToken,
+    options,
+  );
+
+  const databaseSchemaTables = useListDatabaseSchemaTablesQuery(
+    schemaOptions?.isDatasets ? skipToken : finalQuery,
+    options,
+  );
+
+  const tables = schemaOptions?.isDatasets
+    ? virtualDatabaseTables
+    : databaseSchemaTables;
+
+  const data = useMemo(() => {
+    if (tables.isLoading || tables.error) {
+      return tables.data;
+    }
+
+    return {
+      id,
+      name: schemaName,
+      tables: tables.data,
+      database: { id: dbId },
+    };
+  }, [id, schemaName, tables, dbId]);
+
+  const result = useMemo(() => ({ ...tables, data }), [data, tables]);
+
+  return result;
+};
+
+function useListQuery({ dbId, getAll = false, ...args }, options) {
+  const syncableDatabaseSchemas = useListSyncableDatabaseSchemasQuery(
+    getAll ? dbId : skipToken,
+    options,
+  );
+
+  const databaseSchemas = useListDatabaseSchemasQuery(
+    getAll ? skipToken : { id: dbId, ...args },
+    options,
+  );
+
+  const schemas = getAll ? syncableDatabaseSchemas : databaseSchemas;
+
+  const data = useMemo(() => {
+    return schemas.data?.map((schemaName) => ({
+      // NOTE: needs unique IDs for entities to work correctly
+      id: generateSchemaId(dbId, schemaName),
+      name: schemaName,
+      database: { id: dbId },
+    }));
+  }, [dbId, schemas]);
+
+  const result = useMemo(() => ({ ...schemas, data }), [data, schemas]);
+
+  return result;
 }

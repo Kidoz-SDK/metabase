@@ -1,8 +1,8 @@
 import { isBreakoutSeries } from "./guards";
-import type { LegendItem, SeriesModel } from "./types";
+import type { BaseSeriesModel, LegendItem } from "./types";
 
 export const getLegendItems = (
-  seriesModels: SeriesModel[],
+  seriesModels: BaseSeriesModel[],
   showAllLegendItems: boolean = false,
 ): LegendItem[] => {
   if (
@@ -13,9 +13,10 @@ export const getLegendItems = (
     return [];
   }
 
-  return seriesModels.map(seriesModel => ({
+  return seriesModels.map((seriesModel) => ({
     key: seriesModel.dataKey,
     name: seriesModel.name,
     color: seriesModel.color,
+    visible: seriesModel.visible,
   }));
 };

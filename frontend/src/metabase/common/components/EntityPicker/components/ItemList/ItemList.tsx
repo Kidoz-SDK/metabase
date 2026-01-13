@@ -2,12 +2,23 @@ import type React from "react";
 import { useMemo } from "react";
 import { t } from "ttag";
 
-import { VirtualizedList } from "metabase/components/VirtualizedList";
+import { VirtualizedList } from "metabase/common/components/VirtualizedList";
+import { useSelector } from "metabase/lib/redux";
+import { PLUGIN_MODERATION } from "metabase/plugins";
 import { LoadingAndErrorWrapper } from "metabase/public/containers/PublicAction/PublicAction.styled";
-import { Box, Center, Icon, NavLink } from "metabase/ui";
+import { getIsTenantUser } from "metabase/selectors/user";
+import {
+  Box,
+  type BoxProps,
+  Center,
+  Flex,
+  Icon,
+  NavLink,
+  type NavLinkProps,
+} from "metabase/ui";
 
 import type { TypeWithModel } from "../../types";
-import { getIcon, isSelectedItem } from "../../utils";
+import { getEntityPickerIcon, isSelectedItem } from "../../utils";
 import { DelayedLoadingSpinner } from "../LoadingSpinner";
 
 import { PickerColumn } from "./ItemList.styled";
@@ -26,6 +37,8 @@ interface ItemListProps<
   isCurrentLevel: boolean;
   shouldDisableItem?: (item: Item) => boolean;
   shouldShowItem?: (item: Item) => boolean;
+  navLinkProps?: (isSelected?: boolean) => NavLinkProps;
+  containerProps?: BoxProps;
 }
 
 export const ItemList = <
@@ -42,7 +55,10 @@ export const ItemList = <
   isCurrentLevel,
   shouldDisableItem,
   shouldShowItem,
+  navLinkProps,
+  containerProps = { pb: "xs" },
 }: ItemListProps<Id, Model, Item>) => {
+  const isTenantUser = useSelector(getIsTenantUser);
   const filteredItems =
     items && shouldShowItem ? items.filter(shouldShowItem) : items;
   const activeItemIndex = useMemo(() => {
@@ -50,7 +66,9 @@ export const ItemList = <
       return -1;
     }
 
-    return filteredItems.findIndex(item => isSelectedItem(item, selectedItem));
+    return filteredItems.findIndex((item) =>
+      isSelectedItem(item, selectedItem),
+    );
   }, [filteredItems, selectedItem]);
 
   if (error) {
@@ -59,7 +77,7 @@ export const ItemList = <
 
   if (isLoading && !filteredItems) {
     return (
-      <Box miw={310} h="100%" aria-label={t`loading`}>
+      <Box miw={310} h="100%" aria-label={t`Loading...`}>
         <Center p="lg" h="100%">
           <DelayedLoadingSpinner delay={300} />
         </Center>
@@ -72,27 +90,56 @@ export const ItemList = <
   }
 
   return (
-    <VirtualizedList Wrapper={PickerColumn} scrollTo={activeItemIndex}>
-      {filteredItems.map((item: Item) => (
-        <div key={`${item.model}-${item.id}`}>
-          <NavLink
-            disabled={shouldDisableItem?.(item)}
-            rightSection={
-              isFolder(item) ? <Icon name="chevronright" size={10} /> : null
-            }
-            label={item.name}
-            active={isSelectedItem(item, selectedItem)}
-            icon={<Icon {...getIcon(item)} />}
-            onClick={(e: React.MouseEvent) => {
-              e.preventDefault(); // prevent form submission
-              e.stopPropagation(); // prevent parent onClick
-              onClick(item);
-            }}
-            variant={isCurrentLevel ? "default" : "mb-light"}
-            mb="xs"
-          />
-        </div>
-      ))}
+    <VirtualizedList
+      Wrapper={PickerColumn}
+      scrollTo={activeItemIndex}
+      estimatedItemSize={37}
+    >
+      {filteredItems.map((item: Item) => {
+        const isSelected = isSelectedItem(item, selectedItem);
+        const icon = getEntityPickerIcon(item, {
+          isSelected: isSelected && isCurrentLevel,
+          isTenantUser,
+        });
+        const isDisabled = shouldDisableItem?.(item);
+
+        return (
+          <Box
+            data-testid="picker-item"
+            key={`${item.model}-${item.id}`}
+            {...containerProps}
+          >
+            <NavLink
+              w={"auto"}
+              disabled={isDisabled}
+              rightSection={
+                isFolder(item) ? <Icon name="chevronright" size={10} /> : null
+              }
+              mb={0}
+              label={
+                <Flex align="center">
+                  {item.name}{" "}
+                  <PLUGIN_MODERATION.ModerationStatusIcon
+                    status={item.moderated_status}
+                    filled
+                    size={14}
+                    ml="0.5rem"
+                  />
+                </Flex>
+              }
+              active={isSelected}
+              leftSection={<Icon {...icon} />}
+              onClick={(e: React.MouseEvent) => {
+                e.preventDefault(); // prevent form submission
+                e.stopPropagation(); // prevent parent onClick
+                onClick(item);
+              }}
+              variant={isCurrentLevel ? "default" : "mb-light"}
+              {...navLinkProps?.(isSelected)}
+            />
+          </Box>
+        );
+      })}
     </VirtualizedList>
   );
 };

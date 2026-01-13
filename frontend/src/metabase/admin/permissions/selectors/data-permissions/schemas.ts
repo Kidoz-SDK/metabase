@@ -12,21 +12,21 @@ import type Database from "metabase-lib/v1/metadata/Database";
 import type { Group, GroupsPermissions } from "metabase-types/api";
 
 import { DATA_PERMISSION_OPTIONS } from "../../constants/data-permissions";
-import { UNABLE_TO_CHANGE_ADMIN_PERMISSIONS } from "../../constants/messages";
+import { Messages } from "../../constants/messages";
 import {
   limitDatabasePermission,
   navigateToGranularPermissions,
 } from "../../permissions";
 import type {
+  DataPermissionValue,
   DatabaseEntityId,
   PermissionSectionConfig,
-  DataPermissionValue,
 } from "../../types";
 import { DataPermission, DataPermissionType } from "../../types";
 import {
   getPermissionWarning,
   getPermissionWarningModal,
-  getRawQueryWarningModal,
+  getViewDataPermissionsTooRestrictiveWarningModal,
 } from "../confirmations";
 
 const buildAccessPermission = (
@@ -98,7 +98,9 @@ const buildAccessPermission = (
     permission: DataPermission.VIEW_DATA,
     type: DataPermissionType.ACCESS,
     isDisabled: isAdmin,
-    disabledTooltip: isAdmin ? UNABLE_TO_CHANGE_ADMIN_PERMISSIONS : null,
+    disabledTooltip: isAdmin
+      ? Messages.UNABLE_TO_CHANGE_ADMIN_PERMISSIONS
+      : null,
     isHighlighted: isAdmin,
     value: accessPermissionValue,
     warning: accessPermissionWarning,
@@ -119,6 +121,7 @@ const buildNativePermission = (
   isAdmin: boolean,
   permissions: GroupsPermissions,
   defaultGroup: Group,
+  database: Database,
   accessPermissionValue: DataPermissionValue,
 ): PermissionSectionConfig => {
   const value = getSchemasPermission(
@@ -158,7 +161,13 @@ const buildNativePermission = (
       defaultGroup,
       groupId,
     ),
-    getRawQueryWarningModal(permissions, groupId, entityId, newValue),
+    getViewDataPermissionsTooRestrictiveWarningModal(
+      permissions,
+      groupId,
+      entityId,
+      database,
+      newValue,
+    ),
   ];
 
   return {
@@ -172,8 +181,8 @@ const buildNativePermission = (
     confirmations: nativePermissionConfirmations,
     options: [
       DATA_PERMISSION_OPTIONS.queryBuilderAndNative,
-      DATA_PERMISSION_OPTIONS.controlled,
       DATA_PERMISSION_OPTIONS.queryBuilder,
+      DATA_PERMISSION_OPTIONS.controlled,
       DATA_PERMISSION_OPTIONS.no,
     ],
     postActions: {
@@ -186,10 +195,12 @@ export const buildSchemasPermissions = (
   entityId: DatabaseEntityId,
   groupId: number,
   isAdmin: boolean,
+  isExternal: boolean,
   permissions: GroupsPermissions,
   originalPermissions: GroupsPermissions,
   defaultGroup: Group,
   database: Database,
+  permissionView: "group" | "database",
 ): PermissionSectionConfig[] => {
   const accessPermission = buildAccessPermission(
     entityId,
@@ -207,6 +218,7 @@ export const buildSchemasPermissions = (
     isAdmin,
     permissions,
     defaultGroup,
+    database,
     accessPermission.value,
   );
 
@@ -221,10 +233,12 @@ export const buildSchemasPermissions = (
       entityId,
       groupId,
       isAdmin,
+      isExternal,
       permissions,
       accessPermission.value,
       defaultGroup,
       "schemas",
+      permissionView,
     ),
   ]);
 };

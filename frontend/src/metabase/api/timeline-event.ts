@@ -10,24 +10,24 @@ import {
   idTag,
   invalidateTags,
   listTag,
-  tag,
   provideTimelineEventTags,
+  tag,
 } from "./tags";
 
 export const timelineEventApi = Api.injectEndpoints({
-  endpoints: builder => ({
+  endpoints: (builder) => ({
     getTimelineEvent: builder.query<TimelineEvent, TimelineEventId>({
-      query: id => ({
+      query: (id) => ({
         method: "GET",
         url: `/api/timeline-event/${id}`,
       }),
-      providesTags: event => (event ? provideTimelineEventTags(event) : []),
+      providesTags: (event) => (event ? provideTimelineEventTags(event) : []),
     }),
     createTimelineEvent: builder.mutation<
       TimelineEvent,
       CreateTimelineEventRequest
     >({
-      query: body => ({
+      query: (body) => ({
         method: "POST",
         url: "/api/timeline-event",
         body,
@@ -55,7 +55,7 @@ export const timelineEventApi = Api.injectEndpoints({
         ]),
     }),
     deleteTimelineEvent: builder.mutation<TimelineEvent, TimelineEventId>({
-      query: id => ({
+      query: (id) => ({
         method: "DELETE",
         url: `/api/timeline-event/${id}`,
       }),

@@ -2,16 +2,16 @@
 import cx from "classnames";
 import { useFormik } from "formik";
 import PropTypes from "prop-types";
-import { connect } from "react-redux";
 import { t } from "ttag";
 
-import List from "metabase/components/List";
-import LoadingAndErrorWrapper from "metabase/components/LoadingAndErrorWrapper";
-import Link from "metabase/core/components/Link";
+import Link from "metabase/common/components/Link";
+import List from "metabase/common/components/List";
+import { LoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper";
 import CS from "metabase/css/core/index.css";
+import { connect } from "metabase/lib/redux";
 import * as metadataActions from "metabase/redux/metadata";
 import Detail from "metabase/reference/components/Detail";
-import EditHeader from "metabase/reference/components/EditHeader";
+import { EditHeader } from "metabase/reference/components/EditHeader";
 import EditableReferenceHeader from "metabase/reference/components/EditableReferenceHeader";
 import { Formula } from "metabase/reference/components/Formula";
 import UsefulQuestions from "metabase/reference/components/UsefulQuestions";
@@ -20,14 +20,14 @@ import { getMetadata } from "metabase/selectors/metadata";
 
 import S from "../components/Detail.module.css";
 import {
-  getSegment,
-  getTable,
-  getFields,
   getError,
-  getLoading,
-  getUser,
+  getFields,
   getIsEditing,
   getIsFormulaExpanded,
+  getLoading,
+  getSegment,
+  getTable,
+  getUser,
 } from "../selectors";
 import { getQuestionUrl } from "../utils";
 
@@ -81,7 +81,7 @@ const mapDispatchToProps = {
   onSubmit: actions.rUpdateSegmentDetail,
 };
 
-const validate = values =>
+const validate = (values) =>
   !values.revision_message
     ? { revision_message: t`Please enter a revision message` }
     : {};
@@ -107,7 +107,7 @@ const propTypes = {
   onSubmit: PropTypes.func.isRequired,
 };
 
-const SegmentDetail = props => {
+const SegmentDetail = (props) => {
   const {
     style,
     entity,
@@ -135,10 +135,11 @@ const SegmentDetail = props => {
     validate,
     initialValues: {},
     initialErrors: validate({}),
-    onSubmit: fields => onSubmit(fields, { ...props, resetForm: handleReset }),
+    onSubmit: (fields) =>
+      onSubmit(fields, { ...props, resetForm: handleReset }),
   });
 
-  const getFormField = name => ({
+  const getFormField = (name) => ({
     ...getFieldProps(name),
     ...getFieldMeta(name),
   });

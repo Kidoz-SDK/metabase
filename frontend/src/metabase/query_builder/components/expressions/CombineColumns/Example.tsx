@@ -2,14 +2,19 @@ import { t } from "ttag";
 
 import { Card, ScrollArea, Stack, Text } from "metabase/ui";
 
+import type { ColumnAndSeparator } from "./util";
+import { getExample } from "./util";
+
 interface Props {
-  example: string;
+  columnsAndSeparators: ColumnAndSeparator[];
 }
 
-export const Example = ({ example }: Props) => {
+export const Example = ({ columnsAndSeparators }: Props) => {
+  const example = getExample(columnsAndSeparators);
+
   return (
-    <Stack spacing="sm">
-      <Text color="text-medium" lh={1} weight="bold">{t`Example`}</Text>
+    <Stack gap="sm">
+      <Text color="text-medium" lh={1} fw="bold">{t`Example`}</Text>
 
       <Card
         bg="bg-light"

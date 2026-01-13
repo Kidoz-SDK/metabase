@@ -1,21 +1,12 @@
+import "cypress-iframe";
+
+// this is the only place we allow direct helper import
+// eslint-disable-next-line no-direct-helper-import
+import { H } from "e2e/support";
+
 import "./commands/ui/button";
 import "./commands/ui/icon";
-
-import "./commands/api/alert";
-import "./commands/api/question";
-import "./commands/api/dashboard";
-import "./commands/api/dashboardCard";
-import "./commands/api/collection";
-import "./commands/api/moderation";
-import "./commands/api/pulse";
-import "./commands/api/user";
-import "./commands/api/timeline";
-
-import "./commands/api/composite/createQuestionAndDashboard";
-import "./commands/api/composite/createNativeQuestionAndDashboard";
-import "./commands/api/composite/createQuestionAndAddToDashboard";
-import "./commands/api/composite/createDashboardWithQuestions";
-import "./commands/api/composite/createTimelineWithEvents";
+import "./commands/ui/paste";
 
 import "./commands/user/createUser";
 import "./commands/user/authentication";
@@ -31,4 +22,9 @@ import "./commands/visibility/isRenderedWithinViewport";
 
 import "./commands/overwrites/log";
 
-require("./commands/downloads/downloadUtils").addCustomCommands();
+import "./commands/component";
+
+import { addCustomCommands } from "./commands/downloads/downloadUtils";
+addCustomCommands();
+
+cy.H = { ...H };

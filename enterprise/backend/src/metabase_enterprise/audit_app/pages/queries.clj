@@ -3,8 +3,8 @@
    [metabase-enterprise.audit-app.interface :as audit.i]
    [metabase-enterprise.audit-app.pages.common :as common]
    [metabase-enterprise.audit-app.pages.common.cards :as cards]
-   [metabase.db :as mdb]
-   [metabase.models.permissions :as perms]))
+   [metabase.app-db.core :as mdb]
+   [metabase.audit-app.core :as audit]))
 
 ;; List of all failing questions
 (defmethod audit.i/internal-query ::bad-table
@@ -49,7 +49,7 @@
                   :select    [[:card.id :card_id]
                               [:card.name :card_name]
                               [error-substr :error_substr]
-                              :collection_id
+                              [:card.collection_id :collection_id]
                               [coll-name :collection_name]
                               :card.database_id
                               [:db.name :database_name]
@@ -73,7 +73,7 @@
                   :where     [:and
                               [:= :card.archived false]
                               [:<> :latest_qe.error nil]
-                              [:not= :card.database_id perms/audit-db-id]]}
+                              [:not= :card.database_id audit/audit-db-id]]}
                  (common/add-search-clause error-filter :latest_qe.error)
                  (common/add-search-clause db-filter :db.name)
                  (common/add-search-clause collection-filter coll-name)

@@ -1,14 +1,14 @@
-import type { DisplayTheme } from "metabase/public/lib/types";
 import type {
-  Dashboard,
-  DashboardId,
-  DashCardId,
   DashCardDataMap,
-  ParameterId,
-  ParameterValueOrArray,
+  DashCardId,
+  Dashboard,
+  DashboardCard,
+  DashboardId,
   DashboardTab,
   DashboardTabId,
-  DashboardCard,
+  ParameterId,
+  ParameterValueOrArray,
+  ParameterValuesMap,
 } from "metabase-types/api";
 
 export type DashboardSidebarName =
@@ -16,8 +16,10 @@ export type DashboardSidebarName =
   | "action"
   | "clickBehavior"
   | "editParameter"
+  | "settings"
   | "sharing"
-  | "info";
+  | "info"
+  | "analyze";
 
 interface BaseSidebarState {
   name?: DashboardSidebarName;
@@ -76,6 +78,21 @@ export type TabDeletion = {
   removedDashCardIds: DashCardId[];
 };
 
+export type DashboardLoadingStatus = "idle" | "running" | "complete";
+
+export type DashboardCardsLoadingState = {
+  loadingIds: DashCardId[];
+  loadingStatus: DashboardLoadingStatus;
+  startTime: number | null;
+  endTime: number | null;
+};
+
+export type DashboardLoadingControls = {
+  isLoading: boolean;
+  documentTitle?: string;
+  showLoadCompleteFavicon?: boolean;
+};
+
 export interface DashboardState {
   dashboardId: DashboardId | null;
   selectedTabId: SelectedTabId;
@@ -84,19 +101,14 @@ export interface DashboardState {
   dashcards: Record<DashCardId, StoreDashcard>;
   dashcardData: DashCardDataMap;
 
-  parameterValues: Record<ParameterId, ParameterValueOrArray>;
-  draftParameterValues: Record<ParameterId, ParameterValueOrArray | null>;
+  parameterValues: Record<
+    ParameterId,
+    ParameterValueOrArray | undefined | null
+  >;
+  draftParameterValues: ParameterValuesMap;
 
-  loadingDashCards: {
-    loadingIds: DashCardId[];
-    loadingStatus: "idle" | "running" | "complete";
-    startTime: number | null;
-    endTime: number | null;
-  };
-  loadingControls: {
-    documentTitle?: string;
-    showLoadCompleteFavicon?: boolean;
-  };
+  loadingDashCards: DashboardCardsLoadingState;
+  loadingControls: DashboardLoadingControls;
 
   editingDashboard: Dashboard | null;
   isAddParameterPopoverOpen: boolean;
@@ -113,6 +125,4 @@ export interface DashboardState {
     toastDashboardId: number | null;
   };
   tabDeletions: Record<TabDeletionId, TabDeletion>;
-
-  theme: DisplayTheme | null;
 }

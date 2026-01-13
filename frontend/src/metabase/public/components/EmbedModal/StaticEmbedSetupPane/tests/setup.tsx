@@ -1,7 +1,11 @@
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { setupEnterprisePlugins } from "__support__/enterprise";
+import { setupEnterpriseOnlyPlugin } from "__support__/enterprise";
+import {
+  setupParameterValuesEndpoints,
+  setupTokenStatusEndpoint,
+} from "__support__/server-mocks";
 import { mockSettings } from "__support__/settings";
 import { renderWithProviders } from "__support__/ui";
 import type {
@@ -21,21 +25,28 @@ import type { StaticEmbedSetupPaneProps } from "../StaticEmbedSetupPane";
 import { StaticEmbedSetupPane } from "../StaticEmbedSetupPane";
 
 const TextEditorMock = ({
+  highlightRanges,
   value,
-  highlightedTexts,
 }: {
+  highlightRanges?: { start: number; end: number }[];
   value: string;
-  highlightedTexts?: string[];
-}) => (
-  <>
-    <div data-testid="text-editor-mock">{value}</div>
-    <div data-testid="text-editor-mock-highlighted-code">
-      {highlightedTexts}
-    </div>
-  </>
-);
+}) => {
+  const highlightedTexts = highlightRanges?.map((range) =>
+    value.slice(range.start, range.end),
+  );
+  return (
+    <>
+      <div data-testid="text-editor-mock">{value}</div>
+      <div data-testid="text-editor-mock-highlighted-code">
+        {highlightedTexts}
+      </div>
+    </>
+  );
+};
 
-jest.mock("metabase/components/TextEditor", () => TextEditorMock);
+jest.mock("metabase/common/components/CodeEditor", () => ({
+  CodeEditor: TextEditorMock,
+}));
 
 export const FONTS_MOCK_VALUES = [
   "My Awesome Font",
@@ -46,43 +57,47 @@ export const FONTS_MOCK_VALUES = [
 export interface SetupOpts {
   props: Partial<StaticEmbedSetupPaneProps>;
   activeTab?: "Overview" | "Parameters" | "Appearance";
-  hasEnterprisePlugins?: boolean;
+  enterprisePlugins?: Parameters<typeof setupEnterpriseOnlyPlugin>[0][];
 }
 
-export async function setup(
-  {
-    props: {
-      resourceType = "dashboard",
-      resource = getMockResource(resourceType),
-      resourceParameters = [],
-      onUpdateEmbeddingParams = jest.fn(),
-      onUpdateEnableEmbedding = jest.fn(),
-    },
-    activeTab = "Overview",
-    hasEnterprisePlugins = false,
-    tokenFeatures = createMockTokenFeatures(),
-  }: {
-    props: Partial<StaticEmbedSetupPaneProps>;
-    activeTab?: "Overview" | "Parameters" | "Appearance";
-    hasEnterprisePlugins?: boolean;
-    tokenFeatures?: TokenFeatures;
-  } = {
-    props: {},
-  },
-) {
+export async function setup({
+  props: {
+    resourceType = "dashboard",
+    resource = getMockResource(resourceType),
+    resourceParameters = [],
+    onUpdateEmbeddingParams = jest.fn(),
+    onUpdateEnableEmbedding = jest.fn(),
+  } = {},
+  activeTab = "Overview",
+  enterprisePlugins,
+  tokenFeatures = createMockTokenFeatures(),
+}: {
+  props: Partial<StaticEmbedSetupPaneProps>;
+  activeTab?: "Overview" | "Parameters" | "Look and Feel";
+  enterprisePlugins?: Parameters<typeof setupEnterpriseOnlyPlugin>[0][];
+  tokenFeatures?: TokenFeatures;
+}) {
+  setupParameterValuesEndpoints({
+    values: [],
+    has_more_values: false,
+  });
+  setupTokenStatusEndpoint({ valid: !!enterprisePlugins });
+
   const settings = mockSettings({
     "enable-embedding": true,
     "embedding-secret-key": "my_super_secret_key",
     "token-features": tokenFeatures,
-    "available-fonts": hasEnterprisePlugins ? FONTS_MOCK_VALUES : undefined,
+    "available-fonts": enterprisePlugins ? FONTS_MOCK_VALUES : undefined,
   });
   const state = createMockState({
     currentUser: createMockUser({ is_superuser: true }),
     settings: settings,
   });
 
-  if (hasEnterprisePlugins) {
-    setupEnterprisePlugins();
+  if (enterprisePlugins) {
+    enterprisePlugins.forEach((plugin) => {
+      setupEnterpriseOnlyPlugin(plugin);
+    });
   }
 
   const view = renderWithProviders(

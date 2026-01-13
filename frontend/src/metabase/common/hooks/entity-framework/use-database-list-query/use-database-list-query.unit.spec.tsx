@@ -4,7 +4,7 @@ import {
   screen,
   waitForLoaderToBeRemoved,
 } from "__support__/ui";
-import LoadingAndErrorWrapper from "metabase/components/LoadingAndErrorWrapper";
+import { LoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper";
 import { createMockDatabase } from "metabase-types/api/mocks";
 
 import { useDatabaseListQuery } from "./use-database-list-query";
@@ -20,7 +20,7 @@ const TestComponent = () => {
 
   return (
     <div>
-      {data.map(database => (
+      {data.map((database) => (
         <div key={database.id}>{database.name}</div>
       ))}
     </div>
@@ -35,7 +35,7 @@ const setup = () => {
 describe("useDatabaseListQuery", () => {
   it("should be initially loading", () => {
     setup();
-    expect(screen.getByTestId("loading-spinner")).toBeInTheDocument();
+    expect(screen.getByTestId("loading-indicator")).toBeInTheDocument();
   });
 
   it("should show data from the response", async () => {

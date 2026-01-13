@@ -7,14 +7,14 @@ import { isTableDisplay } from "metabase/lib/click-behavior";
 import type { IconName } from "metabase/ui";
 import type { UiParameter } from "metabase-lib/v1/parameters/types";
 import type {
-  QuestionDashboardCard,
   ArbitraryCustomDestinationClickBehavior,
   ClickBehavior,
   CustomDestinationClickBehavior,
   CustomDestinationClickBehaviorLinkType,
+  DashboardCard,
 } from "metabase-types/api";
 
-import { SidebarContent } from "../ClickBehaviorSidebar.styled";
+import { SidebarContent } from "../ClickBehaviorSidebarComponents";
 
 import { CustomLinkText } from "./CustomLinkText";
 import { CustomURLPicker } from "./CustomURLPicker";
@@ -54,7 +54,7 @@ function LinkTypeOptions({
 
 interface Props {
   clickBehavior: CustomDestinationClickBehavior;
-  dashcard: QuestionDashboardCard;
+  dashcard: DashboardCard;
   parameters: UiParameter[];
   updateSettings: (settings: Partial<ClickBehavior>) => void;
 }

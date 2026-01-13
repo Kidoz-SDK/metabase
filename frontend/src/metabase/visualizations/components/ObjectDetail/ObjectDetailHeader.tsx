@@ -1,5 +1,5 @@
-import EntityMenu from "metabase/components/EntityMenu";
-import Button from "metabase/core/components/Button";
+import Button from "metabase/common/components/Button";
+import EntityMenu from "metabase/common/components/EntityMenu";
 import CS from "metabase/css/core/index.css";
 import { Flex } from "metabase/ui/components";
 
@@ -18,7 +18,7 @@ export interface ObjectDetailHeaderProps {
   }[];
   canZoom: boolean;
   objectName: string;
-  objectId: ObjectId | null | unknown;
+  objectId: ObjectId | null;
   canZoomPreviousRow: boolean;
   canZoomNextRow?: boolean;
   showControls?: boolean;

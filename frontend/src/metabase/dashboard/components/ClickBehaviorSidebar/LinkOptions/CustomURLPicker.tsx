@@ -1,33 +1,34 @@
+import { useDisclosure } from "@mantine/hooks";
 import cx from "classnames";
 import { useCallback, useState } from "react";
 import { t } from "ttag";
 
-import InputBlurChange from "metabase/components/InputBlurChange";
-import ModalContent from "metabase/components/ModalContent";
-import ModalWithTrigger from "metabase/components/ModalWithTrigger";
 import CS from "metabase/css/core/index.css";
 import { isTableDisplay } from "metabase/lib/click-behavior";
+import {
+  Button,
+  Flex,
+  Icon,
+  Modal,
+  Text,
+  TextInputBlurChange,
+} from "metabase/ui";
 import type { UiParameter } from "metabase-lib/v1/parameters/types";
 import { clickBehaviorIsValid } from "metabase-lib/v1/parameters/utils/click-behavior";
 import type {
   ArbitraryCustomDestinationClickBehavior,
   ClickBehavior,
-  QuestionDashboardCard,
+  DashboardCard,
 } from "metabase-types/api";
 
+import LinkOptionsS from "../LinkOptions/LinkOptions.module.css";
 import { SidebarItem } from "../SidebarItem";
 
 import { CustomLinkText } from "./CustomLinkText";
-import {
-  FormDescription,
-  DoneButton,
-  PickerIcon,
-  PickerItemName,
-} from "./CustomURLPicker.styled";
 import { ValuesYouCanReference } from "./ValuesYouCanReference";
 
 interface Props {
-  dashcard: QuestionDashboardCard;
+  dashcard: DashboardCard;
   clickBehavior: ArbitraryCustomDestinationClickBehavior;
   parameters: UiParameter[];
   updateSettings: (settings: ClickBehavior) => void;
@@ -41,6 +42,8 @@ export function CustomURLPicker({
 }: Props) {
   const [url, setUrl] = useState(clickBehavior?.linkTemplate ?? "");
   const hasLinkTemplate = !!clickBehavior.linkTemplate;
+  const [modalOpened, { open: openModal, close: closeModal }] =
+    useDisclosure(!hasLinkTemplate);
   const canSelect = clickBehaviorIsValid({
     ...clickBehavior,
     linkTemplate: url,
@@ -69,29 +72,41 @@ export function CustomURLPicker({
   }, [clickBehavior, updateSettings]);
 
   return (
-    <ModalWithTrigger
-      isInitiallyOpen={!hasLinkTemplate}
-      triggerElement={
-        <SidebarItem.Selectable isSelected padded={false}>
-          <PickerIcon name="link" />
-          <SidebarItem.Content>
-            <PickerItemName>
-              {hasLinkTemplate ? clickBehavior.linkTemplate : t`URL`}
-            </PickerItemName>
-            <SidebarItem.CloseIcon onClick={handleReset} />
-          </SidebarItem.Content>
-        </SidebarItem.Selectable>
-      }
-    >
-      {({ onClose }: { onClose: () => void }) => (
-        <ModalContent
-          title={t`Enter a URL to link to`}
-          onClose={hasLinkTemplate ? onClose : undefined}
+    <>
+      <Button.Group>
+        <Button
+          justify="flex-start"
+          leftSection={<Icon name="link" />}
+          size="lg"
+          variant="filled"
+          classNames={{
+            root: LinkOptionsS.ButtonRoot,
+          }}
+          onClick={openModal}
         >
-          <FormDescription>
+          <SidebarItem.Name>
+            {hasLinkTemplate ? clickBehavior.linkTemplate : t`URL`}
+          </SidebarItem.Name>
+        </Button>
+        <Button
+          onClick={handleReset}
+          miw="3rem"
+          size="lg"
+          variant="filled"
+          rightSection={<Icon name="close" />}
+        />
+      </Button.Group>
+      <Modal
+        opened={modalOpened}
+        onClose={closeModal}
+        title={t`Enter a URL to link to`}
+        size="lg"
+      >
+        <Flex direction="column" gap="md" mt="sm">
+          <Text>
             {t`You can insert the value of a column or dashboard filter using its name, like this: {{some_column}}`}
-          </FormDescription>
-          <InputBlurChange
+          </Text>
+          <TextInputBlurChange
             autoFocus
             value={url}
             placeholder={t`e.g. http://acme.com/id/\{\{user_id\}\}`}
@@ -105,17 +120,19 @@ export function CustomURLPicker({
             />
           )}
           <ValuesYouCanReference dashcard={dashcard} parameters={parameters} />
-          <DoneButton
-            primary
+          <Button
+            ml="auto"
+            mt="xl"
+            variant="filled"
             type="button"
             onClick={() => {
               handleSubmit();
-              onClose();
+              closeModal();
             }}
             disabled={!canSelect}
-          >{t`Done`}</DoneButton>
-        </ModalContent>
-      )}
-    </ModalWithTrigger>
+          >{t`Done`}</Button>
+        </Flex>
+      </Modal>
+    </>
   );
 }

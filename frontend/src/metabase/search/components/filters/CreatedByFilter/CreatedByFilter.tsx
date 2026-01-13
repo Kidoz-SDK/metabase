@@ -1,4 +1,3 @@
-/* eslint-disable react/prop-types */
 import { t } from "ttag";
 
 import {
@@ -8,8 +7,8 @@ import {
 import { UserNameDisplay } from "metabase/search/components/UserNameDisplay";
 import type { SearchFilterDropdown } from "metabase/search/types";
 import {
-  stringifyUserIdArray,
   parseUserIdArray,
+  stringifyUserIdArray,
 } from "metabase/search/utils/user-search-params";
 
 export const CreatedByFilter: SearchFilterDropdown<"created_by"> = {

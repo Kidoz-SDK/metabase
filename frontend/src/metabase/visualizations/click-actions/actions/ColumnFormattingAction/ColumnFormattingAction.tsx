@@ -8,7 +8,7 @@ import type {
   LegacyDrill,
 } from "metabase/visualizations/types";
 import * as Lib from "metabase-lib";
-import { getColumnKey } from "metabase-lib/v1/queries/utils/get-column-key";
+import { getColumnKey } from "metabase-lib/v1/queries/utils/column-key";
 import type { VisualizationSettings } from "metabase-types/api";
 
 import { PopoverRoot } from "./ColumnFormattingAction.styled";
@@ -35,6 +35,10 @@ export const ColumnFormattingAction: LegacyDrill = ({ question, clicked }) => {
     onUpdateVisualizationSettings,
   }: ClickActionPopoverProps) => {
     const handleChangeSettings = (settings: VisualizationSettings) => {
+      if (!series) {
+        return;
+      }
+
       onUpdateVisualizationSettings(
         updateSettings(series[0].card.visualization_settings, settings),
       );
@@ -47,7 +51,7 @@ export const ColumnFormattingAction: LegacyDrill = ({ question, clicked }) => {
     );
 
     const columnSettingsWidget = widgets.find(
-      widget => widget.id === "column_settings",
+      (widget) => widget.id === "column_settings",
     );
 
     const extraProps = {
@@ -79,8 +83,8 @@ export const ColumnFormattingAction: LegacyDrill = ({ question, clicked }) => {
       icon: "gear",
       tooltip: t`Column formatting`,
       popoverProps: {
-        placement: "right-end",
-        offset: [0, 20],
+        position: "right-start",
+        offset: 20,
       },
       popover: FormatPopover,
     },

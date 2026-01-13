@@ -2,17 +2,16 @@
   "Classifier that infers the semantic type of a Field based on its name and base type."
   (:require
    [clojure.string :as str]
-   [metabase.analyze.fingerprint.schema :as fingerprint.schema]
    [metabase.analyze.schema :as analyze.schema]
-   [metabase.config :as config]
+   [metabase.config.core :as config]
    [metabase.driver.util :as driver.u]
+   [metabase.lib.schema.metadata.fingerprint :as lib.schema.metadata.fingerprint]
    [metabase.sync.util :as sync-util]
    [metabase.util :as u]
    [metabase.util.log :as log]
    [metabase.util.malli :as mu]
    [metabase.util.malli.schema :as ms]))
 
-(def ^:private bool-or-int-type #{:type/Boolean :type/Integer})
 (def ^:private float-type       #{:type/Float})
 (def ^:private int-type         #{:type/Integer})
 (def ^:private int-or-text-type #{:type/Integer :type/Text})
@@ -22,7 +21,6 @@
 (def ^:private date-type        #{:type/Date})
 (def ^:private number-type      #{:type/Number})
 (def ^:private any-type         #{:type/*})
-
 
 (def ^:private pattern+base-types+semantic-type
   "Tuples of `[name-pattern set-of-valid-base-types semantic-type]`.
@@ -45,23 +43,22 @@
    [#"^.*_lat$"                    float-type       :type/Latitude]
    [#"^latitude$"                  float-type       :type/Latitude]
    [#"^.*_latitude$"               float-type       :type/Latitude]
-   [#"^.*_type$"                   int-or-text-type :type/Category]
+   [#"^.*_type$"                   text-type        :type/Category]
    [#"^.*_url$"                    text-type        :type/URL]
-   [#"^active$"                    bool-or-int-type :type/Category]
    [#"^city$"                      text-type        :type/City]
    [#"^country"                    text-type        :type/Country]
    [#"_country$"                   text-type        :type/Country]
-   [#"^currency$"                  int-or-text-type :type/Category]
+   [#"^currency$"                  text-type        :type/Category]
    [#"^first(?:_?)name$"           text-type        :type/Name]
    [#"^full(?:_?)name$"            text-type        :type/Name]
-   [#"^gender$"                    int-or-text-type :type/Category]
+   [#"^gender$"                    text-type        :type/Category]
    [#"^last(?:_?)name$"            text-type        :type/Name]
    [#"^name$"                      text-type        :type/Name]
    [#"^postal(?:_?)code$"          int-or-text-type :type/ZipCode]
-   [#"^role$"                      int-or-text-type :type/Category]
-   [#"^sex$"                       int-or-text-type :type/Category]
-   [#"^status$"                    int-or-text-type :type/Category]
-   [#"^type$"                      int-or-text-type :type/Category]
+   [#"^role$"                      text-type        :type/Category]
+   [#"^sex$"                       text-type        :type/Category]
+   [#"^status$"                    text-type        :type/Category]
+   [#"^type$"                      text-type        :type/Category]
    [#"^url$"                       text-type        :type/URL]
    [#"^zip(?:_?)code$"             int-or-text-type :type/ZipCode]
    [#"discount"                    number-type      :type/Discount]
@@ -122,7 +119,7 @@
     (assert (or (isa? semantic-type :Semantic/*)
                 (isa? semantic-type :Relation/*)))))
 
-(mu/defn ^:private semantic-type-for-name-and-base-type :- [:maybe ms/FieldSemanticOrRelationType]
+(mu/defn- semantic-type-for-name-and-base-type :- [:maybe ms/FieldSemanticOrRelationType]
   "If `name` and `base-type` matches a known pattern, return the `semantic-type` we should assign to it."
   [field-name :- ms/NonBlankString
    base-type  :- ms/FieldType]
@@ -134,16 +131,16 @@
           pattern+base-types+semantic-type)))
 
 (def ^:private FieldOrColumn
-  "Schema that allows a `metabase.models.field/Field` or a column from a query resultset"
+  "Schema that allows a `:model/Field` or a column from a query resultset"
   [:and
    [:map
     ;; Some DBs such as MSSQL can return columns with blank name
     [:name      :string]
     [:base_type :keyword]
     [:semantic_type {:optional true} [:maybe :keyword]]]
-   ::analyze.schema/no-kebab-case-keys])
+   ::analyze.schema/qp-results-cased-map])
 
-(mu/defn infer-semantic-type :- [:maybe :keyword]
+(mu/defn infer-semantic-type-by-name :- [:maybe :keyword]
   "Classifer that infers the semantic type of a `field` based on its name and base type."
   [field-or-column :- FieldOrColumn]
   ;; Don't overwrite keys, else we're ok with overwriting as a new more precise type might have
@@ -152,11 +149,11 @@
                 (str/blank? (:name field-or-column)))
     (semantic-type-for-name-and-base-type (:name field-or-column) (:base_type field-or-column))))
 
-(mu/defn infer-and-assoc-semantic-type :- [:maybe FieldOrColumn]
+(mu/defn infer-and-assoc-semantic-type-by-name :- [:maybe FieldOrColumn]
   "Returns `field-or-column` with a computed semantic type based on the name and base type of the `field-or-column`"
   [field-or-column :- FieldOrColumn
-   _fingerprint    :- [:maybe fingerprint.schema/Fingerprint]]
-  (when-let [inferred-semantic-type (infer-semantic-type field-or-column)]
+   _fingerprint    :- [:maybe ::lib.schema.metadata.fingerprint/fingerprint]]
+  (when-let [inferred-semantic-type (infer-semantic-type-by-name field-or-column)]
     (log/debugf "Based on the name of %s, we're giving it a semantic type of %s."
                 (sync-util/name-for-logging field-or-column)
                 inferred-semantic-type)
@@ -193,7 +190,6 @@
                                             type))
                                         entity-types-patterns)
                                   (case (some-> (:db_id table) driver.u/database->driver)
-                                    :googleanalytics :entity/GoogleAnalyticsTable
-                                    :druid           :entity/EventTable
+                                    :druid :entity/EventTable
                                     nil)
                                   :entity/GenericTable))))

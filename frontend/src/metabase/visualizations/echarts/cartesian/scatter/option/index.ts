@@ -28,7 +28,7 @@ export function getScatterPlotOption(
   selectedTimelineEventsIds: TimelineEventId[],
   settings: ComputedVisualizationSettings,
   chartWidth: number,
-  isPlaceholder: boolean,
+  isAnimated: boolean,
   renderingContext: RenderingContext,
 ): EChartsCoreOption {
   const hasTimelineEvents = timelineEventsModel != null;
@@ -40,15 +40,16 @@ export function getScatterPlotOption(
       )
     : null;
 
-  const dataSeriesOptions: EChartsSeriesOption[] = chartModel.seriesModels.map(
-    seriesModel =>
+  const dataSeriesOptions: EChartsSeriesOption[] = chartModel.seriesModels
+    .filter((seriesModel) => seriesModel.visible)
+    .map((seriesModel) =>
       buildEChartsScatterSeries(
         seriesModel,
         chartModel.bubbleSizeDomain,
         getSeriesYAxisIndex(seriesModel.dataKey, chartModel),
         renderingContext,
       ),
-  );
+    );
   const goalSeriesOption = getGoalLineSeriesOption(
     chartModel,
     settings,
@@ -63,11 +64,11 @@ export function getScatterPlotOption(
     goalSeriesOption,
     trendSeriesOption,
     timelineEventsSeries,
-  ].flatMap(option => option ?? []);
+  ].flatMap((option) => option ?? []);
 
   const dimensions = [
     X_AXIS_DATA_KEY,
-    ...chartModel.seriesModels.map(seriesModel => seriesModel.dataKey),
+    ...chartModel.seriesModels.map((seriesModel) => seriesModel.dataKey),
   ];
 
   const echartsDataset = [
@@ -86,15 +87,16 @@ export function getScatterPlotOption(
       source: chartModel.trendLinesModel?.dataset as OptionSourceData,
       dimensions: [
         X_AXIS_DATA_KEY,
-        ...chartModel.trendLinesModel?.seriesModels.map(s => s.dataKey),
+        ...chartModel.trendLinesModel?.seriesModels.map((s) => s.dataKey),
       ],
     });
   }
 
   return {
-    ...getSharedEChartsOptions(isPlaceholder),
+    ...getSharedEChartsOptions(isAnimated),
     grid: {
       ...chartMeasurements.padding,
+      outerBoundsMode: "none",
     },
     dataset: echartsDataset,
     series: seriesOption,
@@ -104,7 +106,6 @@ export function getScatterPlotOption(
       chartMeasurements,
       settings,
       hasTimelineEvents,
-      null,
       renderingContext,
     ),
   };

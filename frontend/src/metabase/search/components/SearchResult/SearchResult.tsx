@@ -5,9 +5,12 @@ import { push } from "react-router-redux";
 
 import { useDispatch } from "metabase/lib/redux";
 import { isSyncCompleted } from "metabase/lib/syncing";
+import { modelToUrl } from "metabase/lib/urls";
 import { PLUGIN_MODERATION } from "metabase/plugins";
+import { trackSearchClick } from "metabase/search/analytics";
 import type { WrappedResult } from "metabase/search/types";
-import { Group, Loader, Icon } from "metabase/ui";
+import { Group, Icon, Loader } from "metabase/ui";
+import type { SearchContext } from "metabase-types/api";
 
 import { InfoText } from "../InfoText";
 
@@ -31,6 +34,11 @@ export function SearchResult({
   isSelected = false,
   onClick,
   className,
+  index,
+  context = "search-app",
+  searchEngine,
+  searchRequestId,
+  searchTerm,
 }: {
   result: WrappedResult;
   compact?: boolean;
@@ -38,6 +46,11 @@ export function SearchResult({
   onClick?: (result: WrappedResult) => void;
   isSelected?: boolean;
   className?: string;
+  index: number;
+  context?: SearchContext;
+  searchEngine?: string;
+  searchRequestId?: string;
+  searchTerm?: string;
 }) {
   const { name, model, description, moderated_status }: WrappedResult = result;
 
@@ -78,8 +91,17 @@ export function SearchResult({
       onClick(result);
       return;
     }
-
-    onChangeLocation(result.getUrl());
+    trackSearchClick({
+      itemType: "item",
+      position: index,
+      context,
+      searchEngine: searchEngine || "unknown",
+      requestId: searchRequestId,
+      entityModel: result.model,
+      entityId: typeof result.id === "number" ? result.id : null,
+      searchTerm,
+    });
+    onChangeLocation(modelToUrl(result));
   };
 
   return (
@@ -101,13 +123,13 @@ export function SearchResult({
         item={result}
         type={model}
       />
-      <ResultNameSection justify="center" spacing="xs">
-        <Group spacing="xs" align="center" noWrap>
+      <ResultNameSection justify="center" gap="xs">
+        <Group gap="xs" align="center" wrap="nowrap">
           <ResultTitle
             role="heading"
             data-testid="search-result-item-name"
             truncate
-            href={!onClick ? result.getUrl() : undefined}
+            href={!onClick ? modelToUrl(result) : undefined}
           >
             {name}
           </ResultTitle>
@@ -120,7 +142,7 @@ export function SearchResult({
         <InfoText showLinks={!onClick} result={result} isCompact={compact} />
         {description && showDescription && (
           <DescriptionSection>
-            <Group noWrap spacing="sm" data-testid="result-description">
+            <Group wrap="nowrap" gap="sm" data-testid="result-description">
               <DescriptionDivider
                 size="md"
                 color="focus"
@@ -145,7 +167,10 @@ export function SearchResult({
       )}
       {showXRayButton && (
         <XRaySection>
-          <XRayButton leftIcon={<Icon name="bolt" />} onClick={onXRayClick} />
+          <XRayButton
+            leftSection={<Icon name="bolt" />}
+            onClick={onXRayClick}
+          />
         </XRaySection>
       )}
     </SearchResultContainer>

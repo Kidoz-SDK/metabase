@@ -1,6 +1,5 @@
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
-
-import { color } from "metabase/lib/colors";
 
 export const CollapsibleSectionContent = styled.div`
   display: flex;
@@ -9,6 +8,6 @@ export const CollapsibleSectionContent = styled.div`
   margin-bottom: 1rem;
 
   &:hover {
-    color: ${color("brand")};
+    color: var(--mb-color-brand);
   }
 `;

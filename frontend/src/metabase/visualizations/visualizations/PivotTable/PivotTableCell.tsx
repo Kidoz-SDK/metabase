@@ -1,16 +1,16 @@
+import { useDraggable } from "@dnd-kit/core";
 import cx from "classnames";
-import type * as React from "react";
-import type { ControlPosition, DraggableBounds } from "react-draggable";
-import Draggable from "react-draggable";
+import { useEffect, useId, useRef } from "react";
 
-import { Ellipsified } from "metabase/core/components/Ellipsified";
+import { Ellipsified } from "metabase/common/components/Ellipsified";
 import CS from "metabase/css/core/index.css";
+import { useTranslateContent } from "metabase/i18n/hooks";
 import type { VisualizationSettings } from "metabase-types/api";
 
 import { PivotTableCell, ResizeHandle } from "./PivotTable.styled";
 import { RowToggleIcon } from "./RowToggleIcon";
 import { LEFT_HEADER_LEFT_SPACING, RESIZE_HANDLE_WIDTH } from "./constants";
-import type { HeaderItem, BodyItem, PivotTableClicked } from "./types";
+import type { BodyItem, HeaderItem, PivotTableClicked } from "./types";
 
 interface CellProps {
   value: React.ReactNode;
@@ -20,29 +20,58 @@ interface CellProps {
   isBody?: boolean;
   isBold?: boolean;
   isEmphasized?: boolean;
-  isNightMode?: boolean;
   isBorderedHeader?: boolean;
   isTransparent?: boolean;
   hasTopBorder?: boolean;
-  onClick?: ((e: React.SyntheticEvent) => void) | undefined;
-  onResize?: (newWidth: number) => void;
-}
-
-interface CellProps {
-  value: React.ReactNode;
-  style?: React.CSSProperties;
-  icon?: React.ReactNode;
-  backgroundColor?: string;
-  isBody?: boolean;
-  isBold?: boolean;
-  isEmphasized?: boolean;
-  isNightMode?: boolean;
-  isBorderedHeader?: boolean;
-  isTransparent?: boolean;
-  hasTopBorder?: boolean;
-  onClick?: ((e: React.SyntheticEvent) => void) | undefined;
+  onClick?: ((e: React.MouseEvent) => void) | undefined;
   onResize?: (newWidth: number) => void;
   showTooltip?: boolean;
+}
+
+interface ResizableHandleProps {
+  id: string;
+  initialWidth: number;
+  onResizeEnd: (newWidth: number) => void;
+}
+
+function ResizableHandle({
+  id,
+  initialWidth,
+  onResizeEnd,
+}: ResizableHandleProps) {
+  const { attributes, listeners, setNodeRef, transform } = useDraggable({
+    id,
+  });
+
+  const prevTransformRef = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    const prevTransform = prevTransformRef.current;
+    prevTransformRef.current = transform;
+
+    if (prevTransform !== null && transform === null) {
+      const newWidth = Math.max(
+        RESIZE_HANDLE_WIDTH,
+        initialWidth + prevTransform.x,
+      );
+      onResizeEnd(newWidth);
+    }
+  }, [transform, initialWidth, onResizeEnd]);
+
+  const currentPosition = initialWidth + (transform ? transform.x : 0);
+
+  return (
+    <ResizeHandle
+      ref={setNodeRef}
+      data-testid="pivot-table-resize-handle"
+      style={{
+        left: `${currentPosition}px`,
+        cursor: "col-resize",
+      }}
+      {...listeners}
+      {...attributes}
+    />
+  );
 }
 
 export function Cell({
@@ -53,7 +82,6 @@ export function Cell({
   isBody = false,
   isBold,
   isEmphasized,
-  isNightMode,
   isBorderedHeader,
   isTransparent,
   hasTopBorder,
@@ -61,10 +89,12 @@ export function Cell({
   onResize,
   showTooltip = true,
 }: CellProps) {
+  const cellId = useId();
+
   return (
     <PivotTableCell
+      data-allow-page-break-after
       data-testid="pivot-table-cell"
-      isNightMode={isNightMode}
       isBold={isBold}
       isEmphasized={isEmphasized}
       isBorderedHeader={isBorderedHeader}
@@ -90,22 +120,11 @@ export function Cell({
           {icon && <div className={CS.pl1}>{icon}</div>}
         </div>
         {!!onResize && (
-          <Draggable
-            axis="x"
-            enableUserSelectHack
-            bounds={{ left: RESIZE_HANDLE_WIDTH } as DraggableBounds}
-            position={
-              {
-                x: style?.width ?? 0,
-                y: 0,
-              } as ControlPosition
-            }
-            onStop={(e, { x }) => {
-              onResize(x);
-            }}
-          >
-            <ResizeHandle data-testid="pivot-table-resize-handle" />
-          </Draggable>
+          <ResizableHandle
+            id={`resize-handle-${cellId}`}
+            initialWidth={(style?.width as number) ?? 0}
+            onResizeEnd={onResize}
+          />
         )}
       </>
     </PivotTableCell>
@@ -114,12 +133,11 @@ export function Cell({
 
 type CellClickHandler = (
   clicked: PivotTableClicked,
-) => ((e: React.SyntheticEvent) => void) | undefined;
+) => ((e: React.MouseEvent) => void) | undefined;
 
 interface TopHeaderCellProps {
   item: HeaderItem;
   style: React.CSSProperties;
-  isNightMode: boolean;
   getCellClickHandler: CellClickHandler;
   onResize?: (newWidth: number) => void;
 }
@@ -127,19 +145,19 @@ interface TopHeaderCellProps {
 export const TopHeaderCell = ({
   item,
   style,
-  isNightMode,
   getCellClickHandler,
   onResize,
 }: TopHeaderCellProps) => {
   const { value, hasChildren, clicked, isSubtotal, maxDepthBelow, span } = item;
+
+  const tc = useTranslateContent();
 
   return (
     <Cell
       style={{
         ...style,
       }}
-      value={value}
-      isNightMode={isNightMode}
+      value={tc(value)}
       isBorderedHeader={maxDepthBelow === 0}
       isEmphasized={hasChildren}
       isBold={isSubtotal}
@@ -158,7 +176,6 @@ type LeftHeaderCellProps = TopHeaderCellProps & {
 export const LeftHeaderCell = ({
   item,
   style,
-  isNightMode,
   getCellClickHandler,
   rowIndex,
   settings,
@@ -173,7 +190,6 @@ export const LeftHeaderCell = ({
         ...style,
         ...(depth === 0 ? { paddingLeft: LEFT_HEADER_LEFT_SPACING } : {}),
       }}
-      isNightMode={isNightMode}
       value={value}
       isEmphasized={isSubtotal}
       isBold={isSubtotal}
@@ -198,7 +214,6 @@ export const LeftHeaderCell = ({
 interface BodyCellProps {
   style: React.CSSProperties;
   rowSection: BodyItem[];
-  isNightMode: boolean;
   getCellClickHandler: CellClickHandler;
   cellWidths: number[];
   showTooltip?: boolean;
@@ -207,7 +222,6 @@ interface BodyCellProps {
 export const BodyCell = ({
   style,
   rowSection,
-  isNightMode,
   getCellClickHandler,
   cellWidths,
   showTooltip = true,
@@ -215,22 +229,23 @@ export const BodyCell = ({
   return (
     <div style={style} className={CS.flex}>
       {rowSection.map(
-        ({ value, isSubtotal, clicked, backgroundColor }, index) => (
-          <Cell
-            isNightMode={isNightMode}
-            key={index}
-            style={{
-              flexBasis: cellWidths[index],
-            }}
-            value={value}
-            isEmphasized={isSubtotal}
-            isBold={isSubtotal}
-            showTooltip={showTooltip}
-            isBody
-            onClick={getCellClickHandler(clicked)}
-            backgroundColor={backgroundColor}
-          />
-        ),
+        ({ value, isSubtotal, clicked, backgroundColor }, index) => {
+          return (
+            <Cell
+              key={index}
+              style={{
+                flexBasis: cellWidths[index],
+              }}
+              value={value}
+              isEmphasized={isSubtotal}
+              isBold={isSubtotal}
+              showTooltip={showTooltip}
+              isBody
+              onClick={getCellClickHandler(clicked)}
+              backgroundColor={backgroundColor}
+            />
+          );
+        },
       )}
     </div>
   );

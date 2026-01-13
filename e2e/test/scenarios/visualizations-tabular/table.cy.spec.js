@@ -1,103 +1,249 @@
+const { H } = cy;
 import { SAMPLE_DB_ID, WRITABLE_DB_ID } from "e2e/support/cypress_data";
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import {
-  enterCustomColumnDetails,
-  isScrollableHorizontally,
-  openNativeEditor,
-  openOrdersTable,
-  openPeopleTable,
-  popover,
-  hovercard,
-  restore,
-  summarize,
-  visualize,
-  resetTestTable,
-  resyncDatabase,
-  visitQuestionAdhoc,
-  getTable,
-  leftSidebar,
-  sidebar,
-  moveDnDKitElement,
-  selectFilterOperator,
-  expressionEditorWidget,
-  entityPickerModal,
-  entityPickerModalTab,
-} from "e2e/support/helpers";
+  ORDERS_BY_YEAR_QUESTION_ID,
+  ORDERS_DASHBOARD_ID,
+} from "e2e/support/cypress_sample_instance_data";
 
 describe("scenarios > visualizations > table", () => {
   beforeEach(() => {
-    restore();
+    H.restore();
     cy.signInAsNormalUser();
     cy.intercept("GET", "/api/field/*/search/*").as("findSuggestions");
   });
 
   function joinTable(table) {
     cy.findByText("Join data").click();
-    entityPickerModal().within(() => {
-      entityPickerModalTab("Tables").click();
-      cy.findByText(table).click();
+    H.miniPickerBrowseAll().click();
+    H.entityPickerModal().within(() => {
+      H.entityPickerModalItem(0, "Databases").click();
+      H.entityPickerModalItem(1, table).click();
     });
   }
 
   function selectFromDropdown(option, clickOpts) {
-    popover().last().findByText(option).click(clickOpts);
+    // eslint-disable-next-line no-unsafe-element-filtering
+    H.popover().last().findByText(option).click(clickOpts);
   }
+
+  it("should not be sortable when displays raw query results (metabase#19817)", () => {
+    H.visitQuestion(ORDERS_BY_YEAR_QUESTION_ID);
+    cy.findByLabelText("Switch to data").click();
+    const initialColumnsOrder = ["Created At: Year", "Count"];
+
+    H.assertTableData({
+      columns: initialColumnsOrder,
+    });
+
+    H.tableHeaderColumn("Count").as("countHeaderInPreview");
+    H.moveDnDKitElementByAlias("@countHeaderInPreview", { horizontal: -100 });
+
+    H.assertTableData({
+      columns: initialColumnsOrder,
+    });
+
+    H.notebookButton().click();
+
+    cy.findAllByTestId("step-preview-button").eq(1).click();
+
+    H.assertTableData({
+      columns: initialColumnsOrder,
+    });
+
+    H.tableHeaderColumn("Count").as("countHeaderInNotebook");
+    H.moveDnDKitElementByAlias("@countHeaderInNotebook", { horizontal: -100 });
+
+    H.assertTableData({
+      columns: initialColumnsOrder,
+    });
+  });
 
   it("should allow changing column title when the field ref is the same except for the join-alias", () => {
     cy.intercept("POST", "/api/dataset").as("dataset");
-    openOrdersTable({ mode: "notebook" });
+    H.openOrdersTable({ mode: "notebook" });
     joinTable("Orders");
     selectFromDropdown("ID");
     selectFromDropdown("User ID");
-    visualize();
+    H.visualize();
 
     // Rename the first ID column, and make sure the second one is not updated
-    headerCells().findByText("ID").click();
-    popover().within(() => {
+    H.tableHeaderClick("ID");
+    H.popover().within(() => {
       cy.findByText("Filter by this column");
       cy.icon("gear").click();
       cy.findByLabelText("Column title").type(" updated");
       // This defocuses the input, which triggers the update
       cy.findByText("Column title").click();
     });
-    // click somewhere else to close the popover
-    headerCells().last().click();
+
+    cy.realPress("Escape");
     headerCells().findAllByText("ID updated").should("have.length", 1);
   });
 
+  it("should allow selecting cells in a table and copy the values", () => {
+    H.grantClipboardPermissions();
+
+    H.openOrdersTable();
+
+    const getNonPKCells = () =>
+      H.tableInteractiveBody().find(
+        '[data-selectable-cell]:not([data-column-id="ID"])',
+      );
+
+    const assertSelectedCells = (expectedCount) => {
+      H.tableInteractiveBody()
+        .find("[data-selectable-cell]")
+        .filter('[aria-selected="true"]')
+        .should("have.length", expectedCount);
+    };
+
+    // Single cell selection by clicking
+    getNonPKCells().first().as("firstCell");
+    cy.get("@firstCell").click();
+    cy.get("@firstCell").should("have.attr", "aria-selected", "true");
+
+    // Multi-cell selection by dragging
+    getNonPKCells().eq(0).as("startCell");
+    getNonPKCells().eq(3).as("endCell");
+
+    cy.get("@startCell")
+      .trigger("mousedown", { which: 1 })
+      .then(() => {
+        cy.get("@endCell").trigger("mouseover", { buttons: 1 });
+        cy.get("@endCell").trigger("mouseup");
+      });
+    assertSelectedCells(4);
+
+    // Cmd+click to add cells to selection
+    getNonPKCells().eq(5).as("cmdClickCell");
+    cy.get("@cmdClickCell").click({ metaKey: true });
+    assertSelectedCells(5);
+
+    // Shift+click for range selection
+    getNonPKCells().eq(4).click();
+    getNonPKCells().eq(6).click({ shiftKey: true });
+    assertSelectedCells(3);
+
+    // Copy formatted content with Cmd+C
+    cy.realPress(["Meta", "c"]);
+    H.readClipboard().should(
+      "equal",
+      "Total	Discount ($)	Created At\n39.72		February 11, 2025, 9:40 PM",
+    );
+
+    // Copy unformatted content with Shift+Cmd+C
+    cy.realPress(["Shift", "Meta", "c"]);
+    H.readClipboard().should(
+      "equal",
+      "Total	Discount ($)	Created At\n" +
+        "39.718145389078366	null	2025-02-11T21:40:27.892-08:00",
+    );
+
+    // Escape to clear selection
+    cy.realPress("Escape");
+    assertSelectedCells(0);
+
+    // Click outside to clear selection
+    getNonPKCells().eq(0).click();
+    // Click outside the table
+    H.queryBuilderHeader().findByText("Orders").click();
+    assertSelectedCells(0);
+  });
+
+  it("should allow enabling row index column", () => {
+    H.openOrdersTable();
+    H.openVizSettingsSidebar();
+    H.sidebar().findByText("Show row index").click();
+
+    H.openObjectDetail(5);
+
+    // Ensure click on row index opens the object detail
+    H.modal().findAllByText("6").should("have.length", 2).and("be.visible");
+
+    // Close object detail modal
+    cy.realType("{esc}");
+
+    H.sidebar().findByText("Show row index").click();
+
+    H.tableInteractive()
+      .findAllByTestId("row-id-cell")
+      .eq(5)
+      .should("not.have.text", "6");
+  });
+
   it("should allow you to reorder and hide columns in the table header", () => {
-    openNativeEditor().type("select * from orders LIMIT 2");
+    H.startNewNativeQuestion({ query: "select * from orders LIMIT 2" });
     cy.findByTestId("native-query-editor-container").icon("play").click();
 
-    cy.findByTestId("viz-settings-button").click();
+    H.openVizSettingsSidebar();
 
     cy.findByTestId(/subtotal-hide-button/i).click();
     cy.findByTestId(/tax-hide-button/i).click();
     cy.findByTestId("sidebar-left").findByText("Done").click();
 
-    headerCells().eq(3).should("contain.text", "TOTAL").as("total");
-
-    cy.get("@total")
-      .trigger("mousedown", 0, 0, { force: true })
-      .trigger("mousemove", 5, 5, { force: true })
-      .trigger("mousemove", -220, 0, { force: true })
-      .trigger("mouseup", -220, 0, { force: true });
-
+    headerCells().eq(3).should("contain.text", "TOTAL");
+    H.moveDnDKitElement(H.tableHeaderColumn("TOTAL"), { horizontal: -220 });
     headerCells().eq(1).should("contain.text", "TOTAL");
 
-    headerCells().contains("QUANTITY").click();
-    popover().icon("eye_crossed_out").click();
+    H.tableHeaderClick("QUANTITY");
+    H.popover().icon("eye_crossed_out").click();
 
     headerCells().contains("QUANTITY").should("not.exist");
   });
 
+  it("should preserve set widths after reordering (VIZ-439)", () => {
+    cy.intercept(
+      "GET",
+      "/api/search?models=dataset&models=table&table_db_id=*",
+    ).as("getSearchResults");
+    cy.intercept("POST", "/api/dataset").as("getDataset");
+    H.startNewNativeQuestion({
+      query: 'select 1 "first_column", 2 "second_column"',
+      display: "table",
+      visualization_settings: { "table.column_widths": [600, 150] },
+    });
+
+    cy.findByTestId("native-query-editor-container").icon("play").click();
+    cy.wait(["@getSearchResults", "@getDataset"]);
+
+    H.tableHeaderColumn("first_column").invoke("outerWidth").as("firstWidth");
+    H.tableHeaderColumn("second_column").invoke("outerWidth").as("secondWidth");
+
+    H.moveDnDKitElement(H.tableHeaderColumn("first_column"), {
+      horizontal: 100,
+    });
+
+    const assertUnchangedWidths = () => {
+      cy.get("@firstWidth").then((firstWidth) => {
+        H.tableHeaderColumn("first_column")
+          .invoke("outerWidth")
+          .should("eq", firstWidth);
+      });
+
+      cy.get("@secondWidth").then((secondWidth) => {
+        H.tableHeaderColumn("second_column")
+          .invoke("outerWidth")
+          .should("eq", secondWidth);
+      });
+    };
+
+    assertUnchangedWidths();
+    cy.reload();
+
+    cy.findByTestId("native-query-editor-container").icon("play").click();
+    // Wait for column widths to be set
+    cy.wait(["@getSearchResults", "@getDataset"]);
+    H.tableHeaderColumn("first_column").should("be.visible");
+    assertUnchangedWidths();
+  });
+
   it("should allow to display any column as link with extrapolated url and text", () => {
-    openPeopleTable({ limit: 2 });
+    H.openPeopleTable({ limit: 2 });
 
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-    cy.findByText("City").click();
+    H.tableHeaderClick("City");
 
-    popover().within(() => {
+    H.popover().within(() => {
       cy.icon("gear").click();
     });
 
@@ -132,22 +278,20 @@ describe("scenarios > visualizations > table", () => {
   it("should show field metadata in a hovercard when hovering over a table column header", () => {
     const ccName = "Foo";
 
-    openPeopleTable({ mode: "notebook", limit: 2 });
+    H.openPeopleTable({ mode: "notebook", limit: 2 });
 
-    cy.icon("add_data").click();
+    cy.findByLabelText("Custom column").click();
 
-    expressionEditorWidget().within(() => {
-      enterCustomColumnDetails({
-        formula: "concat([Name], [Name])",
-        name: ccName,
-      });
-
-      cy.button("Done").click();
+    H.enterCustomColumnDetails({
+      formula: "concat([Name], [Name])",
+      name: ccName,
     });
 
+    H.expressionEditorWidget().button("Done").click();
+
     cy.findByTestId("fields-picker").click();
-    popover().within(() => {
-      cy.findByText("Select none").click();
+    H.popover().within(() => {
+      cy.findByText("Select all").click();
       cy.findByText("City").click();
       cy.findByText("State").click();
       cy.findByText("Birth Date").click();
@@ -157,7 +301,7 @@ describe("scenarios > visualizations > table", () => {
     // Click anywhere else to close the popover which is blocking the Visualize button
     cy.findByTestId("query-builder-root").click(0, 0);
 
-    visualize();
+    H.visualize();
 
     [
       [
@@ -175,7 +319,7 @@ describe("scenarios > visualizations > table", () => {
           // semantic type
           cy.contains("City");
           // description
-          cy.contains("The city of the account’s billing address");
+          cy.findByText("The city of the account’s billing address");
           // fingerprint
           cy.findByText("1,966 distinct values");
         },
@@ -227,21 +371,21 @@ describe("scenarios > visualizations > table", () => {
       // Add a delay here because there can be two popovers active for a very short time.
       cy.wait(250);
 
-      hovercard().within(() => {
+      H.hovercard().within(() => {
         test();
       });
 
       cy.get("[data-testid=cell-data]").contains(column).trigger("mouseout");
     });
 
-    summarize();
+    H.summarize();
 
     cy.findAllByTestId("dimension-list-item-name").contains(ccName).click();
 
     cy.wait("@dataset");
 
     cy.get("[data-testid=cell-data]").contains("Count").trigger("mouseover");
-    hovercard().within(() => {
+    H.hovercard().within(() => {
       cy.contains("Quantity");
       cy.findByText("No description");
     });
@@ -251,29 +395,29 @@ describe("scenarios > visualizations > table", () => {
     cy.get("[data-testid=cell-data]").contains(ccName).trigger("mouseover");
     cy.wait(250);
 
-    hovercard().within(() => {
+    H.hovercard().within(() => {
       cy.contains("No special type");
       cy.findByText("No description");
     });
   });
 
   it("should show the field metadata popover for a foreign key field (metabase#19577)", () => {
-    openOrdersTable({ limit: 2 });
+    H.openOrdersTable({ limit: 2 });
 
     cy.get("[data-testid=cell-data]")
       .contains("Product ID")
       .trigger("mouseover");
 
-    hovercard().within(() => {
+    H.hovercard().within(() => {
       cy.contains("Foreign Key");
       cy.contains("The product ID.");
     });
   });
 
   it("should show field metadata in a hovercard when hovering over a table column in the summarize sidebar", () => {
-    openOrdersTable({ limit: 2 });
+    H.openOrdersTable({ limit: 2 });
 
-    summarize();
+    H.summarize();
 
     cy.findAllByTestId("dimension-list-item")
       .contains("ID")
@@ -282,67 +426,63 @@ describe("scenarios > visualizations > table", () => {
         cy.findByLabelText("More info").realHover();
       });
 
-    hovercard().within(() => {
+    H.hovercard().within(() => {
       cy.contains("Entity Key");
     });
   });
 
   it("should show field metadata hovercards for native query tables", () => {
-    openNativeEditor().type("select * from products");
+    H.startNewNativeQuestion({
+      query: "select * from products limit 1",
+      display: "table",
+    });
     cy.findByTestId("native-query-editor-container").icon("play").click();
 
-    cy.get("[data-testid=cell-data]").contains("CATEGORY").realHover();
+    cy.log("Wait for the table to load");
+    cy.findAllByTestId("cell-data")
+      .should("be.visible")
+      .and("contain", "Gizmo");
 
-    hovercard().within(() => {
-      cy.contains("No special type");
-      cy.findByText("No description");
-    });
+    cy.log("Assert");
+    cy.findAllByTestId("header-cell").filter(":contains(CATEGORY)").realHover();
+    H.hovercard()
+      .should("contain", "No special type")
+      .and("contain", "No description");
   });
 
-  it.skip("should close the colum popover on subsequent click (metabase#16789)", () => {
-    openPeopleTable({ limit: 2 });
+  it("should close the colum popover on subsequent click (metabase#16789)", () => {
+    H.openPeopleTable({ limit: 2 });
 
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-    cy.findByText("City").click();
-    popover().within(() => {
-      cy.icon("arrow_up");
-      cy.icon("arrow_down");
-      cy.icon("gear");
-      cy.findByText("Filter by this column");
-      cy.findByText("Distribution");
-      cy.findByText("Distinct values");
-    });
+    H.tableHeaderColumn("City").click();
+    H.clickActionsPopover().should("be.visible");
 
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-    cy.findByText("City").click();
-    // Although arbitrary waiting is considered an anti-pattern and a really bad practice, I couldn't find any other way to reproduce this issue.
-    // Cypress is too fast and is doing the assertions in that split second while popover is reloading which results in a false positive result.
-    cy.wait(100);
-    popover().should("not.exist");
+    H.tableHeaderColumn("City").click();
+    cy.wait(100); // Ensure popover is closed
+    H.clickActionsPopover({ skipVisibilityCheck: true }).should("not.exist");
   });
 
   it("popover should not be scrollable horizontally (metabase#31339)", () => {
-    openPeopleTable();
-    headerCells().filter(":contains('Password')").click();
+    H.openPeopleTable();
+    H.tableHeaderClick("Password");
 
-    popover().findByText("Filter by this column").click();
-    selectFilterOperator("Is");
-    popover().within(() => {
+    H.popover().findByText("Filter by this column").click();
+    H.selectFilterOperator("Is");
+    H.popover().within(() => {
       cy.findByPlaceholderText("Search by Password").type("e");
       cy.wait("@findSuggestions");
       cy.findByPlaceholderText("Search by Password").blur();
     });
 
-    popover().then($popover => {
-      expect(isScrollableHorizontally($popover[0])).to.be.false;
+    H.popover().then(($popover) => {
+      expect(H.isScrollableHorizontally($popover[0])).to.be.false;
     });
   });
 
   it("should show the slow loading text when the query is taking too long", () => {
-    openOrdersTable({ mode: "notebook" });
+    H.openOrdersTable({ mode: "notebook" });
 
-    cy.intercept("POST", "/api/dataset", req => {
-      req.on("response", res => {
+    cy.intercept("POST", "/api/dataset", (req) => {
+      req.on("response", (res) => {
         res.setDelay(10000);
       });
     });
@@ -356,15 +496,359 @@ describe("scenarios > visualizations > table", () => {
     cy.tick(5000);
     cy.findByTestId("query-builder-main").findByText("Waiting for results...");
   });
+
+  it("should support 'Local symbol' in 'Currency label style' viz setting", () => {
+    H.openOrdersTable();
+
+    H.tableHeaderClick("Discount ($)");
+    H.popover().icon("gear").click();
+    cy.findByLabelText("Unit of currency").click();
+    cy.findByRole("option", { name: "New Zealand Dollar" }).click();
+    H.tableHeaderColumn("Discount (NZ$)").should("be.visible");
+    H.tableInteractive().findByText("6.42").should("be.visible");
+
+    H.popover().findByText("Local symbol ($)").should("be.visible").click();
+    H.tableHeaderColumn("Discount ($)").should("be.visible");
+    H.tableInteractive().findByText("6.42").should("be.visible");
+
+    H.popover().findByText("In every table cell").click();
+    H.tableHeaderColumn("Discount").should("be.visible");
+    H.tableInteractive().findByText("$6.42").should("be.visible");
+
+    cy.log(
+      "should still show the option if it's already selected but currency does not support it",
+    );
+    cy.findByLabelText("Unit of currency").click();
+    cy.findByRole("option", { name: "US Dollar" }).click();
+    H.popover().findByText("Local symbol ($)").should("be.visible");
+
+    cy.log("but should hide it once a valid option is selected");
+    H.popover().findByText("Symbol ($)").click();
+    H.popover().findByText("Local symbol ($)").should("not.exist");
+  });
+});
+
+describe("scenarios > visualizations > table > dashboards context", () => {
+  beforeEach(() => {
+    H.restore();
+    cy.signInAsAdmin();
+  });
+
+  it("should allow viewing data in dashboards", () => {
+    H.visitDashboard(ORDERS_DASHBOARD_ID);
+
+    // Ensure it works on a regular dashboard
+    assertCanViewOrdersTableDashcard();
+
+    // Ensure it works on a public dashboard
+    H.openSharingMenu("Create a public link");
+    cy.findByTestId("public-link-input")
+      .invoke("val")
+      .should("not.be.empty")
+      .then((publicLink) => {
+        cy.signOut();
+        cy.visit(publicLink);
+      });
+
+    assertCanViewOrdersTableDashcard();
+  });
+
+  it("should allow enabling pagination in dashcard viz settings", () => {
+    // Page rows count is based on the available space which can differ depending on the platform and scroll bar system settings
+    const rowsRegex = /Rows \d+-\d+ of first 2,000/;
+    const idCellSelector = '[data-column-id="ID"]';
+    const firstPageId = 6;
+    const secondPageId = 12;
+
+    H.visitDashboard(ORDERS_DASHBOARD_ID);
+    H.dashboardCards()
+      .eq(0)
+      .as("tableDashcard")
+      .findByText(rowsRegex)
+      .should("not.exist");
+
+    cy.get("@tableDashcard").findByText("Showing first 2,000 rows");
+
+    // Enable pagination
+    H.editDashboard();
+    H.showDashcardVisualizationSettings(0);
+    H.modal().within(() => {
+      cy.findByText("Paginate results").click();
+      cy.findByText(rowsRegex);
+      cy.button("Done").click();
+    });
+
+    H.saveDashboard();
+
+    // Ensure pagination works
+    cy.get("@tableDashcard").findByText(rowsRegex);
+    cy.get(idCellSelector).should("contain", firstPageId);
+    cy.get(idCellSelector).should("not.contain", secondPageId);
+
+    cy.findByLabelText("Next page").click();
+    cy.get("@tableDashcard").findByText(rowsRegex);
+    cy.get(idCellSelector).should("contain", secondPageId);
+    cy.get(idCellSelector).should("not.contain", firstPageId);
+
+    cy.findByLabelText("Previous page").click();
+    cy.get("@tableDashcard").findByText(rowsRegex);
+    cy.get(idCellSelector).should("contain", firstPageId);
+    cy.get(idCellSelector).should("not.contain", secondPageId);
+
+    H.editDashboard();
+
+    // Ensure resizing change page size
+    H.resizeDashboardCard({ card: cy.get("@tableDashcard"), x: 600, y: 700 });
+    H.saveDashboard();
+    cy.get("@tableDashcard")
+      .findByText(rowsRegex)
+      .scrollIntoView()
+      .should("be.visible");
+    // Table got taller so elements from the second page have become visible
+    cy.get(idCellSelector).should("contain", secondPageId);
+  });
+
+  it("should support text wrapping setting", () => {
+    H.createQuestionAndDashboard({
+      questionDetails: {
+        name: "reviews",
+        type: "model",
+        query: {
+          "source-table": SAMPLE_DATABASE.REVIEWS_ID,
+        },
+        visualization_settings: {
+          "table.column_widths": [246, 195, 69, 116, 134, 83],
+          column_settings: {
+            '["name","BODY"]': {
+              text_wrapping: true,
+            },
+          },
+          "table.columns": [
+            {
+              name: "BODY",
+              enabled: true,
+            },
+            {
+              name: "CREATED_AT",
+              enabled: true,
+            },
+            {
+              name: "ID",
+              enabled: true,
+            },
+            {
+              name: "PRODUCT_ID",
+              enabled: true,
+            },
+            {
+              name: "REVIEWER",
+              enabled: true,
+            },
+            {
+              name: "RATING",
+              enabled: true,
+            },
+          ],
+        },
+      },
+      dashboardDetails: {
+        name: "Dashboard",
+      },
+      cardDetails: {
+        size_x: 24,
+        size_y: 12,
+      },
+    }).then(({ body: { dashboard_id } }) => {
+      const wrappedRowInitialHeight = 87;
+      const updatedRowHeight = 70;
+      H.visitDashboard(dashboard_id);
+
+      H.assertRowHeight(0, wrappedRowInitialHeight);
+
+      H.resizeTableColumn("BODY", 100);
+
+      // Ensure resizing led to the reduction of the row height
+      H.assertRowHeight(0, updatedRowHeight);
+
+      // Ensure resizing did not permanently changed the row height
+      cy.reload();
+      H.assertRowHeight(0, wrappedRowInitialHeight);
+
+      // Disable text wrapping from dashcard settings
+      H.editDashboard();
+
+      H.getDashboardCard(0)
+        .realHover()
+        .within(() => {
+          cy.findByLabelText("Show visualization options").click();
+        });
+
+      cy.findByTestId("Body-settings-button").click();
+
+      H.popover().findByText("Wrap text").click();
+
+      cy.button("Done").click();
+
+      // Ensure rows have fixed default height
+      H.assertRowHeight(0, 36);
+    });
+  });
+
+  it("should support the row index setting", () => {
+    H.visitDashboard(ORDERS_DASHBOARD_ID);
+    H.editDashboard();
+
+    H.getDashboardCard(0)
+      .realHover()
+      .within(() => {
+        cy.findByLabelText("Show visualization options").click();
+      });
+    H.modal().findByText("Show row index").click();
+
+    cy.button("Done").click();
+
+    H.saveDashboard();
+
+    H.tableInteractiveBody()
+      .findAllByTestId("row-id-cell")
+      .eq(0)
+      .should("have.text", 1);
+
+    // Apply sorting to ensure row index does not change
+    H.tableHeaderClick("ID");
+
+    H.tableInteractiveBody()
+      .findAllByTestId("row-id-cell")
+      .eq(0)
+      .should("have.text", 1);
+  });
+
+  it("should expand columns to the full width of the dashcard (metabase#57381)", () => {
+    const sideColumnsWidth = 200;
+    const expandedSideColumnsWidth = 2 * sideColumnsWidth;
+    const idColumnWidth = 54;
+    const idExpandedWidth = 2 * idColumnWidth;
+
+    H.createQuestionAndDashboard({
+      questionDetails: {
+        name: "reviews",
+        type: "model",
+        query: {
+          "source-table": SAMPLE_DATABASE.REVIEWS_ID,
+        },
+        visualization_settings: {
+          "table.column_widths": [sideColumnsWidth, null, sideColumnsWidth], // middle column width is not set
+          column_settings: {
+            '["name","BODY"]': {
+              text_wrapping: true,
+            },
+          },
+          "table.columns": [
+            {
+              name: "BODY",
+              enabled: true,
+            },
+            {
+              name: "CREATED_AT",
+              enabled: false,
+            },
+            {
+              name: "ID",
+              enabled: true,
+            },
+            {
+              name: "PRODUCT_ID",
+              enabled: false,
+            },
+            {
+              name: "REVIEWER",
+              enabled: false,
+            },
+            {
+              name: "RATING",
+              enabled: true,
+            },
+          ],
+        },
+      },
+      dashboardDetails: {
+        name: "Dashboard",
+      },
+      cardDetails: {
+        size_x: 24,
+        size_y: 12,
+      },
+    }).then(({ body: { dashboard_id } }) => {
+      H.visitDashboard(dashboard_id);
+
+      // Column widths should be expanded to the full width of the dashcard
+      H.getColumnWidth("Body").should("be.gt", expandedSideColumnsWidth);
+      H.getColumnWidth("Rating").should("be.gt", expandedSideColumnsWidth);
+      H.getColumnWidth("ID").should("be.gt", idExpandedWidth);
+
+      // Resize Body column
+      H.resizeTableColumn("BODY", -100);
+
+      // Ensure columns are not expanded to the full width of the dashcard after manual resizing
+      H.getColumnWidth("Body")
+        .should("be.gt", expandedSideColumnsWidth - 100)
+        .should("be.lt", expandedSideColumnsWidth);
+      H.getColumnWidth("Rating").should("be.gt", expandedSideColumnsWidth);
+      H.getColumnWidth("ID").should("be.gt", idExpandedWidth);
+    });
+  });
+
+  it("should support resizing columns in dashcard viz settings", () => {
+    H.visitDashboard(ORDERS_DASHBOARD_ID);
+    cy.findAllByTestId("header-cell")
+      .filter(":contains(ID)")
+      .as("headerCell")
+      .then(($cell) => {
+        const originalWidth = $cell[0].getBoundingClientRect().width;
+        cy.wrap(originalWidth).as("originalWidth");
+      });
+
+    H.editDashboard();
+
+    H.getDashboardCard(0)
+      .realHover()
+      .within(() => {
+        cy.findByLabelText("Show visualization options").click();
+      });
+
+    const resizeByWidth = 100;
+    H.resizeTableColumn("ID", resizeByWidth, 1);
+
+    H.modal().findByText("Done").click();
+
+    H.saveDashboard();
+
+    cy.get("@originalWidth").then((originalWidth) => {
+      cy.get("@headerCell").should(($newCell) => {
+        const newWidth = $newCell[0].getBoundingClientRect().width;
+        expect(newWidth).to.be.gte(originalWidth + resizeByWidth);
+      });
+    });
+
+    // Ensure it persists after page reload
+    cy.reload();
+
+    cy.get("@originalWidth").then((originalWidth) => {
+      cy.get("@headerCell").should(($newCell) => {
+        const newWidth = $newCell[0].getBoundingClientRect().width;
+        expect(newWidth).to.be.gte(originalWidth + resizeByWidth);
+      });
+    });
+  });
 });
 
 describe("scenarios > visualizations > table > conditional formatting", () => {
   describe("rules", () => {
     beforeEach(() => {
-      restore();
+      H.restore();
       cy.signInAsAdmin();
 
-      visitQuestionAdhoc({
+      H.visitQuestionAdhoc({
         dataset_query: {
           database: SAMPLE_DB_ID,
           query: {
@@ -405,8 +889,8 @@ describe("scenarios > visualizations > table > conditional formatting", () => {
         },
       });
 
-      cy.findByTestId("viz-settings-button").click();
-      sidebar().findByText("Conditional Formatting").click();
+      H.openVizSettingsSidebar();
+      H.sidebar().findByText("Conditional Formatting").click();
     });
 
     it("should be able to remove, add, and re-order rows", () => {
@@ -423,17 +907,19 @@ describe("scenarios > visualizations > table > conditional formatting", () => {
         .should("contain.text", "is less than 6");
 
       cy.findByRole("button", { name: /add a rule/i }).click();
-      cy.findByRole("button", { name: /choose a column/i }).click();
-      popover().findByText("Subtotal").click();
+      // popover should open automatically
+      H.popover().findByText("Subtotal").click();
       cy.realPress("Escape");
-      cy.findByRole("button", { name: /is equal to/i }).click();
-      popover().findByText("is less than").click();
+      cy.findByTestId("conditional-formatting-value-operator-button").click({
+        force: true,
+      });
+      H.popover().findByText("is less than").click();
 
       cy.findByTestId("conditional-formatting-value-input").type("20");
       cy.findByTestId("conditional-formatting-color-selector").click();
 
-      popover()
-        .findByRole("generic", { name: /#F2A86F/i })
+      H.popover()
+        .findByRole("button", { name: /#F2A86F/i })
         .click();
 
       cy.button("Add rule").click();
@@ -442,7 +928,7 @@ describe("scenarios > visualizations > table > conditional formatting", () => {
         .first()
         .should("contain.text", "is less than 20");
 
-      moveDnDKitElement(cy.findAllByTestId("formatting-rule-preview").eq(2), {
+      H.moveDnDKitElement(cy.findAllByTestId("formatting-rule-preview").eq(2), {
         vertical: -300,
       });
 
@@ -454,58 +940,60 @@ describe("scenarios > visualizations > table > conditional formatting", () => {
 
   describe("operators", () => {
     beforeEach(() => {
-      resetTestTable({ type: "postgres", table: "many_data_types" });
-      restore("postgres-writable");
+      H.restore("postgres-writable");
+      H.resetTestTable({ type: "postgres", table: "many_data_types" });
       cy.signInAsAdmin();
-      resyncDatabase({
+      H.resyncDatabase({
         dbId: WRITABLE_DB_ID,
         tableName: "many_data_types",
       });
 
-      getTable({ name: "many_data_types" }).then(({ id: tableId, fields }) => {
-        const booleanField = fields.find(field => field.name === "boolean");
-        const stringField = fields.find(field => field.name === "string");
-        const idField = fields.find(field => field.name === "id");
+      H.getTable({ name: "many_data_types" }).then(
+        ({ id: tableId, fields }) => {
+          const booleanField = fields.find((field) => field.name === "boolean");
+          const stringField = fields.find((field) => field.name === "string");
+          const idField = fields.find((field) => field.name === "id");
 
-        visitQuestionAdhoc({
-          dataset_query: {
-            database: WRITABLE_DB_ID,
-            query: {
-              "source-table": tableId,
-              fields: [
-                ["field", idField.id, { "base-type": idField["base_type"] }],
-                [
-                  "field",
-                  stringField.id,
-                  { "base-type": stringField["base_type"] },
+          H.visitQuestionAdhoc({
+            dataset_query: {
+              database: WRITABLE_DB_ID,
+              query: {
+                "source-table": tableId,
+                fields: [
+                  ["field", idField.id, { "base-type": idField["base_type"] }],
+                  [
+                    "field",
+                    stringField.id,
+                    { "base-type": stringField["base_type"] },
+                  ],
+                  [
+                    "field",
+                    booleanField.id,
+                    { "base-type": booleanField["base_type"] },
+                  ],
                 ],
-                [
-                  "field",
-                  booleanField.id,
-                  { "base-type": booleanField["base_type"] },
-                ],
-              ],
+              },
+              type: "query",
             },
-            type: "query",
-          },
-          display: "table",
-        });
-      });
+            display: "table",
+          });
+        },
+      );
     });
 
     it("should work with boolean columns", { tags: ["@external"] }, () => {
-      cy.findByTestId("viz-settings-button").click();
-      leftSidebar().findByText("Conditional Formatting").click();
+      H.openVizSettingsSidebar();
+      H.leftSidebar().findByText("Conditional Formatting").click();
       cy.findByRole("button", { name: /add a rule/i }).click();
 
-      popover().findByRole("option", { name: "Boolean" }).click();
+      H.popover().findByRole("option", { name: "Boolean" }).click();
 
       //Dismiss popover
-      leftSidebar().findByText("Which columns should be affected?").click();
+      H.leftSidebar().findByText("Which columns should be affected?").click();
 
       //Check that is-true was applied by default to boolean field rule
       cy.findByTestId("conditional-formatting-value-operator-button").should(
-        "contain.text",
+        "have.value",
         "is true",
       );
 
@@ -528,12 +1016,12 @@ describe("scenarios > visualizations > table > time formatting (#11398)", () => 
   `;
 
   beforeEach(() => {
-    restore();
+    H.restore();
     cy.signInAsNormalUser();
   });
 
   it("should work with time columns", { tags: ["@external"] }, () => {
-    cy.createNativeQuestion(
+    H.createNativeQuestion(
       {
         name: "11398",
         native: {
@@ -544,9 +1032,9 @@ describe("scenarios > visualizations > table > time formatting (#11398)", () => 
     );
 
     // Open the formatting menu
-    cy.findByTestId("field-info-popover").click();
+    H.tableHeaderClick("CREATION_TIME");
 
-    popover().icon("gear").click();
+    H.popover().icon("gear").click();
 
     cy.findByTestId("column-formatting-settings").within(() => {
       // Set to hours, minutes, seconds, 24-hour clock
@@ -570,4 +1058,97 @@ describe("scenarios > visualizations > table > time formatting (#11398)", () => 
 
 function headerCells() {
   return cy.findAllByTestId("header-cell");
+}
+
+function assertClientSideTableSorting({
+  columnName,
+  columnId,
+  descValue,
+  ascValue,
+  defaultValue,
+}) {
+  H.tableInteractiveScrollContainer().scrollTo("topLeft");
+
+  const cellSelector = `[data-column-id=${columnId}]`;
+
+  H.tableInteractiveBody()
+    .findAllByRole("row")
+    .first()
+    .find(cellSelector)
+    .should("have.text", defaultValue);
+
+  // Descending sorting by ID
+  H.tableHeaderClick(columnName);
+  H.tableHeaderColumn(columnName)
+    .closest("[role=columnheader]")
+    .findByLabelText("chevrondown icon");
+  H.tableInteractiveBody()
+    .findAllByRole("row")
+    .first()
+    .find(cellSelector)
+    .should("have.text", descValue);
+
+  // Ascending sorting by ID
+  H.tableHeaderClick(columnName);
+  H.tableHeaderColumn(columnName)
+    .closest("[role=columnheader]")
+    .findByLabelText("chevronup icon");
+  H.tableInteractiveBody()
+    .findAllByRole("row")
+    .first()
+    .find(cellSelector)
+    .should("have.text", ascValue);
+
+  // Default sorting by ID
+  H.tableHeaderClick(columnName);
+  H.tableHeaderColumn(columnName)
+    .closest("[role=columnheader]")
+    .findByRole("img")
+    .should("not.exist");
+  H.tableInteractiveBody()
+    .findAllByRole("row")
+    .first()
+    .find(cellSelector)
+    .should("have.text", defaultValue);
+}
+
+function assertCanViewOrdersTableDashcard() {
+  H.assertTableRowsCount(2000);
+  H.tableInteractiveScrollContainer().scrollTo("bottomLeft");
+
+  // Ensure it renders correct data
+  // eslint-disable-next-line no-unsafe-element-filtering
+  H.tableInteractiveBody()
+    .findAllByRole("row")
+    .last()
+    .findAllByRole("gridcell")
+    .eq(0)
+    .should("have.text", "2000"); // Last Order ID
+
+  H.tableInteractiveScrollContainer().scrollTo("bottomRight");
+
+  // eslint-disable-next-line no-unsafe-element-filtering
+  H.tableInteractiveBody()
+    .findAllByRole("row")
+    .last()
+    .findAllByRole("gridcell")
+    .last()
+    .should("have.text", "9"); // Quantity of the last Order
+
+  // Ensure sorting works
+  assertClientSideTableSorting({
+    columnName: "ID",
+    columnId: "ID",
+    defaultValue: 1,
+    descValue: 2000,
+    ascValue: 1,
+  });
+
+  assertClientSideTableSorting({
+    columnName: "Created At",
+    columnId: "CREATED_AT",
+    defaultValue: "February 11, 2025, 9:40 PM",
+    descValue: "April 19, 2026, 2:07 PM",
+    ascValue: "June 1, 2022, 6:12 PM",
+  });
 }

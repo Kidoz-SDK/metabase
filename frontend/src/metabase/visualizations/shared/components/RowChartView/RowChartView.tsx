@@ -2,15 +2,17 @@ import type { AxisScale } from "@visx/axis";
 import { AxisBottom, AxisLeft } from "@visx/axis";
 import { GridColumns } from "@visx/grid";
 import { Group } from "@visx/group";
-import type { StringLike, NumberLike } from "@visx/scale";
+import type { NumberLike, StringLike } from "@visx/scale";
 import { scaleBand } from "@visx/scale";
 import { Bar } from "@visx/shape";
 import { Text } from "@visx/text";
 import type { ScaleBand, ScaleContinuousNumeric } from "d3-scale";
 import * as React from "react";
 
+import { truncateText } from "metabase/visualizations/lib/text";
 import type { HoveredData } from "metabase/visualizations/shared/types/events";
 import type { Margin } from "metabase/visualizations/shared/types/layout";
+import type { TextWidthMeasurer } from "metabase/visualizations/shared/types/measure-text";
 
 import type { SeriesInfo } from "../../types/data";
 import type { BarData, RowChartTheme, SeriesData } from "../RowChart/types";
@@ -46,6 +48,7 @@ export interface RowChartViewProps<TDatum> {
   isStacked?: boolean;
   style?: React.CSSProperties;
   hoveredData?: HoveredData | null;
+  measureTextWidth?: TextWidthMeasurer;
   onHover?: (
     event: React.MouseEvent<Element>,
     bar: BarData<TDatum, SeriesInfo> | null,
@@ -78,6 +81,7 @@ const RowChartView = <TDatum,>({
   isStacked,
   style,
   hoveredData,
+  measureTextWidth,
   onHover,
   onClick,
 }: RowChartViewProps<TDatum>) => {
@@ -90,6 +94,34 @@ const RowChartView = <TDatum,>({
 
   const goalLineX = xScale(goal?.value ?? 0);
 
+  const ellipsifiedYTickFormatter = React.useMemo(() => {
+    if (!measureTextWidth || !width) {
+      return yTickFormatter;
+    }
+
+    // Calculate the maximum allowed width for y-axis labels (50% of chart width)
+    const maxLabelWidth =
+      margin.left - (yLabel ? theme.axis.label.size * 2 : 0);
+
+    return (value: StringLike) => {
+      const originalText = yTickFormatter(value);
+      return truncateText(
+        originalText,
+        maxLabelWidth,
+        measureTextWidth,
+        theme.axis.ticks,
+      );
+    };
+  }, [
+    measureTextWidth,
+    width,
+    margin.left,
+    yLabel,
+    theme.axis.label.size,
+    theme.axis.ticks,
+    yTickFormatter,
+  ]);
+
   return (
     <svg width={width ?? undefined} height={height ?? undefined} style={style}>
       <Group top={margin.top} left={margin.left}>
@@ -101,7 +133,7 @@ const RowChartView = <TDatum,>({
         />
 
         {seriesData.map((series, seriesIndex) => {
-          return series.bars.map(bar => {
+          return series.bars.map((bar) => {
             const { xStartValue, xEndValue, isNegative, yValue, datumIndex } =
               bar;
             let y = yScale(yValue);
@@ -157,9 +189,9 @@ const RowChartView = <TDatum,>({
                   height={height}
                   fill={series.color}
                   opacity={opacity}
-                  onClick={event => onClick?.(event, bar)}
-                  onMouseEnter={event => onHover?.(event, bar)}
-                  onMouseLeave={event => onHover?.(event, null)}
+                  onClick={(event) => onClick?.(event, bar)}
+                  onMouseEnter={(event) => onHover?.(event, bar)}
+                  onMouseLeave={(event) => onHover?.(event, null)}
                 />
                 {label != null && (
                   <Text
@@ -196,13 +228,14 @@ const RowChartView = <TDatum,>({
           label={yLabel ?? ""}
           labelProps={{
             fill: theme.axis.label.color,
+            fontFamily: theme.dataLabels.family,
             fontSize: theme.axis.label.size,
             fontWeight: theme.axis.label.weight,
             textAnchor: "middle",
             verticalAnchor: "start",
           }}
           labelOffset={margin.left - theme.axis.label.size}
-          tickFormat={yTickFormatter}
+          tickFormat={ellipsifiedYTickFormatter}
           hideAxisLine={!hasYAxis}
           hideTicks
           tickValues={hasYAxis ? undefined : []}
@@ -212,6 +245,7 @@ const RowChartView = <TDatum,>({
           tickStroke={theme.axis.color}
           tickLabelProps={() => ({
             fill: theme.axis.ticks.color,
+            fontFamily: theme.dataLabels.family,
             fontSize: theme.axis.ticks.size,
             fontWeight: theme.axis.ticks.weight,
             textAnchor: "end",
@@ -222,6 +256,7 @@ const RowChartView = <TDatum,>({
           label={xLabel ?? ""}
           labelProps={{
             fill: theme.axis.label.color,
+            fontFamily: theme.dataLabels.family,
             fontSize: theme.axis.label.size,
             fontWeight: theme.axis.label.weight,
             textAnchor: "middle",
@@ -237,6 +272,7 @@ const RowChartView = <TDatum,>({
           tickStroke={theme.axis.color}
           tickLabelProps={() => ({
             fill: theme.axis.ticks.color,
+            fontFamily: theme.dataLabels.family,
             fontSize: theme.axis.ticks.size,
             fontWeight: theme.axis.ticks.weight,
             textAnchor: "middle",

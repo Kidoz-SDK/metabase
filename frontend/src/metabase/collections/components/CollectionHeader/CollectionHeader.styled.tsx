@@ -1,7 +1,7 @@
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
 
-import Button from "metabase/core/components/Button";
-import { color } from "metabase/lib/colors";
+import Button, { type ButtonProps } from "metabase/common/components/Button";
 import { breakpointMinSmall } from "metabase/styled-components/theme";
 
 export const HeaderRoot = styled.div`
@@ -25,28 +25,29 @@ export const HeaderActions = styled.div`
   gap: 0.5rem;
 `;
 
-interface CollectionHeaderButtonProps {
+interface CollectionHeaderButtonProps extends ButtonProps {
   to?: string;
 }
 
 export const CollectionHeaderButton = styled(
-  Button,
+  (props: CollectionHeaderButtonProps) => (
+    <Button
+      {...props}
+      onlyIcon={props.onlyIcon ?? true}
+      iconSize={props.iconSize ?? 20}
+    />
+  ),
 )<CollectionHeaderButtonProps>`
   padding: 0.25rem 0.5rem;
   height: 2rem;
   width: 2rem;
 
   &:hover {
-    color: ${color("brand")};
-    background-color: ${color("bg-medium")};
+    color: var(--mb-color-brand);
+    background-color: var(--mb-color-bg-medium);
   }
 
   ${Button.Content} {
     height: 100%;
   }
 `;
-
-CollectionHeaderButton.defaultProps = {
-  onlyIcon: true,
-  iconSize: 20,
-};

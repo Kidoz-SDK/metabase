@@ -18,6 +18,7 @@ describe("visualization_settings", () => {
         );
         expect(settings["stackable.stack_type"]).toBe(null);
       });
+
       it("should default area chart to stacked for 1 dimensions and 2 metrics", () => {
         const settings = getComputedSettingsForSeries(
           cardWithTimeseriesBreakoutAndTwoMetrics({
@@ -28,6 +29,7 @@ describe("visualization_settings", () => {
         expect(settings["stackable.stack_type"]).toBe("stacked");
       });
     });
+
     describe("graph.x_axis._is_histogram", () => {
       // NOTE: currently datetimes with unit are never considered histograms
       const HISTOGRAM_UNITS = [];
@@ -43,8 +45,9 @@ describe("visualization_settings", () => {
         "day-of-year",
         "week-of-year",
       ];
+
       describe("non-histgram units", () => {
-        NON_HISTOGRAM_UNITS.forEach(unit => {
+        NON_HISTOGRAM_UNITS.forEach((unit) => {
           it(`should default ${unit} to false`, () => {
             const settings = getComputedSettingsForSeries(
               cardWithTimeseriesBreakout({ unit }),
@@ -53,8 +56,9 @@ describe("visualization_settings", () => {
           });
         });
       });
+
       describe("histgram units", () => {
-        HISTOGRAM_UNITS.forEach(unit => {
+        HISTOGRAM_UNITS.forEach((unit) => {
           it(`should default ${unit} to true`, () => {
             const settings = getComputedSettingsForSeries(
               cardWithTimeseriesBreakout({ unit }),
@@ -64,6 +68,7 @@ describe("visualization_settings", () => {
         });
       });
     });
+
     describe("graph.y_axis.title_text", () => {
       const data = {
         cols: [
@@ -125,6 +130,7 @@ describe("visualization_settings", () => {
         const settings = getComputedSettingsForSeries([{ card, data }]);
         expect(settings["graph.show_values"]).toBe(false);
       });
+
       it("should not show values on a previously saved bar chart", () => {
         const card = {
           visualization_settings: {},
@@ -136,22 +142,6 @@ describe("visualization_settings", () => {
         expect(settings["graph.show_values"]).toBe(false);
       });
     });
-    describe("table.columns", () => {
-      it("should include fieldRef in default table.columns", () => {
-        const card = { visualization_settings: {} };
-        const cols = [
-          NumberColumn({
-            name: "some number",
-            field_ref: ["field", 123, null],
-          }),
-        ];
-        const {
-          "table.columns": [setting],
-        } = getComputedSettingsForSeries([{ card, data: { cols } }]);
-
-        expect(setting.fieldRef).toEqual(["field", 123, null]);
-      });
-    });
   });
 
   describe("getStoredSettingsForSeries", () => {
@@ -159,12 +149,14 @@ describe("visualization_settings", () => {
       const settings = getStoredSettingsForSeries([{ card: {} }]);
       expect(settings).toEqual({});
     });
+
     it("should pull out any saved visualization settings", () => {
       const settings = getStoredSettingsForSeries([
         { card: { visualization_settings: { foo: "bar" } } },
       ]);
       expect(settings).toEqual({ foo: "bar" });
     });
+
     it("should work correctly with frozen objects", () => {
       const settings = getStoredSettingsForSeries(
         icepick.freeze([
@@ -190,6 +182,7 @@ describe("visualization_settings", () => {
       });
     });
   });
+
   describe("table.cell_column", () => {
     it("should pick the first metric column", () => {
       const settings = getComputedSettingsForSeries(
@@ -216,6 +209,53 @@ describe("visualization_settings", () => {
         }),
       );
       expect(settings["table.cell_column"]).toBe("col1");
+    });
+  });
+
+  describe("pie.rows memoization (metabase#50090) (metabase#50381)", () => {
+    it("should memoize results when data hasn't changed", () => {
+      const series = cardWithTimeseriesBreakout({
+        unit: "month",
+        display: "pie",
+        visualization_settings: {
+          "pie.dimension": ["col1"],
+          "pie.metric": "col2",
+        },
+      });
+
+      const originalSettings = getComputedSettingsForSeries(series);
+      const unchangedSettings = getComputedSettingsForSeries(series);
+
+      expect(originalSettings["pie.rows"]).toBe(unchangedSettings["pie.rows"]);
+
+      // Series with different data
+      const modifiedSeries = [
+        {
+          ...series[0],
+          data: {
+            ...series[0].data,
+            rows: [[1, 1]],
+          },
+        },
+      ];
+
+      const modifiedSettings = getComputedSettingsForSeries(modifiedSeries);
+
+      expect(originalSettings["pie.rows"]).not.toBe(
+        modifiedSettings["pie.rows"],
+      );
+      expect(modifiedSettings["pie.rows"]).toEqual([
+        {
+          color: "#88BF4D",
+          defaultColor: true,
+          enabled: true,
+          hidden: false,
+          isOther: false,
+          key: "1",
+          name: "1",
+          originalName: "1",
+        },
+      ]);
     });
   });
 });

@@ -5,7 +5,7 @@ import type {
   ColumnMetadata,
   ExpressionArg,
   ExpressionClause,
-  ExpressionOperatorName,
+  ExpressionOperator,
   ExpressionOptions,
   ExpressionParts,
   FilterClause,
@@ -43,45 +43,48 @@ export function expressions(
 export function expressionableColumns(
   query: Query,
   stageIndex?: number,
-  expressionPosition?: number,
+  expressionIndex?: number,
 ): ColumnMetadata[] {
-  return ML.expressionable_columns(query, stageIndex, expressionPosition);
+  return ML.expressionable_columns(query, stageIndex, expressionIndex);
 }
 
 export function expressionParts(
   query: Query,
   stageIndex: number,
-  clause: ExpressionClause | FilterClause | JoinCondition,
+  clause: AggregationClause | ExpressionClause | FilterClause | JoinCondition,
 ): ExpressionParts {
   return ML.expression_parts(query, stageIndex, clause);
 }
 
 export function expressionClause(
-  operator: ExpressionOperatorName,
-  args: (ExpressionArg | ExpressionClause)[],
-  options: ExpressionOptions | null = null,
+  parts: ExpressionParts | ExpressionArg,
+): ExpressionClause;
+export function expressionClause(
+  operator: ExpressionOperator,
+  args: (
+    | ExpressionParts
+    | ExpressionArg
+    | AggregationClause
+    | ExpressionClause
+    | FilterClause
+  )[],
+  options?: ExpressionOptions | null,
+): ExpressionClause;
+export function expressionClause(
+  operatorOrParts: ExpressionOperator | ExpressionParts | ExpressionArg,
+  args?: (
+    | ExpressionParts
+    | ExpressionArg
+    | AggregationClause
+    | ExpressionClause
+    | FilterClause
+  )[],
+  options?: ExpressionOptions | null,
 ): ExpressionClause {
-  return ML.expression_clause(operator, args, options);
-}
-
-export function expressionClauseForLegacyExpression(
-  query: Query,
-  stageIndex: number,
-  mbql: any,
-): ExpressionClause {
-  return ML.expression_clause_for_legacy_expression(query, stageIndex, mbql);
-}
-
-export function legacyExpressionForExpressionClause(
-  query: Query,
-  stageIndex: number,
-  expressionClause: ExpressionClause | AggregationClause | FilterClause,
-): any {
-  return ML.legacy_expression_for_expression_clause(
-    query,
-    stageIndex,
-    expressionClause,
-  );
+  if (args === undefined && options === undefined) {
+    return ML.expression_clause(operatorOrParts);
+  }
+  return ML.expression_clause(operatorOrParts, args, options ?? null);
 }
 
 export type ExpressionMode = "expression" | "aggregation" | "filter";
@@ -89,14 +92,14 @@ export function diagnoseExpression(
   query: Query,
   stageIndex: number,
   expressionMode: ExpressionMode,
-  mbql: any,
-  expressionPosition?: number,
+  expression: ExpressionClause,
+  expressionIndex?: number,
 ): ErrorWithMessage | null {
   return ML.diagnose_expression(
     query,
     stageIndex,
     expressionMode,
-    mbql,
-    expressionPosition,
+    expression,
+    expressionIndex,
   );
 }

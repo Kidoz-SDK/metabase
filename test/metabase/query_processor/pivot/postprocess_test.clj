@@ -1,60 +1,152 @@
 (ns metabase.query-processor.pivot.postprocess-test
   (:require
    [clojure.test :refer :all]
-   [metabase.query-processor.pivot.postprocess :as qp.pivot.postprocess]))
+   [metabase.query-processor.pivot.postprocess :as pivot.postprocess]))
 
-(def ^:private pivot-base-rows
-  (for [a ["AA" "AB" "AC" "AD"]
-        b ["BA" "BB" "BC" "BD"]
-        c ["CA" "CB" "CC" "CD"]
-        d ["DA" "DB" "DC" "DD"]]
-    [a b c d 1]))
+(deftest build-top-headers-test
+  (testing "builds top headers with single level hierarchy"
+    (let [top-header-items [{:depth 0 :value "A" :span 2}
+                            {:depth 0 :value "B" :span 1}]
+          left-header-items [{:depth 0 :value "Row1" :span 1 :offset 0 :maxDepthBelow 0}]
+          row-indexes [0]
+          display-name-for-col (fn [idx] (condp = idx 0 "Row"))
+          result (#'pivot.postprocess/build-top-headers top-header-items left-header-items row-indexes display-name-for-col)]
+      (is (= [["Row" "A" "A" "B"]]
+             result))))
 
-(def ^:private column-titles
-  ["A" "B" "C" "D" "MEASURE"])
+  (testing "builds top headers with multi-level hierarchy"
+    (let [top-header-items [{:depth 0 :value "A" :span 2}
+                            {:depth 1 :value "X" :span 1}
+                            {:depth 1 :value "Y" :span 1}
+                            {:depth 0 :value "B" :span 1}
+                            {:depth 1 :value "Z" :span 1}]
+          left-header-items [{:depth 0 :value "Region" :span 2 :offset 0 :maxDepthBelow 1}
+                             {:depth 1 :value "Country" :span 1 :offset 0 :maxDepthBelow 0}]
+          row-indexes [0 1]
+          display-name-for-col (fn [idx] (condp = idx 0 "Row1" 1 "Row2"))
+          result (#'pivot.postprocess/build-top-headers top-header-items left-header-items row-indexes display-name-for-col)]
+      (is (= [[nil nil "A" "A" "B"]
+              ["Row1" "Row2" "X" "Y" "Z"]]
+             result))))
 
-(def ^:private pivot-spec
-  {:pivot-rows [2 3]
-   :pivot-cols [0 1]
-   :column-titles column-titles})
+  (testing "handles the case where the max depth of the left-header-items tree is less than the count of row-indexes (#58340)"
+    (let [top-header-items [{:depth 0 :value "A" :span 2}
+                            {:depth 1 :value "X" :span 1}
+                            {:depth 1 :value "Y" :span 1}
+                            {:depth 0 :value "B" :span 1}
+                            {:depth 1 :value "Z" :span 1}]
+          left-header-items [{:depth 0 :value "Region" :span 2 :offset 0 :maxDepthBelow 0}]
+          row-indexes [0 1]
+          display-name-for-col (fn [idx] (condp = idx 0 "Row1" 1 "Row2"))
+          result (#'pivot.postprocess/build-top-headers top-header-items left-header-items row-indexes display-name-for-col)]
+      ;; Number of left columns should match the depth of left-header-items, to account for cases where entire columns
+      ;; are collapsed and thus are omitted from the export
+      (is (= [[nil "A" "A" "B"]
+              ["Row1" "X" "Y" "Z"]]
+             result))))
 
-(deftest add-pivot-measures-test
-  (testing "Given a `pivot-spec` without `:pivot-measures`, add them."
-    (is (= [4] (:pivot-measures (#'qp.pivot.postprocess/add-pivot-measures pivot-spec))))))
+  (testing "handles empty top header items without error"
+    (let [top-header-items []
+          left-header-items [{:depth 0 :value "Row1" :span 1 :offset 0 :maxDepthBelow 0}]
+          row-indexes [0]
+          display-name-for-col (fn [idx] (condp = idx 0 "Row"))
+          result (#'pivot.postprocess/build-top-headers top-header-items left-header-items row-indexes display-name-for-col)]
+      (is (= [["Row"]]
+             result)))))
 
-(deftest all-values-for-test
-  (testing "The `all-values-for` function correctly finds the values for the given column idx"
-    (doseq [[idx include-nil? expected-values] [[0 true  ["AA" "AB" "AC" "AD" nil]]
-                                                [1 false ["BA" "BB" "BC" "BD"]]
-                                                [2 true  ["CA" "CB" "CC" "CD" nil]]
-                                                [3 false ["DA" "DB" "DC" "DD"]]
-                                                [4 false [1]]]]
-      (testing (format "Column index %s has correct expected values." idx)
-        (is (= expected-values
-               (#'qp.pivot.postprocess/all-values-for pivot-base-rows idx include-nil?)))))))
+(deftest build-left-headers-test
+  (testing "builds left headers with single level hierarchy"
+    (let [left-header-items [{:depth 0 :value "A" :span 1 :offset 0}
+                             {:depth 0 :value "B" :span 1 :offset 1}]
+          result (#'pivot.postprocess/build-left-headers left-header-items)]
+      (is (= [["A"]
+              ["B"]]
+             result))))
 
-(deftest header-builder-test
-  (testing "The `header-builder` function returns the correctly formed header(s)."
-    ;; Title from Pivot Rows, then values from first pivot-cols, then 'Row Totals'
-    (is (= [["C" "AA" "AB" "AC" "AD" "Row totals"]]
-           (#'qp.pivot.postprocess/header-builder pivot-base-rows (merge
-                                                                   pivot-spec
-                                                                   {:pivot-cols [0]
-                                                                    :pivot-rows [2]}))))
-    (is (= [["C" "D" "BA" "BB" "BC" "BD" "Row totals"]]
-           (#'qp.pivot.postprocess/header-builder pivot-base-rows (merge
-                                                                   pivot-spec
-                                                                   {:pivot-cols [1]
-                                                                    :pivot-rows [2 3]}))))
-    (is (= [["C" "AA" "AA" "AA" "AA" "AB" "AB" "AB" "AB" "AC" "AC" "AC" "AC" "AD" "AD" "AD" "AD" "Row totals"]
-            ["C" "BA" "BB" "BC" "BD" "BA" "BB" "BC" "BD" "BA" "BB" "BC" "BD" "BA" "BB" "BC" "BD" "Row totals"]]
-           (#'qp.pivot.postprocess/header-builder pivot-base-rows (merge
-                                                                   pivot-spec
-                                                                   {:pivot-cols [0 1]
-                                                                    :pivot-rows [2]}))))
-    (is (= [["C" "D" "AA" "AA" "AA" "AA" "AB" "AB" "AB" "AB" "AC" "AC" "AC" "AC" "AD" "AD" "AD" "AD" "Row totals"]
-            ["C" "D" "BA" "BB" "BC" "BD" "BA" "BB" "BC" "BD" "BA" "BB" "BC" "BD" "BA" "BB" "BC" "BD" "Row totals"]]
-           (#'qp.pivot.postprocess/header-builder pivot-base-rows (merge
-                                                                   pivot-spec
-                                                                   {:pivot-cols [0 1]
-                                                                    :pivot-rows [2 3]}))))))
+  (testing "builds left headers with multi-level hierarchy"
+    (let [left-header-items [{:depth 0 :value "A" :span 2 :offset 0}
+                             {:depth 1 :value "X" :span 1 :offset 0}
+                             {:depth 1 :value "Y" :span 1 :offset 1}
+                             {:depth 0 :value "B" :span 1 :offset 2}
+                             {:depth 1 :value "Z" :span 1 :offset 2}]
+          result (#'pivot.postprocess/build-left-headers left-header-items)]
+      (is (= [["A" "X"]
+              ["A" "Y"]
+              ["B" "Z"]]
+             result))))
+
+  (testing "handles empty left header items without error"
+    (let [left-header-items []
+          result (#'pivot.postprocess/build-left-headers left-header-items)]
+      (is (= []
+             result)))))
+
+(deftest build-full-pivot-test
+  (testing "builds full pivot table correctly"
+    (let [get-row-section (fn [col-idx row-idx]
+                            (case [col-idx row-idx]
+                              [0 0] [{:value "100"}]
+                              [0 1] [{:value "200"}]
+                              [1 0] [{:value "300"}]
+                              [1 1] [{:value "400"}]
+                              []))
+          left-headers [["Row A"]
+                        ["Row B"]]
+          top-headers [["" "Col X" "Col Y"]]
+          measure-count 1
+          result (#'pivot.postprocess/build-full-pivot get-row-section left-headers top-headers measure-count)]
+      (is (= [["" "Col X" "Col Y"]
+              ["Row A" "100" "300"]
+              ["Row B" "200" "400"]]
+             result))))
+
+  (testing "handles multiple measures per column"
+    (let [get-row-section (fn [col-idx row-idx]
+                            (case [col-idx row-idx]
+                              [0 0] [{:value "100"} {:value "101"}]
+                              [0 1] [{:value "200"} {:value "201"}]
+                              [1 0] [{:value "300"} {:value "301"}]
+                              [1 1] [{:value "400"} {:value "401"}]
+                              []))
+          left-headers [["Row A"]
+                        ["Row B"]]
+          top-headers [["" "Col X" "Col X" "Col Y" "Col Y"]]
+          measure-count 2
+          result (#'pivot.postprocess/build-full-pivot get-row-section left-headers top-headers measure-count)]
+      (is (= [["" "Col X" "Col X" "Col Y" "Col Y"]
+              ["Row A" "100" "101" "300" "301"]
+              ["Row B" "200" "201" "400" "401"]]
+             result))))
+
+  (testing "handles empty left headers without error"
+    (let [get-row-section (fn [col-idx row-idx]
+                            (case [col-idx row-idx]
+                              [0 0] [{:value "100"}]
+                              []))
+          left-headers []
+          top-headers [["" "Col X"]]
+          measure-count 1
+          result (#'pivot.postprocess/build-full-pivot get-row-section left-headers top-headers measure-count)]
+      (is (= [["" "Col X"]
+              ["100"]]
+             result))))
+
+  (testing "handles no values in row sections without error"
+    (let [get-row-section (constantly [])
+          left-headers [["Row A"]]
+          top-headers [["" "Col X"]]
+          measure-count 1
+          result (#'pivot.postprocess/build-full-pivot get-row-section left-headers top-headers measure-count)]
+      (is (= [["" "Col X"]
+              ["Row A"]]
+             result))))
+
+  (testing "handles zero measure-count with no error"
+    (let [get-row-section (constantly [])
+          left-headers []
+          top-headers [["" "Col X"]]
+          measure-count 0
+          result (#'pivot.postprocess/build-full-pivot get-row-section left-headers top-headers measure-count)]
+      (is (= [["" "Col X"]
+              []]
+             result)))))

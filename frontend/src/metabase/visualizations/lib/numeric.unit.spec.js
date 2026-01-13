@@ -1,8 +1,8 @@
 import {
-  precision,
-  computeNumericDataInverval,
-  isMultipleOf,
   computeChange,
+  computeNumericDataInterval,
+  isMultipleOf,
+  precision,
 } from "metabase/visualizations/lib/numeric";
 
 describe("visualization.lib.numeric", () => {
@@ -31,10 +31,10 @@ describe("visualization.lib.numeric", () => {
       [1.2345678, 1e-7],
       [1.23456789, 1e-8],
       [-1.23456789, 1e-8],
+      // very precise numbers are cut off at 10^-13
       [-1.2345678912345, 1e-13],
-      [-1.23456789123456, 1e-14],
-      // very precise numbers are cut off at 10^-14
-      [-1.23456789123456789123456789, 1e-14],
+      [-1.23456789123456, 1e-13],
+      [-1.234567891234568, 1e-13],
     ];
     for (const [n, p] of CASES) {
       it(`precision of ${n} should be ${p}`, () => {
@@ -45,7 +45,8 @@ describe("visualization.lib.numeric", () => {
       });
     }
   });
-  describe("computeNumericDataInverval", () => {
+
+  describe("computeNumericDataInterval", () => {
     const CASES = [
       [[0], 1],
       [[1], 1],
@@ -57,10 +58,11 @@ describe("visualization.lib.numeric", () => {
     ];
     for (const c of CASES) {
       it("precision of " + c[0] + " should be " + c[1], () => {
-        expect(computeNumericDataInverval(c[0])).toEqual(c[1]);
+        expect(computeNumericDataInterval(c[0])).toEqual(c[1]);
       });
     }
   });
+
   describe("isMultipleOf", () => {
     [
       [1, 0.1, true],
@@ -80,7 +82,7 @@ describe("visualization.lib.numeric", () => {
 
     // With the current implementation this is guaranteed to be true. This test
     // is left in incase that implementation changes.
-    [123456.123456, -123456.123456, 1.23456789, -1.23456789].map(value =>
+    [123456.123456, -123456.123456, 1.23456789, -1.23456789].map((value) =>
       it(`${value} should be a multiple of its precision (${precision(
         value,
       )})`, () => expect(isMultipleOf(value, precision(value))).toBe(true)),

@@ -1,158 +1,95 @@
-import { useState, useEffect, useMemo } from "react";
+import { Flex, Icon, Tabs } from "metabase/ui";
+import type { SearchResultId } from "metabase-types/api";
 
-import { Icon, Tabs } from "metabase/ui";
 import type {
-  SearchResult,
-  SearchResultId,
-  SearchRequest,
-} from "metabase-types/api";
+  EntityPickerTab,
+  EntityPickerTabId,
+  TypeWithModel,
+} from "../../types";
 
-import type { EntityTab, TypeWithModel } from "../../types";
-import {
-  EntityPickerSearchResults,
-  EntityPickerSearchTab,
-} from "../EntityPickerSearch";
-
-const computeInitialTab = <
-  Item extends TypeWithModel<SearchResultId, Model>,
+interface Props<
+  Id extends SearchResultId,
   Model extends string,
->({
-  initialValue,
-  tabs,
-  hasRecents,
-  defaultToRecentTab,
-}: {
-  initialValue?: Partial<Item>;
-  tabs: EntityTab<Model>[];
-  hasRecents: boolean;
-  defaultToRecentTab: boolean;
-}) => {
-  if (hasRecents && defaultToRecentTab) {
-    return { model: "recents" };
-  }
-  if (
-    initialValue?.model &&
-    tabs.some(tab => tab.model === initialValue.model)
-  ) {
-    return { model: initialValue.model };
-  } else {
-    return { model: tabs[0].model };
-  }
-};
+  Item extends TypeWithModel<Id, Model>,
+> {
+  selectedTabId: EntityPickerTabId;
+  tabs: EntityPickerTab<Id, Model, Item>[];
+  onItemSelect: (item: Item, tabId: EntityPickerTabId) => void;
+  onTabChange: (tabId: EntityPickerTabId) => void;
+}
 
 export const TabsView = <
   Id extends SearchResultId,
   Model extends string,
   Item extends TypeWithModel<Id, Model>,
 >({
+  selectedTabId,
   tabs,
   onItemSelect,
-  searchQuery,
-  searchResults,
-  selectedItem,
-  initialValue,
-  defaultToRecentTab,
-}: {
-  tabs: EntityTab<Model>[];
-  onItemSelect: (item: Item) => void;
-  searchQuery: string;
-  searchResults: SearchResult[] | null;
-  selectedItem: Item | null;
-  initialValue?: Partial<Item>;
-  searchParams?: Partial<SearchRequest>;
-  defaultToRecentTab: boolean;
-}) => {
-  const hasSearchTab = !!searchQuery;
-  const hasRecentsTab = tabs.some(tab => tab.model === "recents");
-
-  const defaultTab = useMemo(
-    () =>
-      computeInitialTab({
-        initialValue,
-        tabs,
-        hasRecents: hasRecentsTab,
-        defaultToRecentTab,
-      }),
-    [initialValue, tabs, hasRecentsTab, defaultToRecentTab],
-  );
-
-  const [selectedTab, setSelectedTab] = useState<string>(defaultTab.model);
-
-  useEffect(() => {
-    // when the searchQuery changes, switch to the search tab
-    if (searchQuery) {
-      setSelectedTab("search");
-    } else {
-      setSelectedTab(defaultTab.model);
-    }
-  }, [searchQuery, defaultTab.model]);
-
+  onTabChange,
+}: Props<Id, Model, Item>) => {
   return (
     <Tabs
-      value={selectedTab}
+      value={selectedTabId}
       style={{
         flexGrow: 1,
         height: 0,
         display: "flex",
         flexDirection: "column",
       }}
+      data-testid="tabs-view"
     >
-      <Tabs.List px="1rem">
-        {tabs.map(tab => {
-          const { model, icon, displayName } = tab;
+      <Flex
+        justify="space-between"
+        align="center"
+        px="2.5rem"
+        style={{
+          borderBottom: "1px solid var(--mb-color-border)",
+        }}
+      >
+        <Tabs.List
+          h="2.5rem"
+          style={{
+            // eslint-disable-next-line no-color-literals
+            "--tab-border-color": "rgba(0, 0, 0, 0)",
+          }}
+        >
+          {tabs.map((tab) => {
+            const { id, icon, displayName } = tab;
 
-          return (
-            <Tabs.Tab
-              key={model}
-              value={model}
-              icon={<Icon name={icon} />}
-              onClick={() => setSelectedTab(model)}
-            >
-              {displayName}
-            </Tabs.Tab>
-          );
-        })}
-        {hasSearchTab && (
-          <EntityPickerSearchTab
-            onClick={() => setSelectedTab("search")}
-            searchResults={searchResults}
-            searchQuery={searchQuery}
-          />
-        )}
-      </Tabs.List>
+            return (
+              <Tabs.Tab
+                key={id}
+                value={id}
+                leftSection={<Icon name={icon} />}
+                onClick={() => onTabChange(id)}
+              >
+                {displayName}
+              </Tabs.Tab>
+            );
+          })}
+        </Tabs.List>
+        {tabs.find((tab) => tab.id === selectedTabId)?.extraButtons || null}
+      </Flex>
 
-      {tabs.map(tab => {
-        const { model } = tab;
+      {tabs.map((tab) => {
+        const { id } = tab;
 
         return (
           <Tabs.Panel
-            key={model}
-            value={model}
+            key={id}
+            value={id}
             style={{
               flexGrow: 1,
               height: 0,
             }}
           >
-            {tab.element}
+            {tab.render({
+              onItemSelect: (item) => onItemSelect(item, id),
+            })}
           </Tabs.Panel>
         );
       })}
-      {hasSearchTab && (
-        <Tabs.Panel
-          key="search"
-          value="search"
-          style={{
-            flexGrow: 1,
-            height: 0,
-          }}
-        >
-          <EntityPickerSearchResults
-            searchResults={searchResults}
-            onItemSelect={onItemSelect}
-            selectedItem={selectedItem}
-          />
-        </Tabs.Panel>
-      )}
     </Tabs>
   );
 };

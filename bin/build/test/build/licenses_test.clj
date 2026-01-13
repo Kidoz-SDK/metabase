@@ -31,7 +31,6 @@
   </licenses>
 </project>")
 
-
 (defn jar->path
   "Return a Path for a jar."
   ^Path [filename]
@@ -154,11 +153,13 @@
 
 (defn- loop-until-success [f max step-name]
   (loop [n 0]
-    (let [success? (try (f) true
-                    (catch Exception _ false))]
+    (let [success? (try
+                     (f)
+                     true
+                     (catch Exception _ false))]
       (cond success? ::done
             (and (not success?) (< n max)) (recur (inc n))
-            :else (throw (ex-info (str "Could not succeed " step-name) {:max-attempts max}))))))
+            :else (throw (ex-info (str "Could not succeed " step-name) {:max-retries max}))))))
 
 (deftest all-deps-have-licenses
   (testing "All deps on the classpath have licenses"

@@ -1,21 +1,27 @@
 import userEvent from "@testing-library/user-event";
+import { Route } from "react-router";
 
 import { callMockEvent } from "__support__/events";
 import {
   setupCardDataset,
+  setupCollectionByIdEndpoint,
+  setupCollectionItemsEndpoint,
   setupDatabasesEndpoints,
+  setupRecentViewsAndSelectionsEndpoints,
   setupSearchEndpoints,
   setupSegmentsEndpoints,
 } from "__support__/server-mocks";
 import {
+  act,
+  mockGetBoundingClientRect,
   renderWithProviders,
   screen,
   waitFor,
   waitForLoaderToBeRemoved,
 } from "__support__/ui";
-import { Route } from "metabase/hoc/Title";
-import { BEFORE_UNLOAD_UNSAVED_MESSAGE } from "metabase/hooks/use-before-unload";
+import { BEFORE_UNLOAD_UNSAVED_MESSAGE } from "metabase/common/hooks/use-before-unload";
 import { checkNotNull } from "metabase/lib/types";
+import { createMockCollection } from "metabase-types/api/mocks";
 import { createSampleDatabase } from "metabase-types/api/mocks/presets";
 
 import SegmentApp from "./SegmentApp";
@@ -30,10 +36,30 @@ interface SetupOpts {
 }
 
 const setup = ({ initialRoute = FORM_URL }: SetupOpts = {}) => {
+  mockGetBoundingClientRect();
   setupDatabasesEndpoints([createSampleDatabase()]);
   setupSearchEndpoints([]);
-  setupCardDataset();
+  setupCardDataset({
+    data: {
+      rows: [[null]],
+    },
+  });
+  setupRecentViewsAndSelectionsEndpoints([], ["selections"]);
   setupSegmentsEndpoints([]);
+  setupCollectionByIdEndpoint({
+    collections: [
+      createMockCollection({ id: "root" }),
+      createMockCollection({ id: 1 }),
+    ],
+  });
+  setupCollectionItemsEndpoint({
+    collection: createMockCollection({ id: "root" }),
+    collectionItems: [],
+  });
+  setupCollectionItemsEndpoint({
+    collection: createMockCollection({ id: 1 }),
+    collectionItems: [],
+  });
 
   const { history } = renderWithProviders(
     <>
@@ -84,9 +110,10 @@ describe("SegmentApp", () => {
   it("does not show custom warning modal when leaving with no changes via SPA navigation", () => {
     const { history } = setup({ initialRoute: "/" });
 
-    history.push(FORM_URL);
-
-    history.goBack();
+    act(() => {
+      history.push(FORM_URL);
+      history.goBack();
+    });
 
     expect(screen.queryByTestId("leave-confirmation")).not.toBeInTheDocument();
   });
@@ -94,13 +121,20 @@ describe("SegmentApp", () => {
   it("shows custom warning modal when leaving with unsaved changes via SPA navigation", async () => {
     const { history } = setup({ initialRoute: "/" });
 
-    history.push(FORM_URL);
+    act(() => {
+      history.push(FORM_URL);
+    });
 
-    await userEvent.type(screen.getByLabelText("Name Your Segment"), "Name");
+    await userEvent.type(
+      await screen.findByLabelText("Name Your Segment"),
+      "Name",
+    );
 
-    history.goBack();
+    act(() => {
+      history.goBack();
+    });
 
-    expect(screen.getByTestId("leave-confirmation")).toBeInTheDocument();
+    expect(await screen.findByTestId("leave-confirmation")).toBeInTheDocument();
   });
 
   it("does not show custom warning modal when saving changes", async () => {
@@ -110,7 +144,7 @@ describe("SegmentApp", () => {
 
     await waitForLoaderToBeRemoved();
 
-    await userEvent.click(screen.getByText("Orders"));
+    await userEvent.click(await screen.findByText("Orders"));
 
     await waitForLoaderToBeRemoved();
 

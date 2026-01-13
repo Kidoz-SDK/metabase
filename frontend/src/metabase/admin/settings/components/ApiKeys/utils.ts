@@ -1,3 +1,4 @@
+import { t } from "ttag";
 import * as Yup from "yup";
 
 import type { ApiKey } from "metabase-types/api";
@@ -8,7 +9,10 @@ export function formatMaskedKey(maskedKey: string) {
 
 export const API_KEY_VALIDATION_SCHEMA = Yup.object({
   name: Yup.string().required(),
-  group_id: Yup.number().required(),
+  group_id: Yup.number()
+    // eslint-disable-next-line ttag/no-module-declaration -- see metabase#55045
+    .typeError(t`Group is a required field`)
+    .required(),
 });
 
 export type FlatApiKey = ApiKey & {

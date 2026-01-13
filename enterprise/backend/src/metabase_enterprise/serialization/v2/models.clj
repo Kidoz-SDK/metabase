@@ -1,12 +1,15 @@
-(ns metabase-enterprise.serialization.v2.models)
+(ns metabase-enterprise.serialization.v2.models
+  "See [[metabase.models.serialization]] for documentation.")
 
 (def data-model
   "Schema model types"
   ["Database"
    "Field"
-   "LegacyMetric"
+   "FieldUserSettings"
+   "Measure"
    "Segment"
-   "Table"])
+   "Table"
+   "Channel"])
 
 (def content
   "Content model types"
@@ -14,6 +17,8 @@
    "Card"
    "Collection"
    "Dashboard"
+   "Document"
+   "Glossary"
    "NativeQuerySnippet"
    "Timeline"])
 
@@ -22,7 +27,11 @@
   (concat data-model
           content
           ["FieldValues"
-           "Setting"]))
+           "Metabot"
+           "Setting"
+           "Transform"
+           "TransformJob"
+           "TransformTag"]))
 
 (def inlined-models
   "An additional list of models which are inlined into parent entities for serialization.
@@ -33,36 +42,52 @@
    "Dimension"
    "ParameterCard"
    "DashboardCardSeries"
-   "TimelineEvent"])
+   "MetabotPrompt"
+   "TimelineEvent"
+   "TransformJobTransformTag"
+   "TransformTransformTag"])
 
 (def excluded-models
   "List of models which are not going to be serialized ever."
   ["ApiKey"
    "ApplicationPermissionsRevision"
    "AuditLog"
+   "AuthIdentity"
    "BookmarkOrdering"
    "CacheConfig"
    "CardBookmark"
+   "ChannelTemplate"
    "CloudMigration"
    "CollectionBookmark"
    "CollectionPermissionGraphRevision"
+   "Comment"
+   "CommentReaction"
    "ConnectionImpersonation"
+   "ContentTranslation"
    "DashboardBookmark"
    "DataPermissions"
-   "FieldUsage"
-   "GroupTableAccessPolicy"
+   "DatabaseRouter"
+   "Dependency"
+   "DocumentBookmark"
    "HTTPAction"
    "ImplicitAction"
    "LoginHistory"
-   "LegacyMetricImportantField"
+   "MetabotConversation"
+   "MetabotMessage"
    "ModelIndex"
    "ModelIndexValue"
    "ModerationReview"
+   "Notification"
+   "NotificationCard"
+   "NotificationHandler"
+   "NotificationRecipient"
+   "NotificationSubscription"
    "Permissions"
    "PermissionsGroup"
    "PermissionsGroupMembership"
    "PermissionsRevision"
    "PersistedInfo"
+   "PythonLibrary"
    "Pulse"
    "PulseCard"
    "PulseChannel"
@@ -72,12 +97,24 @@
    "QueryCache"
    "QueryExecution"
    "QueryField"
+   "QueryTable"
    "RecentViews"
+   "RemoteSyncObject"
+   "RemoteSyncTask"
    "Revision"
+   "Sandbox"
+   "SearchIndexMetadata"
    "Secret"
+   "SemanticSearchTokenTracking"
    "Session"
-   "TablePrivileges"
+   "SupportAccessGrantLog"
    "TaskHistory"
+   "Tenant"
+   "TransformJobRun"
+   "TransformRun"
+   "TransformRunCancelation"
+   "Undo"
    "User"
+   "UserKeyValue"
    "UserParameterValue"
    "ViewLog"])

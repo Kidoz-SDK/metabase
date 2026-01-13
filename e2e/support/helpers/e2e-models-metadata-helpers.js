@@ -1,4 +1,12 @@
-import { popover, interceptIfNotPreviouslyDefined } from "e2e/support/helpers";
+import {
+  interceptIfNotPreviouslyDefined,
+  popover,
+  tableInteractive,
+} from "e2e/support/helpers";
+
+export function datasetEditBar() {
+  return cy.findByTestId("dataset-edit-bar");
+}
 
 export function saveMetadataChanges() {
   interceptIfNotPreviouslyDefined({
@@ -18,40 +26,62 @@ export function saveMetadataChanges() {
 export function openColumnOptions(column) {
   const columnNameRegex = new RegExp(`^${column}$`);
 
-  cy.findAllByTestId("header-cell")
+  // Query element again to ensure it's not unmounted
+  tableInteractive().findAllByTestId("header-cell");
+  tableInteractive().contains(columnNameRegex);
+  tableInteractive().scrollIntoView();
+  tableInteractive().should("be.visible");
+
+  tableInteractive()
+    .findAllByTestId("header-cell")
     .contains(columnNameRegex)
-    .should("be.visible")
     .click();
 }
 
 export function renameColumn(oldName, newName) {
-  cy.findByDisplayValue(oldName).clear().type(newName);
+  cy.findByLabelText("Display name")
+    .should("have.value", oldName)
+    .clear()
+    .type(newName)
+    .blur();
+
+  tableInteractive()
+    .findAllByTestId("header-cell")
+    .contains(newName)
+    .as("column")
+    .scrollIntoView();
+  cy.get("@column").should("be.visible");
 }
 
 export function setColumnType(oldType, newType) {
   cy.findByTestId("sidebar-right")
-    .findAllByTestId("select-button")
-    .contains(oldType)
+    .findByLabelText("Column type")
+    .should("have.value", oldType)
     .click();
 
-  cy.get(".ReactVirtualized__Grid.MB-Select").scrollTo("top");
-  cy.findByPlaceholderText("Search for a special type").type(newType);
-  popover().findByLabelText(newType).click();
+  popover().findByText(newType).click();
+
+  cy.findByTestId("sidebar-right")
+    .findByLabelText("Column type")
+    .should("have.value", newType);
 }
 
 export function mapColumnTo({ table, column } = {}) {
   cy.findByText("Database column this maps to")
     .parent()
     .findByTestId("select-button")
-    .click({ force: true });
+    .click();
 
   popover().contains(table).click();
-
   popover().contains(column).click();
+
+  cy.findByText("Database column this maps to")
+    .next()
+    .should("contain", `${table} → ${column}`);
 }
 
 export function setModelMetadata(modelId, callback) {
-  return cy.request("GET", `/api/card/${modelId}`).then(response => {
+  return cy.request("GET", `/api/card/${modelId}`).then((response) => {
     const { result_metadata } = response.body;
     return cy.request("PUT", `/api/card/${modelId}`, {
       result_metadata: result_metadata.map(callback),

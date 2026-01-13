@@ -1,42 +1,87 @@
+import cx from "classnames";
 import { t } from "ttag";
 
-import { Icon } from "metabase/ui";
-import { getIconForVisualizationType } from "metabase/visualizations";
-import type Question from "metabase-lib/v1/Question";
+import { useRegisterShortcut } from "metabase/palette/hooks/useRegisterShortcut";
+import { Icon, SegmentedControl } from "metabase/ui";
 
-import { Well, ToggleIcon } from "./QuestionDisplayToggle.styled";
+import QuestionDisplayToggleS from "./QuestionDisplayToggle.module.css";
 
-interface QuestionDisplayToggleProps {
+export interface QuestionDisplayToggleProps {
   className?: string;
-  question: Question;
   isShowingRawTable: boolean;
   onToggleRawTable: (isShowingRawTable: boolean) => void;
 }
 
 const QuestionDisplayToggle = ({
   className,
-  question,
   isShowingRawTable,
   onToggleRawTable,
 }: QuestionDisplayToggleProps) => {
-  const vizIcon = getIconForVisualizationType(question.display());
+  useRegisterShortcut(
+    [
+      {
+        id: "query-builder-toggle-visualization",
+        perform: () => onToggleRawTable(!isShowingRawTable),
+      },
+    ],
+    [isShowingRawTable, onToggleRawTable],
+  );
+
   return (
-    <Well
-      className={className}
-      onClick={() => onToggleRawTable(!isShowingRawTable)}
-    >
-      <ToggleIcon active={isShowingRawTable} aria-label={t`Switch to data`}>
-        <Icon name="table2" />
-      </ToggleIcon>
-      <ToggleIcon
-        active={!isShowingRawTable}
-        aria-label={t`Switch to visualization`}
-      >
-        <Icon name={vizIcon} />
-      </ToggleIcon>
-    </Well>
+    <SegmentedControl
+      classNames={{
+        root: cx(QuestionDisplayToggleS.Well, className),
+        label: QuestionDisplayToggleS.ToggleIcon,
+        indicator: cx(
+          QuestionDisplayToggleS.ToggleIcon,
+          QuestionDisplayToggleS.active,
+        ),
+      }}
+      onClick={(e) => {
+        e.preventDefault();
+        onToggleRawTable(!isShowingRawTable);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onToggleRawTable(!isShowingRawTable);
+        }
+      }}
+      tabIndex={0}
+      value={isShowingRawTable ? "data" : "visualization"}
+      data-testid="query-display-tabular-toggle"
+      data={[
+        {
+          disabled: true,
+          value: "data",
+          label: (
+            <Icon
+              size={16}
+              name="table2"
+              className={cx(QuestionDisplayToggleS.InnerLabel, {
+                [QuestionDisplayToggleS.activeLabel]: isShowingRawTable,
+              })}
+              aria-label={t`Switch to data`}
+            />
+          ),
+        },
+        {
+          disabled: true,
+          value: "visualization",
+          label: (
+            <Icon
+              size={16}
+              name="lineandbar"
+              className={cx(QuestionDisplayToggleS.InnerLabel, {
+                [QuestionDisplayToggleS.activeLabel]: !isShowingRawTable,
+              })}
+              aria-label={t`Switch to visualization`}
+            />
+          ),
+        },
+      ]}
+    />
   );
 };
 
-// eslint-disable-next-line import/no-default-export -- deprecated usage
-export default QuestionDisplayToggle;
+export { QuestionDisplayToggle };

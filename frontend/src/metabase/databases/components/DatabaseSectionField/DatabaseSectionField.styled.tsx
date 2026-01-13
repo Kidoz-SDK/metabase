@@ -1,10 +1,10 @@
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
 
-import Button from "metabase/core/components/Button";
-import { color } from "metabase/lib/colors";
+import Button from "metabase/common/components/Button";
 
 export const SectionButton = styled(Button)`
-  color: ${color("brand")};
+  color: var(--mb-color-brand);
   padding: 0;
   border: none;
   border-radius: 0;

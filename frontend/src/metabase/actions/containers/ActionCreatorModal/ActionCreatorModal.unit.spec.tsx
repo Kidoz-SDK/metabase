@@ -8,6 +8,7 @@ import {
   setupModelActionsEndpoints,
 } from "__support__/server-mocks";
 import {
+  act,
   renderWithProviders,
   screen,
   waitFor,
@@ -55,12 +56,10 @@ async function setup({
     <>
       <Route
         path="/model/:slug/detail/actions/:actionId"
-        component={routeProps => (
+        component={(routeProps) => (
           <ActionCreatorModal
             {...routeProps}
-            onClose={() => {
-              history?.push(`/model/${MODEL.id}/detail/actions`);
-            }}
+            onClose={() => history?.push(`/model/${MODEL.id}/detail/actions`)}
           />
         )}
       />
@@ -81,10 +80,6 @@ async function setup({
 }
 
 describe("actions > containers > ActionCreatorModal", () => {
-  afterEach(() => {
-    fetchMock.reset();
-  });
-
   it("renders correctly", async () => {
     const initialRoute = `/model/${MODEL.id}/detail/actions/${ACTION.id}`;
     await setup({ initialRoute });
@@ -123,13 +118,17 @@ describe("actions > containers > ActionCreatorModal", () => {
       const actionRoute = `/model/${MODEL.id}/detail/actions/action`;
       const { history } = await setup({ initialRoute, action: null });
 
-      history.push(actionRoute);
+      act(() => {
+        history.push(actionRoute);
+      });
 
       await waitFor(() => {
         expect(screen.getByTestId("action-creator")).toBeInTheDocument();
       });
 
-      history.goBack();
+      act(() => {
+        history.goBack();
+      });
 
       expect(
         screen.queryByTestId("leave-confirmation"),
@@ -141,7 +140,9 @@ describe("actions > containers > ActionCreatorModal", () => {
       const actionRoute = `/model/${MODEL.id}/detail/actions/new`;
       const { history } = await setup({ initialRoute, action: null });
 
-      history.push(actionRoute);
+      act(() => {
+        history.push(actionRoute);
+      });
 
       await waitFor(() => {
         expect(screen.getByTestId("action-creator")).toBeInTheDocument();
@@ -150,7 +151,9 @@ describe("actions > containers > ActionCreatorModal", () => {
       await userEvent.type(screen.getByDisplayValue("New Action"), "a change");
       await userEvent.tab(); // need to click away from the input to re-compute the isDirty flag
 
-      history.goBack();
+      act(() => {
+        history.goBack();
+      });
 
       expect(screen.getByTestId("leave-confirmation")).toBeInTheDocument();
     });
@@ -160,11 +163,11 @@ describe("actions > containers > ActionCreatorModal", () => {
       const actionRoute = `/model/${MODEL.id}/detail/actions/new`;
       const { history } = await setup({ initialRoute, action: null });
 
-      history.push(actionRoute);
-
-      await waitFor(() => {
-        expect(screen.getByTestId("action-creator")).toBeInTheDocument();
+      act(() => {
+        history.push(actionRoute);
       });
+
+      expect(await screen.findByTestId("action-creator")).toBeInTheDocument();
 
       const query = "select 1;";
 
@@ -215,7 +218,9 @@ describe("actions > containers > ActionCreatorModal", () => {
       const actionRoute = `/model/${MODEL.id}/detail/actions/${action.id}`;
       const { history } = await setup({ initialRoute, action });
 
-      history.push(actionRoute);
+      act(() => {
+        history.push(actionRoute);
+      });
 
       await waitFor(() => {
         expect(screen.getByTestId("action-creator")).toBeInTheDocument();
@@ -227,7 +232,9 @@ describe("actions > containers > ActionCreatorModal", () => {
       await userEvent.type(input, "{backspace}{backspace}");
       await userEvent.tab(); // need to click away from the input to re-compute the isDirty flag
 
-      history.goBack();
+      act(() => {
+        history.goBack();
+      });
 
       expect(
         screen.queryByTestId("leave-confirmation"),
@@ -240,7 +247,9 @@ describe("actions > containers > ActionCreatorModal", () => {
       const actionRoute = `/model/${MODEL.id}/detail/actions/${action.id}`;
       const { history } = await setup({ initialRoute, action });
 
-      history.push(actionRoute);
+      act(() => {
+        history.push(actionRoute);
+      });
 
       await waitFor(() => {
         expect(screen.getByTestId("action-creator")).toBeInTheDocument();
@@ -249,9 +258,13 @@ describe("actions > containers > ActionCreatorModal", () => {
       await userEvent.type(screen.getByDisplayValue(action.name), "a change");
       await userEvent.tab(); // need to click away from the input to re-compute the isDirty flag
 
-      history.goBack();
+      act(() => {
+        history.goBack();
+      });
 
-      expect(screen.getByTestId("leave-confirmation")).toBeInTheDocument();
+      expect(
+        await screen.findByTestId("leave-confirmation"),
+      ).toBeInTheDocument();
     });
 
     it("does not show custom warning modal when saving changes", async () => {
@@ -261,7 +274,9 @@ describe("actions > containers > ActionCreatorModal", () => {
       const actionRoute = `/model/${MODEL.id}/detail/actions/${action.id}`;
       const { history } = await setup({ initialRoute, action });
 
-      history.push(actionRoute);
+      act(() => {
+        history.push(actionRoute);
+      });
 
       await waitFor(() => {
         expect(screen.getByTestId("action-creator")).toBeInTheDocument();
@@ -270,14 +285,12 @@ describe("actions > containers > ActionCreatorModal", () => {
       await userEvent.type(screen.getByDisplayValue(action.name), "a change");
       await userEvent.tab(); // need to click away from the input to re-compute the isDirty flag
 
-      fetchMock.put(
-        `path:/api/action/${action.id}`,
-        {
+      fetchMock.modifyRoute(`action-${action.id}-put`, {
+        response: {
           ...action,
           name: `${action.name}a change`,
         },
-        { overwriteRoutes: true },
-      );
+      });
 
       await userEvent.click(screen.getByRole("button", { name: "Update" }));
 

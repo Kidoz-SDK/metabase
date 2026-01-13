@@ -5,9 +5,13 @@
     "no-color-literals": 0,
     "no-console": 0,
     "@typescript-eslint/no-namespace": "off",
+    "cypress/no-assigning-return-values": "error",
     "cypress/no-async-tests": "error",
     "cypress/no-pause": "error",
     "quotes": ["error", "double", { "avoidEscape": true }],
+    // Note: adding this rule to a eslint config file in a subfolder will remove
+    // *not* carry over the restricted imports from parent folders, you will
+    // need to copy them over
     "no-restricted-imports": [
       "error",
       {
@@ -25,9 +29,29 @@
             "name": "metabase-types/api/mocks/presets",
             "message": "Please use e2e/support/cypress_sample_database instead"
           }
+        ],
+        "patterns": [
+          {
+            "group": [
+              "**/enterprise/frontend/src/embedding-sdk-package",
+              "**/enterprise/frontend/src/embedding-sdk-package/*"
+            ],
+            "message": "Please use SDK package name - '@metabase/embedding-sdk-react'"
+          }
         ]
       }
-    ]
+    ],
+    "import/no-unresolved": [
+      "error",
+      {
+        "ignore": [
+          "@metabase/embedding-sdk-react"
+        ]
+      }
+    ],
+    "no-direct-helper-import": 2,
+    "no-unsafe-element-filtering": ["warn"],
+    "no-unordered-test-helpers": 2
   },
   "env": {
     "cypress/globals": true,

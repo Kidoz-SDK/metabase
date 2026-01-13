@@ -20,8 +20,16 @@
   flex: 0.5;
 }
 
+.flex1 {
+  flex: 1;
+}
+
 .flexNoShrink {
   flex-shrink: 0;
+}
+
+.flexGrow1 {
+  flex-grow: 1;
 }
 
 /* The behavior of how `flex: <flex-grow>` sets flex-basis is inconsistent across

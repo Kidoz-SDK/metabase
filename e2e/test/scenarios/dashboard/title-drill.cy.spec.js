@@ -1,20 +1,13 @@
+const { H } = cy;
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
-import {
-  restore,
-  filterWidget,
-  popover,
-  visitDashboard,
-  addOrUpdateDashboardCard,
-  getDashboardCard,
-  appBar,
-} from "e2e/support/helpers";
 
-const { PRODUCTS, PRODUCTS_ID } = SAMPLE_DATABASE;
+const { ORDERS, ORDERS_ID, PEOPLE, PEOPLE_ID, PRODUCTS, PRODUCTS_ID } =
+  SAMPLE_DATABASE;
 
 describe("scenarios > dashboard > title drill", () => {
   describe("on a native question without connected dashboard parameters", () => {
     beforeEach(() => {
-      restore();
+      H.restore();
       cy.signInAsAdmin();
 
       const questionDetails = {
@@ -27,31 +20,36 @@ describe("scenarios > dashboard > title drill", () => {
         },
       };
 
-      cy.createNativeQuestionAndDashboard({ questionDetails }).then(
-        ({ body: { dashboard_id } }) => {
-          visitDashboard(dashboard_id);
+      H.createNativeQuestionAndDashboard({ questionDetails }).then(
+        ({ body: { dashboard_id }, questionId }) => {
+          cy.wrap(questionId).as("questionId");
+          H.visitDashboard(dashboard_id);
         },
       );
     });
 
     describe("as a user with access to underlying data", () => {
       it("should let you click through the title to the query builder (metabase#13042)", () => {
-        // wait for qustion to load
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("foo");
+        cy.get("@questionId").then((questionId) => {
+          cy.findByTestId("loading-indicator").should("not.exist");
 
-        // drill through title
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("Q1").click();
+          H.getDashboardCard().findByRole("link", { name: "Q1" }).as("title");
+          cy.get("@title").realHover();
+          cy.get("@title")
+            .should("have.attr", "href")
+            .and("include", `/question/${questionId}`);
+          cy.get("@title").click();
 
-        // check that we're in the QB now
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("This question is written in SQL.");
+          H.queryBuilderMain().within(() => {
+            cy.findByText("This question is written in SQL.").should(
+              "be.visible",
+            );
+            cy.findByText("foo").should("be.visible");
+            cy.findByText("bar").should("be.visible");
+          });
 
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("foo");
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("bar");
+          cy.location("pathname").should("eq", `/question/${questionId}-q1`);
+        });
       });
     });
 
@@ -62,29 +60,33 @@ describe("scenarios > dashboard > title drill", () => {
       });
 
       it("should let you click through the title to the query builder (metabase#13042)", () => {
-        // wait for qustion to load
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("foo");
+        cy.get("@questionId").then((questionId) => {
+          cy.findByTestId("loading-indicator").should("not.exist");
 
-        // drill through title
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("Q1").click();
+          H.getDashboardCard().findByRole("link", { name: "Q1" }).as("title");
+          cy.get("@title").realHover();
+          cy.get("@title")
+            .should("have.attr", "href")
+            .and("include", `/question/${questionId}`);
+          cy.get("@title").click();
 
-        // check that we're in the QB now
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("This question is written in SQL.");
+          H.queryBuilderMain().within(() => {
+            cy.findByText("This question is written in SQL.").should(
+              "be.visible",
+            );
+            cy.findByText("foo").should("be.visible");
+            cy.findByText("bar").should("be.visible");
+          });
 
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("foo");
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("bar");
+          cy.location("pathname").should("eq", `/question/${questionId}-q1`);
+        });
       });
     });
   });
 
   describe("on a native question with a connected dashboard parameter", () => {
     beforeEach(() => {
-      restore();
+      H.restore();
       cy.signInAsAdmin();
 
       const filter = {
@@ -116,7 +118,7 @@ describe("scenarios > dashboard > title drill", () => {
 
       const dashboardDetails = { parameters: [filter] };
 
-      cy.createNativeQuestionAndDashboard({
+      H.createNativeQuestionAndDashboard({
         questionDetails,
         dashboardDetails,
       }).then(({ body: { id, card_id, dashboard_id } }) => {
@@ -141,7 +143,7 @@ describe("scenarios > dashboard > title drill", () => {
           ],
         });
 
-        visitDashboard(dashboard_id);
+        H.visitDashboard(dashboard_id);
         checkScalarResult("200");
       });
     });
@@ -158,7 +160,7 @@ describe("scenarios > dashboard > title drill", () => {
         checkFilterLabelAndValue("Text contains", "bb");
         checkScalarResult("12");
 
-        // Drill through on the quesiton's title
+        // Drill through on the question's title
         // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
         cy.findByText("16181").click();
 
@@ -184,7 +186,7 @@ describe("scenarios > dashboard > title drill", () => {
         checkFilterLabelAndValue("Text contains", "bb");
         checkScalarResult("12");
 
-        // Drill through on the quesiton's title
+        // Drill through on the question's title
         // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
         cy.findByText("16181").click();
 
@@ -220,12 +222,14 @@ describe("scenarios > dashboard > title drill", () => {
     };
 
     beforeEach(() => {
-      restore();
+      H.restore();
       cy.signInAsAdmin();
 
-      cy.createQuestionAndDashboard({ questionDetails, dashboardDetails }).then(
-        ({ body: dashboardCard }) => {
+      H.createQuestionAndDashboard({ questionDetails, dashboardDetails }).then(
+        ({ body: dashboardCard, questionId }) => {
           const { card_id, dashboard_id } = dashboardCard;
+
+          cy.wrap(questionId).as("questionId");
 
           const mapFiltersToCard = {
             parameter_mappings: [
@@ -242,14 +246,14 @@ describe("scenarios > dashboard > title drill", () => {
             ],
           };
 
-          cy.editDashboardCard(dashboardCard, mapFiltersToCard);
+          H.editDashboardCard(dashboardCard, mapFiltersToCard);
 
           cy.intercept(
             "POST",
             `/api/dashboard/${dashboard_id}/dashcard/*/card/${card_id}/query`,
           ).as("cardQuery");
 
-          visitDashboard(dashboard_id);
+          H.visitDashboard(dashboard_id);
         },
       );
     });
@@ -259,20 +263,25 @@ describe("scenarios > dashboard > title drill", () => {
         cy.wait("@cardQuery");
 
         // make sure query results are correct
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("42");
+        H.getDashboardCard().findByText("42");
 
-        // drill through title
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("GUI Question").click();
+        H.getDashboardCard()
+          .findByRole("link", { name: "GUI Question" })
+          .as("title");
+        cy.get("@title").realHover();
+        cy.get("@title")
+          .should("have.attr", "href")
+          .and("include", "/question#");
+        cy.get("@title").click();
 
         // make sure the query builder filter is present
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("Category is Doohickey");
+        cy.findByTestId("qb-filters-panel")
+          .findByText("Category is Doohickey")
+          .should("be.visible");
 
         // make sure the results match
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("42");
+        H.queryBuilderMain().findByText("42").should("be.visible");
+        cy.location("href").should("include", "/question#");
       });
     });
 
@@ -286,21 +295,31 @@ describe("scenarios > dashboard > title drill", () => {
         cy.wait("@cardQuery");
 
         // make sure query results are correct
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("42");
+        H.getDashboardCard().findByText("42").should("be.visible");
 
-        // drill through title
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("GUI Question").click();
+        H.getDashboardCard()
+          .findByRole("link", { name: "GUI Question" })
+          .as("title");
+        cy.get("@title").realHover();
+        cy.get("@title")
+          .should("have.attr", "href")
+          .and("include", "/question?category=Doohickey&id=#");
+        cy.get("@title").click();
 
         // make sure the results match
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("42");
+        H.queryBuilderMain().findByText("42").should("be.visible");
+        cy.get("@questionId").then((questionId) => {
+          cy.location("href").should(
+            "include",
+            `/question/${questionId}-gui-question?category=Doohickey&id=#`,
+          );
+        });
 
         // update the parameter filter to a new value
-        filterWidget().contains("Doohickey").click();
-        popover().within(() => {
-          cy.get("input").type("{backspace}Gadget{enter}");
+        H.filterWidget().contains("Doohickey").click();
+        H.dashboardParametersPopover().within(() => {
+          cy.findByText("Doohickey").click();
+          cy.findByText("Gadget").click();
           cy.findByText("Update filter").click();
         });
 
@@ -309,20 +328,19 @@ describe("scenarios > dashboard > title drill", () => {
         cy.wait("@cardQuery");
 
         // make sure the results reflect the new filter
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("53");
+        H.queryBuilderMain().findByText("53").should("be.visible");
 
         // make sure the set parameter filter persists after a page refresh
         cy.reload();
         cy.wait("@cardQuery");
 
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("53");
+        H.queryBuilderMain().findByText("53").should("be.visible");
 
         // make sure the unset id parameter works
-        filterWidget().last().click();
-        popover().within(() => {
-          cy.get("input").type("5{enter}");
+        // eslint-disable-next-line no-unsafe-element-filtering
+        H.filterWidget().last().click();
+        H.dashboardParametersPopover().within(() => {
+          H.fieldValuesCombobox().type("5");
           cy.findByText("Add filter").click();
         });
 
@@ -330,8 +348,7 @@ describe("scenarios > dashboard > title drill", () => {
         cy.findAllByTestId("run-button").first().click();
         cy.wait("@cardQuery");
 
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("1");
+        H.queryBuilderMain().findByText("1").should("be.visible");
       });
     });
   });
@@ -355,35 +372,35 @@ describe("scenarios > dashboard > title drill", () => {
     };
 
     beforeEach(() => {
-      restore();
+      H.restore();
       cy.signInAsAdmin();
 
-      cy.createQuestion(questionDetails, {
+      H.createQuestion(questionDetails, {
         wrapId: true,
         idAlias: "questionId",
       });
 
-      cy.get("@questionId").then(questionId => {
+      cy.get("@questionId").then((questionId) => {
         const nestedQuestionDetails = {
           ...baseNestedQuestionDetails,
           query: {
             "source-table": `card__${questionId}`,
           },
         };
-        cy.createQuestion(nestedQuestionDetails, {
+        H.createQuestion(nestedQuestionDetails, {
           wrapId: true,
           idAlias: "nestedQuestionId",
         });
       });
 
-      cy.createDashboard(dashboardDetails).then(
+      H.createDashboard(dashboardDetails).then(
         ({ body: { id: dashboardId } }) => {
           cy.wrap(dashboardId).as("dashboardId");
         },
       );
 
       cy.then(function () {
-        addOrUpdateDashboardCard({
+        H.addOrUpdateDashboardCard({
           card_id: this.nestedQuestionId,
           dashboard_id: this.dashboardId,
           card: {
@@ -401,11 +418,16 @@ describe("scenarios > dashboard > title drill", () => {
 
     it("should lead you to a table question with filtered ID (metabase#17213)", () => {
       const productRecordId = 3;
-      visitDashboard("@dashboardId", { params: { id: productRecordId } });
+      H.visitDashboard("@dashboardId", { params: { id: productRecordId } });
 
-      getDashboardCard().findByText(baseNestedQuestionDetails.name).click();
+      H.getDashboardCard()
+        .findByRole("link", { name: baseNestedQuestionDetails.name })
+        .as("title");
+      cy.get("@title").realHover();
+      cy.get("@title").should("have.attr", "href").and("include", "/question#");
+      cy.get("@title").click();
 
-      appBar()
+      H.appBar()
         .contains(`Started from ${baseNestedQuestionDetails.name}`)
         .should("be.visible");
       cy.findByTestId("question-row-count")
@@ -413,13 +435,219 @@ describe("scenarios > dashboard > title drill", () => {
         .should("be.visible");
 
       cy.findByTestId("object-detail").should("not.exist");
+      cy.location("href").should("include", "/question#");
+    });
+  });
+
+  describe("on various charts", () => {
+    beforeEach(() => {
+      H.restore();
+      cy.signInAsAdmin();
+    });
+
+    it("titles become actual HTML anchors on focus and on hover", () => {
+      H.createDashboardWithQuestions({
+        dashboardName: "Dashboard with aggregated Q2",
+        questions: [
+          {
+            name: "Line chart",
+            display: "line",
+            query: {
+              "source-table": ORDERS_ID,
+              aggregation: [["count"]],
+              breakout: [
+                ["field", ORDERS.CREATED_AT, { "temporal-unit": "month" }],
+              ],
+              limit: 5,
+            },
+          },
+          {
+            name: "Row chart",
+            display: "row",
+            query: {
+              "source-table": ORDERS_ID,
+              aggregation: [["count"]],
+              breakout: [
+                ["field", ORDERS.CREATED_AT, { "temporal-unit": "month" }],
+              ],
+              limit: 5,
+            },
+          },
+          {
+            name: "Map chart",
+            display: "map",
+            query: {
+              "source-table": PEOPLE_ID,
+              limit: 5,
+            },
+          },
+          {
+            name: "Funnel chart",
+            display: "funnel",
+            query: {
+              "source-table": PEOPLE_ID,
+              aggregation: [["count"]],
+              breakout: [["field", PEOPLE.SOURCE]],
+              limit: 5,
+            },
+          },
+        ],
+        cards: [
+          { row: 0, col: 0, size_x: 6, size_y: 6 },
+          { row: 0, col: 6, size_x: 6, size_y: 6 },
+          { row: 6, col: 0, size_x: 6, size_y: 6 },
+          { row: 6, col: 6, size_x: 6, size_y: 6 },
+        ],
+      }).then(({ dashboard, questions }) => {
+        H.visitDashboard(dashboard.id);
+
+        // make cursor start from a place where subsequent realHover() calls
+        // won't make the cursor move over the other cards during test
+        // (which would interfere with assertions)
+        cy.findByTestId("sidebar-toggle").realHover();
+
+        H.getDashboardCard(0)
+          .findByRole("link", { name: "Line chart" })
+          .as("line-chart-title");
+        H.getDashboardCard(1)
+          .findByRole("link", { name: "Row chart" })
+          .as("row-chart-title");
+        H.getDashboardCard(2)
+          .findByRole("link", { name: "Map chart" })
+          .as("map-chart-title");
+        H.getDashboardCard(3)
+          .findByRole("link", { name: "Funnel chart" })
+          .as("funnel-chart-title");
+
+        assertTitleHrefOnFocus({
+          elementAlias: "@line-chart-title",
+          href: `/question/${questions[0].id}-line-chart`,
+        });
+        assertTitleHrefOnFocus({
+          elementAlias: "@row-chart-title",
+          href: `/question/${questions[1].id}-row-chart`,
+        });
+        assertTitleHrefOnHover({
+          elementAlias: "@map-chart-title",
+          href: `/question/${questions[2].id}-map-chart`,
+        });
+        assertTitleHrefOnHover({
+          elementAlias: "@funnel-chart-title",
+          href: `/question/${questions[3].id}-funnel-chart`,
+        });
+      });
+    });
+
+    function assertTitleHrefOnFocus({ elementAlias, href }) {
+      cy.get(elementAlias).should("have.attr", "href", "#");
+      cy.get(elementAlias).focus();
+      cy.get(elementAlias).should("have.attr", "href", href);
+    }
+
+    function assertTitleHrefOnHover({ elementAlias, href }) {
+      cy.get(elementAlias).should("have.attr", "href", "#");
+      cy.get(elementAlias).realHover();
+      cy.get(elementAlias).should("have.attr", "href", href);
+    }
+  });
+
+  describe("multiple series", () => {
+    const question1Details = {
+      name: "Q1",
+      query: {
+        "source-table": PEOPLE_ID,
+        aggregation: [["count"]],
+        breakout: [["field", PEOPLE.CREATED_AT, { "temporal-unit": "year" }]],
+      },
+      display: "line",
+    };
+
+    const question2Details = {
+      name: "Q2",
+      query: {
+        "source-table": PEOPLE_ID,
+        aggregation: [["count"]],
+        breakout: [["field", PEOPLE.BIRTH_DATE, { "temporal-unit": "year" }]],
+      },
+      display: "line",
+    };
+
+    const dateParameter = {
+      id: "date",
+      name: "Date",
+      slug: "date",
+      type: "date/all-options",
+      default: "1970-01-01~2025-01-01",
+    };
+
+    const dashboardDetails = {
+      parameters: [dateParameter],
+    };
+
+    function createDashboard() {
+      H.createQuestionAndDashboard({
+        questionDetails: question1Details,
+        dashboardDetails,
+      }).then(({ body: { id, card_id, dashboard_id } }) => {
+        H.createQuestion(question2Details).then(
+          ({ body: { id: card_2_id } }) => {
+            cy.request("PUT", `/api/dashboard/${dashboard_id}`, {
+              dashcards: [
+                {
+                  id,
+                  card_id,
+                  series: [{ id: card_2_id }],
+                  row: 0,
+                  col: 0,
+                  size_x: 16,
+                  size_y: 8,
+                  parameter_mappings: [
+                    {
+                      parameter_id: dateParameter.id,
+                      card_id,
+                      target: ["dimension", ["field", PEOPLE.CREATED_AT, null]],
+                    },
+                    {
+                      parameter_id: dateParameter.id,
+                      card_id: card_2_id,
+                      target: ["dimension", ["field", PEOPLE.BIRTH_DATE, null]],
+                    },
+                  ],
+                },
+              ],
+            });
+          },
+        );
+        H.visitDashboard(dashboard_id);
+      });
+    }
+
+    beforeEach(() => {
+      H.restore();
+      cy.signInAsNormalUser();
+    });
+
+    it("should use parameters mapped to each card for a multi-series dashcard", () => {
+      createDashboard();
+
+      cy.log("click on a dot in the second series and drill thru");
+      H.cartesianChartCircle().eq(20).click();
+      H.popover().findByText("See these People").click();
+
+      cy.log("make sure the parameter mapping for the second series was used");
+      H.queryBuilderFiltersPanel().within(() => {
+        cy.findByText("Birth Date is Jan 1, 1970 – Jan 1, 2025").should(
+          "be.visible",
+        );
+        cy.findByText(/Created At/).should("not.exist");
+      });
     });
   });
 });
 
 function checkFilterLabelAndValue(label, value) {
-  filterWidget().find("legend").invoke("text").should("eq", label);
-  filterWidget().contains(value);
+  H.filterWidget().findByLabelText(label, { exact: false }).should("exist");
+  H.filterWidget().contains(value);
 }
 
 function checkScalarResult(result) {

@@ -1,27 +1,31 @@
 import fetchMock from "fetch-mock";
 
-import type { ModelIndex, CardId } from "metabase-types/api";
+import type { CardId, ModelIndex } from "metabase-types/api";
 import { createMockModelIndex } from "metabase-types/api/mocks";
 
 export function setupModelIndexEndpoints(
   modelId: CardId,
   indexes: ModelIndex[] = [],
 ) {
-  fetchMock.get(
-    {
-      url: `path:/api/model-index`,
-      query: { model_id: modelId },
-      overwriteRoutes: false,
+  fetchMock.get({
+    url: `path:/api/model-index`,
+    query: { model_id: modelId },
+    response: indexes,
+    name: `getModelIndexes-${modelId}`,
+  });
+
+  indexes.forEach((index) => {
+    fetchMock.delete(`path:/api/model-index/${index.id}`, 200, {
+      name: `deleteModelIndex`,
+    });
+  });
+
+  fetchMock.post(
+    `path:/api/model-index`,
+    async (call) => {
+      const lastCall = fetchMock.callHistory.lastCall(call.url);
+      return createMockModelIndex(await lastCall?.request?.json());
     },
-    indexes,
+    { name: `createModelIndex` },
   );
-
-  indexes.forEach(index => {
-    fetchMock.delete(`path:/api/model-index/${index.id}`, 200);
-  });
-
-  fetchMock.post(`path:/api/model-index`, async url => {
-    const lastCall = fetchMock.lastCall(url);
-    return createMockModelIndex(await lastCall?.request?.json());
-  });
 }

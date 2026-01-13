@@ -1,4 +1,6 @@
-import { css } from "@emotion/react";
+// eslint-disable-next-line no-restricted-imports
+import { type Theme, css } from "@emotion/react";
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
 
 import { darken } from "metabase/lib/colors";
@@ -28,16 +30,16 @@ interface DataPointTableHeaderProps {
 
 export const DataPointTableHeader = styled.thead<DataPointTableHeaderProps>`
   &:after {
-    ${props => (props.hasBottomSpacing ? tableRowSpacingStyle : null)}
+    ${(props) => (props.hasBottomSpacing ? tableRowSpacingStyle : null)}
   }
 `;
 
-export const tooltipSeparator = css`
-  border-top: 1px solid ${darken("bg-dark", 0.55)};
+export const getTooltipSeparatorStyle = (theme: Theme) => css`
+  border-top: 1px solid ${darken(theme.fn.themeColor("bg-dark"), 0.55)};
 `;
 
 export const DataPointTableBody = styled.tbody`
-  ${tooltipSeparator}
+  ${({ theme }) => getTooltipSeparatorStyle(theme)}
 
   &:before {
     ${tableRowSpacingStyle}

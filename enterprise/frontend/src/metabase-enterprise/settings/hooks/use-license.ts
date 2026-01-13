@@ -1,21 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { t } from "ttag";
 
+import { reload } from "metabase/lib/dom";
 import { SettingsApi, StoreApi } from "metabase/services";
+import type { TokenStatus } from "metabase-types/api";
 
 export const LICENSE_ACCEPTED_URL_HASH = "#activated";
 
+// eslint-disable-next-line ttag/no-module-declaration -- see metabase#55045
 const INVALID_TOKEN_ERROR = t`This token doesn't seem to be valid. Double-check it, then contact support if you think it should be working.`;
-// eslint-disable-next-line no-literal-metabase-strings -- Metabase settings
+// eslint-disable-next-line ttag/no-module-declaration, no-literal-metabase-strings
 const UNABLE_TO_VALIDATE_TOKEN = t`We're having trouble validating your token. Please double-check that your instance can connect to Metabase's servers.`;
-
-export type TokenStatus = {
-  validUntil: Date;
-  isValid: boolean;
-  isTrial: boolean;
-  features: Set<string>;
-  status: string;
-};
 
 export const useLicense = (onActivated?: () => void) => {
   const [tokenStatus, setTokenStatus] = useState<TokenStatus>();
@@ -44,7 +39,7 @@ export const useLicense = (onActivated?: () => void) => {
       if (isValidTokenAccepted) {
         window.location.href += LICENSE_ACCEPTED_URL_HASH;
       }
-      window.location.reload();
+      reload();
     } catch {
       setError(INVALID_TOKEN_ERROR);
     } finally {
@@ -55,14 +50,7 @@ export const useLicense = (onActivated?: () => void) => {
   useEffect(() => {
     const fetchStatus = async () => {
       try {
-        const response = await StoreApi.tokenStatus();
-        setTokenStatus({
-          validUntil: new Date(response["valid-thru"]),
-          isValid: response.valid,
-          isTrial: response.trial,
-          features: new Set(response.features),
-          status: response.status,
-        });
+        setTokenStatus(await StoreApi.tokenStatus());
       } catch (e) {
         if ((e as any).status !== 404) {
           setError(UNABLE_TO_VALIDATE_TOKEN);

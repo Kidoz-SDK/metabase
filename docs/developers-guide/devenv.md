@@ -7,11 +7,21 @@ title: Development environment
 The Metabase application has two basic components:
 
 1. A backend written in Clojure which contains a REST API as well as all the relevant code for talking to databases and processing queries.
-2. A frontend written as a Javascript single-page application which provides the web UI.
+2. A frontend written as a JavaScript single-page application which provides the web UI.
 
 Both components are built and assembled together into a single JAR file. In the directory where you run the JAR, you can create a JAR file (if Metabase hasn't already created it) and add drivers in there (the drivers are also JARs).
 
 ## Quick start
+
+**New to the project?** Run the automated setup:
+
+```
+./bin/dev-install
+```
+
+This installs [mise](https://mise.jdx.dev) (a tool version manager), sets up your shell, and installs all required tools (Node.js, Java, Clojure, Yarn, Babashka) at the correct versions. Follow the prompts, then open a new terminal.
+
+**Already have your own setup?** You can check that it meets the requirements with `./bin/mage doctor`.
 
 To spin up a development environment, run:
 
@@ -19,7 +29,9 @@ To spin up a development environment, run:
 yarn dev
 ```
 
-This runs both the [frontend](#frontend) and [backend](#backend).  Alternatively, you can run them separately in two terminal sessions below.
+This runs both the [frontend](#frontend) and [backend](#backend). Alternatively, you can run them separately in two terminal sessions below.
+
+To use any other database beside the default ones please take a look at [Building Drivers](#building-drivers) further down in this document.
 
 ### Frontend
 
@@ -40,7 +52,6 @@ See [Frontend development](#frontend-development).
 
 ### Backend
 
-
 Run your backend development server with
 
 ```
@@ -49,6 +60,56 @@ clojure -M:run
 ```
 
 See [backend development](#backend-development).
+
+## IDE and editor setup
+
+If you use an IDE or editor that runs commands outside your interactive shell (VS Code tasks, Emacs (magit etc.), or IntelliJ run configurations), the tools installed by mise won't be available by default. To fix this, add mise shims to your PATH.
+
+Shims are wrapper scripts that automatically select the correct tool version based on the current directory's `mise.toml`.
+
+First, add this to your shell profile (**.zshrc**, **.bashrc**, **.config/fish/config.fish**):
+
+```bash
+export PATH="$HOME/.local/share/mise/shims:$PATH"
+```
+
+Then configure your editor:
+
+### VS Code
+
+VS Code usually inherits your shell's PATH if you launch it from the terminal. If not, add to your **settings.json**:
+
+```json
+{
+  "terminal.integrated.env.osx": {
+    "PATH": "${env:HOME}/.local/share/mise/shims:${env:PATH}"
+  },
+  "terminal.integrated.env.linux": {
+    "PATH": "${env:HOME}/.local/share/mise/shims:${env:PATH}"
+  }
+}
+```
+
+### Emacs
+
+Add to your Emacs config (**init.el** or **.emacs**):
+
+```elisp
+(add-to-list 'exec-path (expand-file-name "~/.local/share/mise/shims"))
+(setenv "PATH" (concat (expand-file-name "~/.local/share/mise/shims") ":" (getenv "PATH")))
+```
+
+If you use **exec-path-from-shell**, it should pick up the shims automatically after you update your shell profile.
+
+### IntelliJ / Cursive
+
+Go to **Settings → Tools → Terminal** and add to "Environment variables":
+
+```
+PATH=$HOME/.local/share/mise/shims:$PATH
+```
+
+For run configurations, you may also need to set the PATH in the run configuration's environment variables.
 
 ## Frontend development
 
@@ -80,21 +141,13 @@ There is also an option to reload changes on save without hot reloading if you p
 $ yarn build-watch
 ```
 
-Some systems may have trouble detecting changes to frontend files. You can enable filesystem polling by uncommenting the `watchOptions` clause in `webpack.config.js`. If you do this it may be worth making git ignore changes to webpack config, using `git update-index --assume-unchanged webpack.config.js`
+Some systems may have trouble detecting changes to frontend files. You can enable filesystem polling by uncommenting the `watchOptions` clause in `rspack.main.config.js`. If you do this it may be worth making git ignore changes to webpack config, using `git update-index --assume-unchanged rspack.main.config.js`
 
 We exclude ESLint loader in dev mode for seven times quicker initial builds by default. You can enable it by exporting an environment variable:
 
 ```sh
 $ USE_ESLINT=true yarn build-hot
 ```
-
-By default, these build processes rely on a memory cache. The build process with ESLint loader enabled uses a large amount of memory and may take a considerable amount of time to start (1 - 2 minutes or more). FE developers (or anyone else who frequently restarts FE builds) are encouraged to use webpack's filesystem cache option for much better start-up performance:
-
-```sh
-$ FS_CACHE=true yarn build-hot
-```
-
-When using `FS_CACHE=true` you may need to remove the `node_modules/.cache` directory to fix scenarios where the build may be improperly cached, and you must run `rm -rf node_modules/.cache` in order for the build to work correctly when alternating between open source and enterprise builds of the codebase.
 
 ### Frontend testing
 
@@ -105,8 +158,6 @@ yarn test
 ```
 
 Cypress tests and some unit tests are located in `frontend/test` directory. New unit test files are added next to the files they test.
-
-If you are using `FS_CACHE=true`, you can also use `FS_CACHE=true` with `yarn test`.
 
 ### Frontend debugging
 
@@ -156,6 +207,19 @@ You can also start a REPL another way (e.g., through your editor) and then call:
 To start the server (at `localhost:3000`). This will also set up or migrate your application database. To actually
 use Metabase, don't forget to start the frontend as well (e.g. with `yarn build-hot`).
 
+### Multiple Instances
+
+By default Rspack runs the development server on port `8088`. You can run multiple instances of Metabase on the same machine by specifying a different port for each instance.
+
+Frontend:
+
+- If you are running the frontend with `yarn build-hot`, set the `MB_FRONTEND_DEV_PORT` environment variable: `MB_FRONTEND_DEV_PORT=8089 MB_EDITION=ee yarn build-hot`
+- If you are building the frontend statically with `yarn build`, there is nothing different to do
+
+Backend:
+
+- Set the `MB_JETTY_PORT` environment variable and `MB_FRONTEND_DEV_PORT` to the same one as for the frontend.
+
 ### The application database
 
 By default, Metabase uses H2 for its application database, but we recommend using Postgres. This is configured with
@@ -174,7 +238,7 @@ several properties that can be set as environment variables or in a `deps.edn`. 
     "-Dmb.db.pass="]}}}
 ```
 
-You could also pass a full conection string in as the `mb.db.connection.uri`:
+You could also pass a full connection string in as the `mb.db.connection.uri`:
 
 ```
 "-Dmb.db.connection.uri=postgres://<user>:<password>@localhost:5432/<dbname>"
@@ -192,7 +256,7 @@ This approach requires creating a `.lein-env` file within your project directory
  :mb-db-pass   ""}
 ```
 
-Despite the name, this file works fine with `deps.edn` projects. An advantage of this approach versus the global `deps.edn` approach is that it is scoped to this project only. 
+Despite the name, this file works fine with `deps.edn` projects. An advantage of this approach versus the global `deps.edn` approach is that it is scoped to this project only.
 
 Only use this for development, it is not supported for production use. There is already entry in `.gitignore` to prevent you accidentally committing this file.
 
@@ -240,10 +304,10 @@ or a specific test (or test namespace) with
 
 ```
 # run tests in only one namespace (pass in a symbol)
-clojure -X:dev:test :only metabase.api.session-test
+clojure -X:dev:test :only metabase.session.api-test
 
 # run one specific test (pass in a qualified symbol)
-clojure -X:dev:test :only metabase.api.session-test/my-test
+clojure -X:dev:test :only metabase.session.api-test/my-test
 
 # run tests in one specific folder (test/metabase/util in this example)
 # pass arg in double-quotes so Clojure CLI interprets it as a string;
@@ -351,6 +415,7 @@ Here's the one for postgres in `metabase.test.data.postgres`:
 ```
 
 You can see that this looks in the environment for:
+
 - host (defaults to "localhost")
 - port (defaults to 5432)
 - user
@@ -358,7 +423,7 @@ You can see that this looks in the environment for:
 
 The function names indicate if they throw or not (although in this instance the ones that would throw are also supplied default values).
 
-The `(tx/db-test-env-var :postgresql :password)` will look in the env/env map for `:mb-postgres-test-password` which will be set by the environmental variable `MB_POSTGRESQL_TEST_PASSWORD`.
+The `(tx/db-test-env-var :postgresql :password)` will look in the env/env map for `:mb-postgresql-test-password` which will be set by the environmental variable `MB_POSTGRESQL_TEST_PASSWORD`.
 
 ```clojure
 some-ns=> (take 10 (keys environ.core/env))
@@ -374,23 +439,22 @@ some-ns=> (take 10 (keys environ.core/env))
  :sun-management-compiler)
 ```
 
-
 ### Running the linters
 
 `clj-kondo` must be [installed separately](https://github.com/clj-kondo/clj-kondo/blob/master/doc/install.md).
 
 ```
+# Run clj-kondo
+mage kondo
+
+# Lint the migrations file (if you've written a database migration):
+mage lint-migrations
+
 # Run Eastwood
 clojure -X:dev:ee:ee-dev:drivers:drivers-dev:eastwood
 
 # Run the namespace checker
 clojure -X:dev:ee:ee-dev:drivers:drivers-dev:test:namespace-checker
-
-# Run clj-kondo
-./bin/kondo.sh
-
-# Lint the migrations file (if you've written a database migration):
-./bin/lint-migrations-file.sh
 ```
 
 ## Continuous integration

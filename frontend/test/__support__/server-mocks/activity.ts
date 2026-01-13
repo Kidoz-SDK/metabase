@@ -1,11 +1,39 @@
-import fetchMock from "fetch-mock";
+import fetchMock, { type UserRouteConfig } from "fetch-mock";
 
-import type { PopularItem, RecentItem, Dashboard } from "metabase-types/api";
+import type {
+  Dashboard,
+  PopularItem,
+  RecentContexts,
+  RecentItem,
+} from "metabase-types/api";
 
-export function setupRecentViewsEndpoints(recentlyViewedItems: RecentItem[]) {
-  fetchMock.get("path:/api/activity/recent_views", {
-    recent_views: recentlyViewedItems,
+export function setupRecentViewsEndpoints(recentItems: RecentItem[]) {
+  fetchMock.get(/\/api\/activity\/recents\?*/, {
+    recents: recentItems,
   });
+}
+
+export function setupRecentViewsAndSelectionsEndpoints(
+  recentItems: RecentItem[],
+  context: RecentContexts[] = ["selections", "views"],
+  routeConfig: UserRouteConfig = {},
+  mockPostRequest: boolean = true,
+) {
+  fetchMock.get({
+    url: "path:/api/activity/recents",
+    query: {
+      context,
+    },
+    response: {
+      status: 200,
+      body: { recents: recentItems },
+    },
+    ...routeConfig,
+  });
+
+  if (mockPostRequest) {
+    fetchMock.post("path:/api/activity/recents", 200);
+  }
 }
 
 export function setupPopularItemsEndpoints(popularItems: PopularItem[]) {

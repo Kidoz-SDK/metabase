@@ -1,12 +1,12 @@
 import type { LocationDescriptor } from "history";
 import { useEffect } from "react";
-import { connect } from "react-redux";
 import type { Route } from "react-router";
 import { replace } from "react-router-redux";
 import _ from "underscore";
 
-import Actions from "metabase/entities/actions";
-import Models from "metabase/entities/questions";
+import { skipToken, useGetActionQuery } from "metabase/api";
+import { Questions } from "metabase/entities/questions";
+import { connect } from "metabase/lib/redux";
 import * as Urls from "metabase/lib/urls";
 import { setErrorPage } from "metabase/redux/app";
 import type Question from "metabase-lib/v1/Question";
@@ -50,10 +50,9 @@ const mapDispatchToProps = {
 };
 
 function ActionCreatorModal({
-  action,
   model,
   params,
-  loading,
+  loading: isModelLoading,
   route,
   onClose,
   setErrorPage,
@@ -63,9 +62,15 @@ function ActionCreatorModal({
   const modelId = Urls.extractEntityId(params.slug);
   const databaseId = model.databaseId();
 
+  const { isLoading: isActionLoading, data: action } = useGetActionQuery(
+    actionId === undefined ? skipToken : { id: actionId },
+  );
+
+  const loading = isModelLoading || isActionLoading;
+
   useEffect(() => {
     if (loading === false) {
-      const notFound = params.actionId && !action;
+      const notFound = actionId && !action;
       const hasModelMismatch = action != null && action.model_id !== modelId;
 
       if (notFound || action?.archived) {
@@ -94,20 +99,15 @@ function ActionCreatorModal({
   );
 }
 
-function getActionId(state: State, props: OwnProps) {
-  return Urls.extractEntityId(props.params.actionId);
-}
-
 function getModelId(state: State, props: OwnProps) {
   return Urls.extractEntityId(props.params.slug);
 }
 
 // eslint-disable-next-line import/no-default-export -- deprecated usage
 export default _.compose(
-  Models.load({
+  Questions.load({
     id: getModelId,
     entityAlias: "model",
   }),
-  Actions.load({ id: getActionId, loadingAndErrorWrapper: false }),
   connect(null, mapDispatchToProps),
 )(ActionCreatorModal);

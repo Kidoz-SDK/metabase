@@ -1,18 +1,17 @@
 import { createMockMetadata } from "__support__/metadata";
 import {
   createParameter,
-  setParameterName,
-  hasMapping,
-  getParametersMappedToDashcard,
-  hasMatchingParameters,
   getFilteringParameterValuesMap,
-  getDashboardUiParameters,
+  getUnsavedDashboardUiParameters,
+  hasMapping,
+  hasMatchingParameters,
+  setParameterName,
 } from "metabase/parameters/utils/dashboards";
 import Question from "metabase-lib/v1/Question";
 import Field from "metabase-lib/v1/metadata/Field";
 import {
-  createSampleDatabase,
   PRODUCTS,
+  createSampleDatabase,
 } from "metabase-types/api/mocks/presets";
 
 const metadata = createMockMetadata({
@@ -21,7 +20,7 @@ const metadata = createMockMetadata({
 
 describe("metabase/parameters/utils/dashboards", () => {
   describe("createParameter", () => {
-    it("should create a new parameter using the given parameter option", () => {
+    it("should create a new parameter using the given parameter options", () => {
       expect(
         createParameter(
           {
@@ -40,50 +39,44 @@ describe("metabase/parameters/utils/dashboards", () => {
       });
     });
 
-    it("should prioritize using `combinedName` over `name`", () => {
-      expect(
-        createParameter(
-          {
-            combinedName: "foo bar baz",
-            name: "foo bar",
-            type: "category",
-            sectionId: "abc",
-          },
-          [],
-        ),
-      ).toEqual({
-        id: expect.any(String),
-        name: "foo bar baz",
-        sectionId: "abc",
-        slug: "foo_bar_baz",
-        type: "category",
-      });
-    });
-
     it("should prevent a duplicate name", () => {
-      expect(
-        createParameter(
-          {
-            name: "foo bar",
-            type: "category",
-            sectionId: "abc",
-          },
-          [
-            createParameter(
-              {
-                name: "foo bar",
-                type: "category",
-                sectionId: "abc",
-              },
-              [],
-            ),
-          ],
-        ),
-      ).toEqual({
+      const parameter1 = createParameter({
+        name: "foo bar",
+        type: "category",
+        sectionId: "abc",
+      });
+
+      const parameter2 = createParameter(
+        {
+          name: "foo bar",
+          type: "category",
+          sectionId: "abc",
+        },
+        [parameter1],
+      );
+
+      expect(parameter2).toEqual({
         id: expect.any(String),
         name: "foo bar 1",
         sectionId: "abc",
         slug: "foo_bar_1",
+        type: "category",
+      });
+
+      const parameter3 = createParameter(
+        {
+          name: "foo bar",
+          type: "category",
+          sectionId: "abc",
+        },
+        [parameter1, parameter2],
+      );
+
+      expect(parameter3).toEqual({
+        id: expect.any(String),
+        name: "foo bar 2",
+        sectionId: "abc",
+        slug: "foo_bar_2",
         type: "category",
       });
     });
@@ -188,65 +181,6 @@ describe("metabase/parameters/utils/dashboards", () => {
       };
 
       expect(hasMapping(parameter, dashboard)).toBe(true);
-    });
-  });
-
-  describe("getParametersMappedToDashcard", () => {
-    const dashboard = {
-      parameters: [
-        {
-          id: "foo",
-          type: "text",
-          target: ["variable", ["template-tag", "abc"]],
-        },
-        {
-          id: "bar",
-          type: "string/=",
-          target: ["dimension", ["field", 123, null]],
-        },
-        {
-          id: "baz",
-        },
-      ],
-    };
-
-    const dashboardWithNoParameters = { parameters: [] };
-
-    const dashcard = {
-      parameter_mappings: [
-        {
-          parameter_id: "foo",
-          target: ["variable", ["template-tag", "abc"]],
-        },
-        {
-          parameter_id: "bar",
-          target: ["dimension", ["field", 123, null]],
-        },
-      ],
-    };
-
-    const dashcardWithNoMappings = {};
-
-    it("should return the subset of the dashboard's parameters that are found in a given dashcard's parameter_mappings", () => {
-      expect(
-        getParametersMappedToDashcard(dashboardWithNoParameters, dashcard),
-      ).toEqual([]);
-      expect(
-        getParametersMappedToDashcard(dashboard, dashcardWithNoMappings),
-      ).toEqual([]);
-
-      expect(getParametersMappedToDashcard(dashboard, dashcard)).toEqual([
-        {
-          id: "foo",
-          type: "text",
-          target: ["variable", ["template-tag", "abc"]],
-        },
-        {
-          id: "bar",
-          type: "string/=",
-          target: ["dimension", ["field", 123, null]],
-        },
-      ]);
     });
   });
 
@@ -587,13 +521,13 @@ describe("metabase/parameters/utils/dashboards", () => {
 
     it("should return a list of UiParameter objects from the given dashboard", () => {
       const questions = Object.fromEntries(
-        dashboard.dashcards.map(dashcard => {
+        dashboard.dashcards.map((dashcard) => {
           return [dashcard.id, new Question(dashcard.card, metadata)];
         }),
       );
 
       expect(
-        getDashboardUiParameters(
+        getUnsavedDashboardUiParameters(
           dashboard.dashcards,
           dashboard.parameters,
           metadata,

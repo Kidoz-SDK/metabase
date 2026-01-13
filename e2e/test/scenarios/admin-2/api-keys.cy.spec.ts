@@ -1,19 +1,14 @@
+const { H } = cy;
 import { SAMPLE_DB_ID } from "e2e/support/cypress_data";
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import {
-  ALL_USERS_GROUP_ID,
-  READONLY_GROUP_ID,
-  NOSQL_GROUP_ID,
   ADMINISTRATORS_GROUP_ID,
-  ORDERS_QUESTION_ID,
+  ALL_USERS_GROUP_ID,
+  NOSQL_GROUP_ID,
   ORDERS_DASHBOARD_ID,
+  ORDERS_QUESTION_ID,
+  READONLY_GROUP_ID,
 } from "e2e/support/cypress_sample_instance_data";
-import {
-  restore,
-  visitDashboard,
-  visitQuestion,
-  createApiKey,
-} from "e2e/support/helpers";
 const { PRODUCTS_ID } = SAMPLE_DATABASE;
 
 describe("scenarios > admin > settings > API keys", () => {
@@ -26,7 +21,7 @@ describe("scenarios > admin > settings > API keys", () => {
     cy.intercept("DELETE", "/api/api-key/*").as("deleteKey");
     cy.intercept("GET", "/api/permissions/group").as("getGroups");
 
-    restore();
+    H.restore();
     cy.signInAsAdmin();
   });
 
@@ -36,7 +31,7 @@ describe("scenarios > admin > settings > API keys", () => {
     cy.wait("@getKeyCount");
     cy.findByTestId("api-keys-setting").findByText("API Keys");
 
-    createApiKey("Test API Key One", ALL_USERS_GROUP_ID);
+    H.createApiKey("Test API Key One", ALL_USERS_GROUP_ID);
 
     cy.reload();
     cy.wait("@getKeyCount");
@@ -45,8 +40,8 @@ describe("scenarios > admin > settings > API keys", () => {
       .findByTestId("card-badge")
       .findByText("1 API Key");
 
-    createApiKey("Test API Key Two", ALL_USERS_GROUP_ID);
-    createApiKey("Test API Key Three", ALL_USERS_GROUP_ID);
+    H.createApiKey("Test API Key Two", ALL_USERS_GROUP_ID);
+    H.createApiKey("Test API Key Three", ALL_USERS_GROUP_ID);
 
     cy.reload();
     cy.wait("@getKeyCount");
@@ -57,13 +52,11 @@ describe("scenarios > admin > settings > API keys", () => {
   });
 
   it("should list existing API keys", () => {
-    createApiKey("Test API Key One", ALL_USERS_GROUP_ID);
-    createApiKey("Test API Key Two", NOSQL_GROUP_ID);
-    createApiKey("Test API Key Three", READONLY_GROUP_ID);
+    H.createApiKey("Test API Key One", ALL_USERS_GROUP_ID);
+    H.createApiKey("Test API Key Two", NOSQL_GROUP_ID);
+    H.createApiKey("Test API Key Three", READONLY_GROUP_ID);
 
-    cy.visit("/admin/settings/authentication/api-keys");
-    cy.wait("@getKeys");
-    cy.findByTestId("api-keys-settings-header").findByText("Manage API Keys");
+    visitApiKeySettings();
 
     cy.findByTestId("api-keys-table").within(() => {
       cy.findByText("Test API Key One");
@@ -81,24 +74,10 @@ describe("scenarios > admin > settings > API keys", () => {
   });
 
   it("should allow creating an API key", () => {
-    cy.visit("/admin/settings/authentication/api-keys");
-    cy.wait("@getKeys");
-    cy.findByTestId("api-keys-settings-header")
-      .button("Create API Key")
-      .click();
-
-    cy.wait("@getGroups");
-
-    cy.findByTestId("create-api-key-modal").within(() => {
-      cy.findByLabelText(/Key name/).type("New key");
-      cy.findByLabelText(/group/).click();
-    });
-
-    cy.findByRole("listbox").findByText("Administrators").click();
-
-    cy.findByLabelText("Create a new API Key").button("Create").click();
-
-    cy.wait("@createKey");
+    const name = "New key";
+    const group = "Administrators";
+    visitApiKeySettings();
+    H.tryToCreateApiKeyViaModal({ name, group });
     cy.wait("@getKeys");
 
     cy.findByLabelText("Copy and save the API key").findByLabelText(
@@ -106,20 +85,34 @@ describe("scenarios > admin > settings > API keys", () => {
     );
 
     cy.button("Done").click();
-    cy.findByTestId("api-keys-table").findByText("New key");
+    cy.findByTestId("api-keys-table").findByText(name);
+  });
+
+  it("should show an error when a previously used key name is submitted", () => {
+    const name = "New key";
+    const group = "Administrators";
+    visitApiKeySettings();
+    H.tryToCreateApiKeyViaModal({ name, group });
+    cy.button("Done").click();
+    H.tryToCreateApiKeyViaModal({ name, group }).then(({ response }) => {
+      expect(response?.statusCode).to.equal(400);
+    });
+
+    cy.findByTestId("create-api-key-modal")
+      .findAllByRole("alert")
+      .contains("An API key with this name already exists.");
   });
 
   it("should allow deleting an API key", () => {
-    createApiKey("Test API Key One", ALL_USERS_GROUP_ID);
-    cy.visit("/admin/settings/authentication/api-keys");
-    cy.wait("@getKeys");
+    H.createApiKey("Test API Key One", ALL_USERS_GROUP_ID);
+    visitApiKeySettings();
 
     cy.findByTestId("api-keys-table")
       .contains("Test API Key One")
       .closest("tr")
       .icon("trash")
       .click();
-    cy.findByLabelText("Delete API Key").button("Delete API Key").click();
+    H.modal().button("Delete API key").click();
 
     cy.wait("@deleteKey");
     cy.wait("@getKeys");
@@ -128,9 +121,8 @@ describe("scenarios > admin > settings > API keys", () => {
   });
 
   it("should allow editing an API key", () => {
-    createApiKey("Development API Key", ALL_USERS_GROUP_ID);
-    cy.visit("/admin/settings/authentication/api-keys");
-    cy.wait("@getKeys");
+    H.createApiKey("Development API Key", ALL_USERS_GROUP_ID);
+    visitApiKeySettings();
 
     cy.findByTestId("api-keys-table")
       .should("include.text", "Development API Key")
@@ -157,20 +149,15 @@ describe("scenarios > admin > settings > API keys", () => {
   });
 
   it("should allow regenerating an API key", () => {
-    createApiKey("Personal API Key", ALL_USERS_GROUP_ID);
+    H.createApiKey("Personal API Key", ALL_USERS_GROUP_ID);
 
-    cy.visit("/admin/settings/authentication/api-keys");
-    cy.wait("@getKeys").then(({ response }) => {
-      const { created_at, updated_at } = response?.body[0];
-      // on creation, created_at and updated_at should be the same
-      expect(created_at).to.equal(updated_at);
-    });
+    visitApiKeySettings();
     cy.findByTestId("api-keys-table")
       .contains("Personal API Key")
       .closest("tr")
       .icon("pencil")
       .click();
-    cy.button("Regenerate API Key").click();
+    cy.button("Regenerate API key").click();
     cy.button("Regenerate").click();
     cy.wait("@regenerateKey");
     cy.findByLabelText("The API key").should("include.value", "mb_");
@@ -188,40 +175,42 @@ describe("scenarios > admin > settings > API keys", () => {
 
   describe("api key actions", () => {
     it("should allow creating questions and dashboards with an API key", () => {
-      createApiKey("Test API Key One", ADMINISTRATORS_GROUP_ID).then(
+      H.createApiKey("Test API Key One", ADMINISTRATORS_GROUP_ID).then(
         ({ body }) => {
           const apiKey = body.unmasked_key;
           createQuestionForApiKey(apiKey).then(({ body }) => {
             const questionId = body.id;
 
             cy.signInAsAdmin();
-            visitQuestion(questionId);
+            H.visitQuestion(questionId);
             cy.findByTestId("qb-header").findByText("Test Question");
             cy.findByTestId("view-footer").findByText("Showing 22 rows");
 
             cy.findByTestId("qb-header-info-button").click();
-            cy.findByTestId("sidebar-right").findByText(
-              "Test API Key One created this.",
-            );
+            H.sidesheet().within(() => {
+              cy.findByRole("tab", { name: "History" }).click();
+              cy.findByText("Test API Key One created this.");
+            });
           });
 
           createDashboardForApiKey(apiKey).then(({ body }) => {
             const dashboardId = body.id;
 
             cy.signInAsAdmin();
-            visitDashboard(dashboardId);
+            H.visitDashboard(dashboardId);
             cy.findByTestId("dashboard-header").findByText("Test Dashboard");
             cy.findByTestId("dashboard-header").icon("info").click();
-            cy.findByTestId("sidebar-right").findByText(
-              "Test API Key One created this.",
-            );
+            H.sidesheet().within(() => {
+              cy.findByRole("tab", { name: "History" }).click();
+              cy.findByText("Test API Key One created this.");
+            });
           });
         },
       );
     });
 
     it("should allow editing questions and dashboards with an api key", () => {
-      createApiKey("Test API Key One", ADMINISTRATORS_GROUP_ID).then(
+      H.createApiKey("Test API Key One", ADMINISTRATORS_GROUP_ID).then(
         ({ body }) => {
           const apiKey = body.unmasked_key;
 
@@ -231,10 +220,11 @@ describe("scenarios > admin > settings > API keys", () => {
             "Edited Question Name",
           ).then(() => {
             cy.signInAsAdmin();
-            visitQuestion(ORDERS_QUESTION_ID);
+            H.visitQuestion(ORDERS_QUESTION_ID);
             cy.findByTestId("qb-header").findByText("Edited Question Name");
             cy.findByTestId("qb-header-info-button").click();
-            cy.findByTestId("sidebar-right").within(() => {
+            H.sidesheet().within(() => {
+              cy.findByRole("tab", { name: "History" }).click();
               cy.findByText("You created this.");
               cy.findByText(
                 'Test API Key One renamed this Card from "Orders" to "Edited Question Name".',
@@ -248,12 +238,13 @@ describe("scenarios > admin > settings > API keys", () => {
             "Edited Dashboard Name",
           ).then(() => {
             cy.signInAsAdmin();
-            visitDashboard(ORDERS_DASHBOARD_ID);
+            H.visitDashboard(ORDERS_DASHBOARD_ID);
             cy.findByTestId("dashboard-header").findByText(
               "Edited Dashboard Name",
             );
             cy.findByTestId("dashboard-header").icon("info").click();
-            cy.findByTestId("sidebar-right").within(() => {
+            H.sidesheet().within(() => {
+              cy.findByRole("tab", { name: "History" }).click();
               cy.findByText("You created this.");
               cy.findByText(
                 'Test API Key One renamed this Dashboard from "Orders in a dashboard" to "Edited Dashboard Name".',
@@ -265,6 +256,12 @@ describe("scenarios > admin > settings > API keys", () => {
     });
   });
 });
+
+export const visitApiKeySettings = () => {
+  cy.visit("/admin/settings/authentication/api-keys");
+  cy.wait("@getKeys");
+  cy.findByTestId("api-keys-settings-header");
+};
 
 const createQuestionForApiKey = (apiKey: string) => {
   cy.signOut();

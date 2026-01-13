@@ -1,24 +1,22 @@
 import cx from "classnames";
 import PropTypes from "prop-types";
-import { useState, useRef } from "react";
+import { useRef, useState } from "react";
 
-import ConfirmContent from "metabase/components/ConfirmContent";
-import Modal from "metabase/components/Modal";
-import { Ellipsified } from "metabase/core/components/Ellipsified";
-import Tooltip from "metabase/core/components/Tooltip";
+import { ConfirmModal } from "metabase/common/components/ConfirmModal";
+import { Ellipsified } from "metabase/common/components/Ellipsified";
 import CS from "metabase/css/core/index.css";
+import { Flex, Text, Tooltip } from "metabase/ui";
 
 import { PermissionsSelect } from "../PermissionsSelect";
 
 import {
+  ColumnName,
+  EntityNameLink,
+  HintIcon,
+  PermissionTableHeaderCell,
+  PermissionsTableCell,
   PermissionsTableRoot,
   PermissionsTableRow,
-  PermissionsTableCell,
-  PermissionTableHeaderCell,
-  EntityNameLink,
-  EntityName,
-  HintIcon,
-  ColumnName,
 } from "./PermissionsTable.styled";
 
 const propTypes = {
@@ -64,7 +62,7 @@ export function PermissionsTable({
   };
 
   const handleConfirm = () => {
-    setConfirmations(prev => prev.slice(1));
+    setConfirmations((prev) => prev.slice(1));
     if (confirmations.length === 1) {
       confirmActionRef.current();
       confirmActionRef.current = null;
@@ -89,7 +87,7 @@ export function PermissionsTable({
                   <ColumnName>
                     {name}{" "}
                     {hint && (
-                      <Tooltip placement="right" tooltip={hint}>
+                      <Tooltip position="right" label={hint}>
                         <HintIcon />
                       </Tooltip>
                     )}
@@ -100,11 +98,11 @@ export function PermissionsTable({
           </tr>
         </thead>
         <tbody>
-          {entities.map(entity => {
+          {entities.map((entity) => {
             const entityName = (
               <span className={cx(CS.flex, CS.alignCenter)}>
                 <Ellipsified>{entity.name}</Ellipsified>
-                {entity.hint && (
+                {typeof entity.hint === "string" && (
                   <Tooltip tooltip={entity.hint}>
                     <HintIcon />
                   </Tooltip>
@@ -112,14 +110,23 @@ export function PermissionsTable({
               </span>
             );
             return (
-              <PermissionsTableRow key={entity.id}>
+              <PermissionsTableRow
+                key={entity.id}
+                aria-label={`${entity.name} permissions`}
+              >
                 <PermissionsTableCell>
                   {entity.canSelect ? (
                     <EntityNameLink onClick={() => onSelect(entity)}>
                       {entityName}
                     </EntityNameLink>
                   ) : (
-                    <EntityName>{entityName}</EntityName>
+                    <Flex gap="xs" fw="bold">
+                      {entityName}
+                      {entity.icon}
+                    </Flex>
+                  )}
+                  {entity.callout && (
+                    <Text c="text-secondary">{entity.callout}</Text>
                   )}
                 </PermissionsTableCell>
 
@@ -133,7 +140,7 @@ export function PermissionsTable({
                         onChange={(value, toggleState) =>
                           handleChange(value, toggleState, entity, permission)
                         }
-                        onAction={actionCreator =>
+                        onAction={(actionCreator) =>
                           onAction(actionCreator, entity)
                         }
                         colorScheme={colorScheme}
@@ -147,15 +154,12 @@ export function PermissionsTable({
         </tbody>
       </PermissionsTableRoot>
       {!hasItems && emptyState}
-      {confirmations?.length > 0 && (
-        <Modal>
-          <ConfirmContent
-            {...confirmations[0]}
-            onAction={handleConfirm}
-            onCancel={handleCancelConfirm}
-          />
-        </Modal>
-      )}
+      <ConfirmModal
+        opened={confirmations?.length > 0}
+        {...confirmations[0]}
+        onConfirm={handleConfirm}
+        onClose={handleCancelConfirm}
+      />
     </>
   );
 }

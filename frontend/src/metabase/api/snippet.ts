@@ -1,3 +1,5 @@
+import { updateMetadata } from "metabase/lib/redux/metadata";
+import { SnippetSchema } from "metabase/schema";
 import type {
   CreateSnippetRequest,
   ListSnippetsParams,
@@ -9,34 +11,43 @@ import type {
 import { Api } from "./api";
 import {
   idTag,
-  listTag,
   invalidateTags,
-  provideSnippetTags,
+  listTag,
   provideSnippetListTags,
+  provideSnippetTags,
 } from "./tags";
+import { handleQueryFulfilled } from "./utils/lifecycle";
 
 export const snippetApi = Api.injectEndpoints({
-  endpoints: builder => ({
+  endpoints: (builder) => ({
     listSnippets: builder.query<
       NativeQuerySnippet[],
       ListSnippetsParams | void
     >({
-      query: params => ({
+      query: (params) => ({
         method: "GET",
         url: "/api/native-query-snippet",
         params,
       }),
       providesTags: (snippets = []) => provideSnippetListTags(snippets),
+      onQueryStarted: (_, { queryFulfilled, dispatch }) =>
+        handleQueryFulfilled(queryFulfilled, (data) =>
+          dispatch(updateMetadata(data, [SnippetSchema])),
+        ),
     }),
     getSnippet: builder.query<NativeQuerySnippet, NativeQuerySnippetId>({
-      query: id => ({
+      query: (id) => ({
         method: "GET",
         url: `/api/native-query-snippet/${id}`,
       }),
-      providesTags: snippet => (snippet ? provideSnippetTags(snippet) : []),
+      providesTags: (snippet) => (snippet ? provideSnippetTags(snippet) : []),
+      onQueryStarted: (_, { queryFulfilled, dispatch }) =>
+        handleQueryFulfilled(queryFulfilled, (data) =>
+          dispatch(updateMetadata(data, SnippetSchema)),
+        ),
     }),
     createSnippet: builder.mutation<NativeQuerySnippet, CreateSnippetRequest>({
-      query: body => ({
+      query: (body) => ({
         method: "POST",
         url: "/api/native-query-snippet",
         body,

@@ -6,7 +6,6 @@ import { setup as baseSetup } from "./setup";
 
 function setup(opts: SetupOpts) {
   baseSetup({
-    hasEnterprisePlugins: true,
     ...opts,
   });
 }
@@ -42,6 +41,7 @@ describe("SegmentList (EE without token)", () => {
 
   describe("Non-admins", () => {
     const user = createMockUser();
+
     it("should not render help link", () => {
       setup({ user });
 

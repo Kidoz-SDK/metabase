@@ -1,73 +1,53 @@
 (ns metabase.query-processor.middleware.wrap-value-literals
   "Middleware that wraps value literals in `value`/`absolute-datetime`/etc. clauses containing relevant type
   information; parses datetime string literals when appropriate."
+  (:refer-clojure :exclude [select-keys])
   (:require
    [clojure.string :as str]
    [java-time.api :as t]
-   [metabase.legacy-mbql.schema :as mbql.s]
-   [metabase.legacy-mbql.util :as mbql.u]
+   [metabase.lib.core :as lib]
    [metabase.lib.metadata :as lib.metadata]
+   [metabase.lib.schema :as lib.schema]
+   [metabase.lib.schema.expression :as lib.schema.expression]
+   [metabase.lib.types.isa :as lib.types.isa]
+   [metabase.lib.util :as lib.util]
    [metabase.lib.util.match :as lib.util.match]
+   [metabase.lib.walk :as lib.walk]
    [metabase.query-processor.error-type :as qp.error-type]
-   [metabase.query-processor.store :as qp.store]
+   ^{:clj-kondo/ignore [:deprecated-namespace]} [metabase.query-processor.store :as qp.store]
    [metabase.query-processor.timezone :as qp.timezone]
-   [metabase.types :as types]
-   [metabase.util :as u]
    [metabase.util.date-2 :as u.date]
    [metabase.util.i18n :as i18n]
-   [metabase.util.malli :as mu])
+   [metabase.util.malli :as mu]
+   [metabase.util.performance :refer [select-keys]])
   (:import
    (java.time LocalDate LocalDateTime LocalTime OffsetDateTime OffsetTime ZonedDateTime)))
 
-;;; --------------------------------------------------- Type Info ----------------------------------------------------
+(mu/defn- value :- :mbql.clause/value
+  [info :- :map v]
+  [:value (assoc info :lib/uuid (str (random-uuid))) v])
 
-(defmulti ^:private type-info
-  "Get information about database, base, and semantic types for an object. This is passed to along to various
-  `->honeysql` method implementations so drivers have the information they need to handle raw values like Strings,
-  which may need to be parsed as a certain type."
-  {:arglists '([field-clause])}
-  mbql.u/dispatch-by-clause-name-or-class)
-
-(defmethod type-info :default [_] nil)
-
-(defmethod type-info :metadata/column
-  [field]
-  ;; Opts should probably override all of these
-  (let [field-info (-> (select-keys field [:base-type :effective-type :coercion-strategy :semantic-type :database-type :name])
-                       (update-keys u/->snake_case_en))]
+(defn- type-info-from-col [col]
+  (when col
     (merge
-     field-info
-     ;; add in a default unit for this Field so we know to wrap datetime strings in `absolute-datetime` below based on
-     ;; its presence. Its unit will get replaced by the`:temporal-unit` in `:field` options in the method below if
-     ;; present
-     (when (types/temporal-field? field-info)
-       {:unit :default}))))
+     (select-keys col [:coercion-strategy :semantic-type :database-type])
+     (when-let [unit (lib/raw-temporal-bucket col)]
+       {:unit unit}))))
 
-(defmethod type-info :field [[_ id-or-name opts]]
+(defn- ^:dynamic *type-info*
+  "This is the type info for the LHS in something like
+
+    [:= {} <lhs> <rhs>]
+
+  usually a `:field` clause; we use this info to wrap `rhs` if it's a raw value e.g. `1`."
+  [query path clause]
   (merge
-   ;; With Mlv2 queries, this could be combined with `:expression` below and use the column from the
-   ;; query rather than metadata/field
-   (when (integer? id-or-name)
-     (type-info (lib.metadata/field (qp.store/metadata-provider) id-or-name)))
-   (when (:temporal-unit opts)
-     {:unit (:temporal-unit opts)})
-   (when (:base-type opts)
-     {:base_type (:base-type opts)})
-   (when (:effective-type opts)
-     {:effective_type (:effective-type opts)})))
-
-(defmethod type-info :expression [[_ _name opts]]
-  (merge
-   (when (isa? (:base-type opts) :type/Temporal)
-     {:unit :default})
-   (when (:temporal-unit opts)
-     {:unit (:temporal-unit opts)})
-   (when (:base-type opts)
-     {:base_type (:base-type opts)})
-   (when (:effective-type opts)
-     {:effective_type (:effective-type opts)})))
-
-;;; ------------------------------------------------- add-type-info --------------------------------------------------
+   (when (lib.util/clause-of-type? clause :field)
+     (type-info-from-col (lib.walk/apply-f-for-stage-at-path lib/metadata query path clause)))
+   (let [expr-type (lib.walk/apply-f-for-stage-at-path lib/type-of query path clause)
+         [_ {:keys [base-type]}] clause]
+     {:base-type      (or base-type expr-type)
+      :effective-type expr-type})))
 
 ;; TODO -- parsing the temporal string literals should be moved into `auto-parse-filter-values`, it's really a
 ;; separate transformation from just wrapping the value
@@ -80,35 +60,31 @@
 
 (defmethod add-type-info nil
   [_ info & _]
-  [:value nil info])
+  (value info nil))
 
 (defmethod add-type-info Object
   [this info & _]
-  [:value this info])
+  (value info this))
 
-(defmethod add-type-info LocalDate
-  [this info & _]
-  [:absolute-datetime this (get info :unit :default)])
+(derive LocalDate      ::->absolute-datetime)
+(derive LocalDateTime  ::->absolute-datetime)
+(derive OffsetDateTime ::->absolute-datetime)
+(derive ZonedDateTime ::->absolute-datetime)
 
-(defmethod add-type-info LocalDateTime
-  [this info & _]
-  [:absolute-datetime this (get info :unit :default)])
+(prefer-method add-type-info ::->absolute-datetime Object)
 
-(defmethod add-type-info LocalTime
+(defmethod add-type-info ::->absolute-datetime
   [this info & _]
-  [:time this (get info :unit :default)])
+  (lib/absolute-datetime this (get info :unit :default)))
 
-(defmethod add-type-info OffsetDateTime
-  [this info & _]
-  [:absolute-datetime this (get info :unit :default)])
+(derive LocalTime  ::->time)
+(derive OffsetTime ::->time)
 
-(defmethod add-type-info OffsetTime
-  [this info & _]
-  [:time this (get info :unit :default)])
+(prefer-method add-type-info ::->time Object)
 
-(defmethod add-type-info ZonedDateTime
+(defmethod add-type-info ::->time
   [this info & _]
-  [:absolute-datetime this (get info :unit :default)])
+  (lib/time this (get info :unit :default)))
 
 (defmulti ^:private coerce-temporal
   "Coerce temporal value `t` to `target-class`, or throw an Exception if it is an invalid conversion."
@@ -193,27 +169,27 @@
 (defmethod parse-temporal-string-literal :default
   [_effective-type s target-unit]
   (let [t (u.date/parse s (qp.timezone/results-timezone-id))]
-    [:absolute-datetime t target-unit]))
+    (lib/absolute-datetime t target-unit)))
 
 (defmethod parse-temporal-string-literal :type/Date
   [_effective-type s target-unit]
   (let [t (parse-temporal-string-literal-to-class s LocalDate)]
-    [:absolute-datetime t target-unit]))
+    (lib/absolute-datetime t target-unit)))
 
 (defmethod parse-temporal-string-literal :type/Time
   [_effective-type s target-unit]
   (let [t (parse-temporal-string-literal-to-class s LocalTime)]
-    [:time t target-unit]))
+    (lib/time t target-unit)))
 
 (defmethod parse-temporal-string-literal :type/TimeWithTZ
   [_effective-type s target-unit]
   (let [t (parse-temporal-string-literal-to-class s OffsetTime)]
-    [:time t target-unit]))
+    (lib/time t target-unit)))
 
 (defmethod parse-temporal-string-literal :type/DateTime
   [_effective-type s target-unit]
   (let [t (parse-temporal-string-literal-to-class s LocalDateTime)]
-    [:absolute-datetime t target-unit]))
+    (lib/absolute-datetime t target-unit)))
 
 (defn- date-literal-string? [s]
   (not (str/includes? s "T")))
@@ -225,7 +201,7 @@
                              (date-literal-string? s))
                       :day
                       target-unit)]
-    [:absolute-datetime t target-unit]))
+    (lib/absolute-datetime t target-unit)))
 
 (defmethod parse-temporal-string-literal :type/DateTimeWithZoneID
   [_effective-type s target-unit]
@@ -234,57 +210,69 @@
                       :day
                       target-unit)
         t           (parse-temporal-string-literal-to-class s ZonedDateTime)]
-    [:absolute-datetime t target-unit]))
+    (lib/absolute-datetime t target-unit)))
 
 (defmethod add-type-info String
   [s {:keys [unit], :as info} & {:keys [parse-datetime-strings?]
                                  :or   {parse-datetime-strings? true}}]
-  (if (and unit
+  (if (and (or unit (when info (lib.types.isa/temporal? info)))
            parse-datetime-strings?
            (seq s))
-    (let [effective-type ((some-fn :effective_type :base_type) info)]
-      (parse-temporal-string-literal effective-type s unit))
-    [:value s info]))
-
+    (let [effective-type ((some-fn :effective-type :base-type) info)]
+      (parse-temporal-string-literal effective-type s (or unit :default)))
+    (value info s)))
 
 ;;; -------------------------------------------- wrap-literals-in-clause ---------------------------------------------
 
-(def ^:private raw-value? (complement mbql.u/mbql-clause?))
+(def ^:private raw-value? (complement lib.util/clause?))
 
-(defn wrap-value-literals-in-mbql
-  "Given a normalized mbql query (important to desugar forms like `[:does-not-contain ...]` -> `[:not [:contains
-  ...]]`), walks over the clause and annotates literals with type information.
+(defn- wrap-value-literals-in-clause
+  [query path clause]
+  (lib.util.match/match-lite clause
+    ;; two literals
+    [(tag :guard #{:= :!= :< :> :<= :>=}) opts (x :guard raw-value?) (y :guard raw-value?)]
+    (let [x-type (lib.schema.expression/type-of x)
+          y-type (lib.schema.expression/type-of y)]
+      [tag opts
+       (add-type-info x {:base-type x-type :effective-type x-type})
+       (add-type-info y {:base-type y-type :effective-type y-type})])
 
-  eg:
+    ;; field and literal
+    [(tag :guard #{:= :!= :< :> :<= :>=}) opts field (x :guard raw-value?)]
+    [tag opts field (add-type-info x (*type-info* query path field))]
 
-  [:not [:contains [:field 13 {:base_type :type/Text}] \"foo\"]]
-  ->
-  [:not [:contains [:field 13 {:base_type :type/Text}]
-                   [:value \"foo\" {:base_type :type/Text,
-                                    :semantic_type nil,
-                                    :database_type \"VARCHAR\",
-                                    :name \"description\"}]]]"
-  [mbql]
-  (lib.util.match/replace mbql
-    [(clause :guard #{:= :!= :< :> :<= :>=}) field (x :guard raw-value?)]
-    [clause field (add-type-info x (type-info field))]
+    [:datetime-diff opts (x :guard string?) (y :guard string?) unit]
+    [:datetime-diff opts (add-type-info (u.date/parse x) nil) (add-type-info (u.date/parse y) nil) unit]
 
-    [:datetime-diff (x :guard string?) (y :guard string?) unit]
-    [:datetime-diff (add-type-info (u.date/parse x) nil) (add-type-info (u.date/parse y) nil) unit]
+    [(tag :guard #{:datetime-add :datetime-subtract :convert-timezone :temporal-extract}) opts (field :guard string?) & args]
+    (into [tag opts (add-type-info (u.date/parse field) nil)] args)
 
-    [(clause :guard #{:datetime-add :datetime-subtract :convert-timezone :temporal-extract}) (field :guard string?) & args]
-    (into [clause (add-type-info (u.date/parse field) nil)] args)
-
-    [:between field (min-val :guard raw-value?) (max-val :guard raw-value?)]
+    [:between opts field (min-val :guard raw-value?) (max-val :guard raw-value?)]
     [:between
+     opts
      field
-     (add-type-info min-val (type-info field))
-     (add-type-info max-val (type-info field))]
+     (add-type-info min-val (*type-info* query path field))
+     (add-type-info max-val (*type-info* query path field))]
 
-    [(clause :guard #{:starts-with :ends-with :contains}) field (s :guard string?) & more]
-    (let [s (add-type-info s (type-info field), :parse-datetime-strings? false)]
-      (into [clause field s] more))))
+    [(tag :guard #{:starts-with :ends-with :contains}) opts field (s :guard string?) & more]
+    (let [s (add-type-info s (*type-info* query path field), :parse-datetime-strings? false)]
+      (into [tag opts field s] more))))
 
+(mu/defn wrap-value-literals :- ::lib.schema/query
+  "Middleware that wraps ran value literals in `:value` (for integers, strings, etc.) or `:absolute-datetime` (for
+  datetime strings, etc.) clauses which include info about the Field they are being compared to. This is done mostly
+  to make it easier for drivers to write implementations that rely on multimethod dispatch (by clause name) -- they
+  can dispatch directly off of these clauses."
+  [query :- ::lib.schema/query]
+  (lib.walk/walk-clauses query (fn [query _path-type path clause]
+                                 (wrap-value-literals-in-clause query path clause))))
+
+;;;
+;;; Tangentially-related nonsense not used by the middleware
+;;;
+
+;;; TODO (Cam 8/22/25) FIXME: This is used in exactly one place: the SQL QP... so why does it live in a QP middleware
+;;; namespace? Nobody knows.
 (defn unwrap-value-literal
   "Extract value literal from `:value` form or returns form as is if not a `:value` form."
   [maybe-value-form]
@@ -292,18 +280,48 @@
     [:value x & _] x
     _              &match))
 
-(defn ^:private wrap-value-literals-in-mbql-query
-  [{:keys [source-query], :as inner-query} options]
-  (let [inner-query (cond-> inner-query
-                      source-query (update :source-query wrap-value-literals-in-mbql-query options))]
-    (wrap-value-literals-in-mbql inner-query)))
+(defn- type-info-no-query
+  "This is like [[type-info*]] but specifically for supporting the legacy/deprecated [[wrap-value-literals-in-mbql]]
+  function."
+  {:deprecated "0.57.0"}
+  [clause]
+  (let [expr-type (lib.schema.expression/type-of clause)]
+    (merge
+     (when (and (lib.util/clause-of-type? clause :field)
+                (qp.store/initialized?))
+       (let [[_tag _opts id-or-name] clause]
+         (when (pos-int? id-or-name)
+           (type-info-from-col (lib.metadata/field (qp.store/metadata-provider) id-or-name)))))
+     (when-let [unit (lib/raw-temporal-bucket clause)]
+       {:unit unit})
+     {:base-type      expr-type
+      :effective-type expr-type})))
 
-(mu/defn wrap-value-literals :- mbql.s/Query
-  "Middleware that wraps ran value literals in `:value` (for integers, strings, etc.) or `:absolute-datetime` (for
-  datetime strings, etc.) clauses which include info about the Field they are being compared to. This is done mostly
-  to make it easier for drivers to write implementations that rely on multimethod dispatch (by clause name) -- they
-  can dispatch directly off of these clauses."
-  [{query-type :type, :as query}]
-  (if-not (= query-type :query)
-    query
-    (update query :query wrap-value-literals-in-mbql-query nil)))
+(mu/defn wrap-value-literals-in-mbql :- [:cat :keyword [:* :any]]
+  "Given a normalized legacy MBQL query (important to desugar forms like `[:does-not-contain ...]` -> `[:not [:contains
+  ...]]`), walks over the clause and annotates literals with type information.
+
+  eg:
+
+  [:not [:contains [:field 13 {:base_type :type/Text}] \"foo\"]]
+  ->
+  [:not [:contains [:field 13 {:base_type :type/Text}]
+                   [:value {:base_type :type/Text, \"foo\"
+                            :semantic_type nil,
+                            :database_type \"VARCHAR\",
+                            :name \"description\"}]]]
+
+  DEPRECATED: This is for legacy compatibility and should not be used in new code."
+  {:deprecated "0.57.0"}
+  [mbql :- [:cat :keyword [:* :any]]]
+  (-> mbql
+      lib/->pMBQL
+      (as-> $mbql (binding [*type-info* (fn [_query _path clause]
+                                          #_{:clj-kondo/ignore [:deprecated-var]}
+                                          (type-info-no-query clause))]
+                    (-> (lib.walk/walk-clauses*
+                         [$mbql]
+                         (fn [clause]
+                           (wrap-value-literals-in-clause nil nil clause)))
+                        first)))
+      lib/->legacy-MBQL))

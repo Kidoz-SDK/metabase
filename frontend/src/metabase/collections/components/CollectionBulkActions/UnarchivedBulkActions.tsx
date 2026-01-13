@@ -1,8 +1,10 @@
 import { useMemo } from "react";
 import { t } from "ttag";
 
+import { archiveAndTrack } from "metabase/archive/analytics";
 import { canArchiveItem, canMoveItem } from "metabase/collections/utils";
-import { BulkActionButton } from "metabase/components/BulkActionBar";
+import { BulkActionButton } from "metabase/common/components/BulkActionBar";
+import { useRegisterShortcut } from "metabase/palette/hooks/useRegisterShortcut";
 import type { Collection, CollectionItem } from "metabase-types/api";
 
 type UnarchivedBulkActionsProps = {
@@ -22,23 +24,46 @@ export const UnarchivedBulkActions = ({
 }: UnarchivedBulkActionsProps) => {
   // archive
   const canArchive = useMemo(() => {
-    return selected.every(item => canArchiveItem(item, collection));
+    return selected.every((item) => canArchiveItem(item, collection));
   }, [selected, collection]);
 
   const handleBulkArchive = async () => {
-    const actions = selected.map(item => item.setArchived(true));
+    const actions = selected.map((item) => {
+      return archiveAndTrack({
+        archive: () =>
+          item.setArchived
+            ? item.setArchived(true, { notify: false })
+            : Promise.resolve(),
+        model: item.model,
+        modelId: item.id,
+        triggeredFrom: "collection",
+      });
+    });
+
     Promise.all(actions).finally(() => clearSelected());
   };
 
   // move
   const canMove = useMemo(() => {
-    return selected.every(item => canMoveItem(item, collection));
+    return selected.every((item) => canMoveItem(item, collection));
   }, [selected, collection]);
 
   const handleBulkMoveStart = () => {
     setSelectedItems(selected);
     setSelectedAction("move");
   };
+
+  useRegisterShortcut(
+    [
+      {
+        id: "collection-send-items-to-trash",
+        perform: () => {
+          handleBulkArchive();
+        },
+      },
+    ],
+    [selected],
+  );
 
   return (
     <>

@@ -1,18 +1,15 @@
-/* eslint-disable import/order */
 import _ from "underscore";
 
 // NOTE: this needs to be imported first due to some cyclical dependency nonsense
-import Question from "../Question";
-
-import { isVirtualCardId } from "metabase-lib/v1/metadata/utils/saved-questions";
-import { getAggregationOperators } from "metabase-lib/v1/operators/utils";
-import type StructuredQuery from "metabase-lib/v1/queries/StructuredQuery";
-import type { NormalizedTable } from "metabase-types/api";
 import { singularize } from "metabase/lib/formatting";
+import type { NormalizedTable } from "metabase-types/api";
+
+import Question from "../Question";
 
 import type Database from "./Database";
 import type Field from "./Field";
 import type ForeignKey from "./ForeignKey";
+import type Measure from "./Measure";
 import type Metadata from "./Metadata";
 import type Schema from "./Schema";
 import type Segment from "./Segment";
@@ -20,13 +17,14 @@ import type Segment from "./Segment";
 interface Table
   extends Omit<
     NormalizedTable,
-    "db" | "schema" | "fields" | "fks" | "segments" | "metrics"
+    "db" | "schema" | "fields" | "fks" | "segments" | "measures" | "metrics"
   > {
   db?: Database;
   schema?: Schema;
   fields?: Field[];
   fks?: ForeignKey[];
   segments?: Segment[];
+  measures?: Measure[];
   metrics?: Question[];
   metadata?: Metadata;
 }
@@ -39,10 +37,6 @@ class Table {
 
   constructor(table: NormalizedTable) {
     this._plainObject = table;
-    this.aggregationOperators = _.memoize(this.aggregationOperators);
-    this.aggregationOperatorsLookup = _.memoize(
-      this.aggregationOperatorsLookup,
-    );
     this.fieldsLookup = _.memoize(this.fieldsLookup);
     Object.assign(this, table);
   }
@@ -53,10 +47,6 @@ class Table {
 
   getFields() {
     return this.fields ?? [];
-  }
-
-  isVirtualCard() {
-    return isVirtualCardId(this.id);
   }
 
   hasSchema() {
@@ -76,30 +66,10 @@ class Table {
 
   question() {
     return Question.create({
-      databaseId: this.db && this.db.id,
-      tableId: this.id,
+      DEPRECATED_RAW_MBQL_databaseId: this.db && this.db.id,
+      DEPRECATED_RAW_MBQL_tableId: this.id,
       metadata: this.metadata,
     });
-  }
-
-  savedQuestionId() {
-    const match = String(this.id).match(/card__(\d+)/);
-    return match ? parseInt(match[1]) : null;
-  }
-
-  legacyQuery(query = {}) {
-    return (
-      this.question().legacyQuery({
-        useStructuredQuery: true,
-      }) as StructuredQuery
-    ).updateQuery(q => ({
-      ...q,
-      ...query,
-    }));
-  }
-
-  dimensions() {
-    return this.getFields().map(field => field.dimension());
   }
 
   displayName({ includeSchema }: { includeSchema?: boolean } = {}) {
@@ -119,27 +89,14 @@ class Table {
   }
 
   dateFields() {
-    return this.getFields().filter(field => field.isDate());
-  }
-
-  // AGGREGATIONS
-  aggregationOperators() {
-    return getAggregationOperators(this.db, this.fields);
-  }
-
-  aggregationOperatorsLookup() {
-    return Object.fromEntries(
-      this.aggregationOperators().map(op => [op.short, op]),
-    );
-  }
-
-  aggregationOperator(short: string) {
-    return this.aggregationOperatorsLookup()[short];
+    return this.getFields().filter((field) => field.isDate());
   }
 
   // FIELDS
   fieldsLookup() {
-    return Object.fromEntries(this.getFields().map(field => [field.id, field]));
+    return Object.fromEntries(
+      this.getFields().map((field) => [field.id, field]),
+    );
   }
 
   // @deprecated: use fieldsLookup
@@ -154,8 +111,8 @@ class Table {
   connectedTables(): Table[] {
     const fks = this.fks || [];
     return fks
-      .map(fk => fk.origin?.table)
-      .filter(table => table != null) as Table[];
+      .map((fk) => fk.origin?.table)
+      .filter((table) => table != null) as Table[];
   }
 
   foreignTables(): Table[] {
@@ -164,8 +121,8 @@ class Table {
       return [];
     }
     return fields
-      .filter(field => field.isFK() && field.fk_target_field_id)
-      .map(field => this.metadata?.field(field.fk_target_field_id)?.table)
+      .filter((field) => field.isFK() && field.fk_target_field_id)
+      .map((field) => this.metadata?.field(field.fk_target_field_id)?.table)
       .filter(Boolean) as Table[];
   }
 

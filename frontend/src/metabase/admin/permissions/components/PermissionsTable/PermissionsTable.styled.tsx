@@ -1,20 +1,26 @@
+// eslint-disable-next-line no-restricted-imports
+import type { Theme } from "@emotion/react";
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
+import { forwardRef } from "react";
 
-import Label from "metabase/components/type/Label";
-import Link from "metabase/core/components/Link";
-import { color, alpha } from "metabase/lib/colors";
-import { Icon } from "metabase/ui";
+import Link from "metabase/common/components/Link";
+import Label from "metabase/common/components/type/Label";
+import { Icon, type IconProps } from "metabase/ui";
+import { color } from "metabase/ui/utils/colors";
 
-const tableBorder = `1px solid ${alpha(color("border"), 0.5)}`;
+const getTableBorder = (theme: Theme) =>
+  `1px solid color-mix(in srgb, ${theme.fn.themeColor("border")}, transparent 50%)`;
 
 // background with 1px of border color at the bottom
 // to work properly with sticky positioning
-const headerBackground = `linear-gradient(to top, ${alpha(
-  color("border"),
-  0.5,
-)}, ${alpha(color("border"), 0.5)} 1px, ${color("white")} 1px, ${color(
-  "white",
-)} 100%)`;
+const getHeaderBackground = (theme: Theme) =>
+  `linear-gradient(
+    to top,
+    color-mix(in srgb, ${theme.fn.themeColor("border")} 50%, ${theme.fn.themeColor("bg-white")} 50%) 1px,
+    var(--mb-color-bg-white) 1px,
+    var(--mb-color-bg-white) 100%
+  )`;
 
 export const PermissionsTableRoot = styled.table`
   border-collapse: collapse;
@@ -29,22 +35,23 @@ export const PermissionsTableCell = styled.td`
   box-sizing: border-box;
   min-height: 40px;
   overflow: hidden;
+  background: var(--mb-color-bg-white);
 
   &:first-of-type {
     max-width: 300px;
-    background: white;
     left: 0;
     top: 0;
     position: sticky;
     padding-left: 0;
     padding-right: 1.5rem;
+    background: var(--mb-color-bg-white);
 
     &:after {
       position: absolute;
       right: 0;
       top: 0;
       height: 100%;
-      border-right: ${tableBorder};
+      border-right: ${({ theme }) => getTableBorder(theme)};
       content: " ";
     }
   }
@@ -56,12 +63,13 @@ export const PermissionTableHeaderCell = styled(
   position: sticky;
   top: 0;
   border: none;
-  background: ${headerBackground};
+  background: ${({ theme }) => getHeaderBackground(theme)};
   z-index: 1;
 
   &:first-of-type {
-    background: ${headerBackground};
+    background: ${({ theme }) => getHeaderBackground(theme)};
     z-index: 2;
+
     &:after {
       display: none;
     }
@@ -69,30 +77,32 @@ export const PermissionTableHeaderCell = styled(
 `;
 
 export const PermissionsTableRow = styled.tr`
-  border-bottom: ${tableBorder};
-`;
-
-export const EntityName = styled.span`
-  font-weight: 700;
+  border-bottom: ${({ theme }) => getTableBorder(theme)};
 `;
 
 export const EntityNameLink = styled(Link)`
   display: inline;
   font-weight: 700;
   text-decoration: underline;
-  color: ${color("admin-navbar")};
+  color: ${() => color("admin-navbar-inverse")};
 `;
 
-export const HintIcon = styled(Icon)`
-  color: ${color("text-light")};
+export const HintIcon = styled(
+  forwardRef<SVGSVGElement, IconProps>(function HintIcon(props, ref) {
+    return (
+      <Icon
+        {...props}
+        name={props.name ?? "info"}
+        size={props.size ?? 16}
+        ref={ref}
+      />
+    );
+  }),
+)`
+  color: var(--mb-color-text-light);
   margin-left: 0.375rem;
   cursor: pointer;
 `;
-
-HintIcon.defaultProps = {
-  name: "info",
-  size: 16,
-};
 
 export const ColumnName = styled(Label)`
   display: inline;

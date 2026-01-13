@@ -11,52 +11,64 @@ export function signedSquareRoot(value: number) {
   return getSign(value) * Math.sqrt(Math.abs(value));
 }
 
-export function signedLog(value: number) {
-  return getSign(value) * Math.log10(Math.abs(value));
-}
+/**
+ * Symmetric log (symlog) transformation that handles:
+ * - Negative values (symmetric around zero)
+ * - Values between -1 and 1 (linear region)
+ * - Values with |x| >= 1 (logarithmic region)
+ */
+const signedLog = (value: number) => {
+  const absValue = Math.abs(value);
+  if (absValue < 1) {
+    return value;
+  }
+  return getSign(value) * (1 + Math.log10(absValue));
+};
+
+const inverseSignedLog = (value: number) => {
+  const absValue = Math.abs(value);
+  if (absValue < 1) {
+    return value;
+  }
+  return getSign(value) * Math.pow(10, absValue - 1);
+};
 
 export function getAxisTransforms(
   scale: NumericScale | undefined,
 ): NumericAxisScaleTransforms {
   if (scale === "pow") {
     return {
-      toEChartsAxisValue: value => {
+      toEChartsAxisValue: (value) => {
         if (!isNumber(value)) {
           return null;
         }
         return signedSquareRoot(value);
       },
-      fromEChartsAxisValue: value => {
+      fromEChartsAxisValue: (value) => {
         return Math.pow(value, 2) * getSign(value);
       },
     };
   }
   if (scale === "log") {
     return {
-      toEChartsAxisValue: value => {
+      toEChartsAxisValue: (value) => {
         if (!isNumber(value)) {
           return null;
         }
 
-        if (value === 0) {
-          return value;
-        }
-
         return signedLog(value);
       },
-      fromEChartsAxisValue: value => {
-        return Math.pow(10, Math.abs(value)) * getSign(value);
-      },
+      fromEChartsAxisValue: inverseSignedLog,
     };
   }
 
   return {
-    toEChartsAxisValue: value => {
+    toEChartsAxisValue: (value) => {
       if (!isNumber(value)) {
         return null;
       }
       return value;
     },
-    fromEChartsAxisValue: value => value,
+    fromEChartsAxisValue: (value) => value,
   };
 }

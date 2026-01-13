@@ -1,6 +1,6 @@
 (ns metabase-enterprise.snippet-collections.api.native-query-snippet
   (:require
-   [metabase.public-settings.premium-features :refer [defenterprise]]
+   [metabase.premium-features.core :refer [defenterprise]]
    [metabase.util.honey-sql-2 :as h2x]))
 
 (defenterprise snippets-collection-filter-clause
@@ -13,7 +13,7 @@
   "Collection children query for snippets on EE."
   :feature :snippet-collections
   [collection {:keys [archived?]}]
-  {:select [:id :name :entity_id [(h2x/literal "snippet") :model]]
+  {:select [:id :collection_id :name :entity_id [(h2x/literal "snippet") :model]]
    :from   [[:native_query_snippet :nqs]]
    :where  [:and
             [:= :collection_id (:id collection)]

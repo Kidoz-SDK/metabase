@@ -1,69 +1,51 @@
 import cx from "classnames";
 import { useMemo, useState } from "react";
+import { useAsync } from "react-use";
 import { t } from "ttag";
-import _ from "underscore";
 
 import { useSetting } from "metabase/common/hooks";
 import CS from "metabase/css/core/index.css";
 import { useSelector } from "metabase/lib/redux";
 import { checkNotNull } from "metabase/lib/types";
-import {
-  trackStaticEmbedCodeCopied,
-  trackStaticEmbedDiscarded,
-  trackStaticEmbedPublished,
-  trackStaticEmbedUnpublished,
-} from "metabase/public/lib/analytics";
+import { getPreviewParamsBySlug } from "metabase/public/components/EmbedModal/StaticEmbedSetupPane/lib/get-preview-params-by-slug";
+import { getStaticEmbedSetupPublishHandlers } from "metabase/public/components/EmbedModal/StaticEmbedSetupPane/lib/get-static-embed-setup-publish-handlers";
+import { trackStaticEmbedCodeCopied } from "metabase/public/lib/analytics";
 import { getEmbedServerCodeExampleOptions } from "metabase/public/lib/code";
-import {
-  getSignedPreviewUrlWithoutHash,
-  optionsToHashParams,
-} from "metabase/public/lib/embed";
+import { getIframeQueryWithoutDefaults } from "metabase/public/lib/code-templates";
+import { getSignedPreviewUrlWithoutHash } from "metabase/public/lib/embed";
 import type {
+  EmbedResource,
+  EmbedResourceParameter,
   EmbeddingDisplayOptions,
   EmbeddingParameters,
   EmbeddingParametersValues,
-  EmbeddingParameterVisibility,
-  EmbedResource,
-  EmbedResourceParameter,
-  EmbedResourceType,
+  GuestEmbedResourceType,
 } from "metabase/public/lib/types";
 import { getCanWhitelabel } from "metabase/selectors/whitelabel";
-import { Stack, Tabs } from "metabase/ui";
-import { getParameterValue } from "metabase-lib/v1/parameters/utils/parameter-values";
+import { Paper, Stack, Tabs } from "metabase/ui";
 
-import { AppearanceSettings } from "./AppearanceSettings";
 import { EmbedModalContentStatusBar } from "./EmbedModalContentStatusBar";
+import { LookAndFeelSettings } from "./LookAndFeelSettings";
 import { OverviewSettings } from "./OverviewSettings";
 import { ParametersSettings } from "./ParametersSettings";
 import { PreviewModeSelector } from "./PreviewModeSelector";
-import { PreviewPane } from "./PreviewPane";
+import { type PreviewBackgroundType, PreviewPane } from "./PreviewPane";
 import { ServerEmbedCodePane } from "./ServerEmbedCodePane";
 import { SettingsTabLayout } from "./StaticEmbedSetupPane.styled";
 import { getDefaultDisplayOptions } from "./config";
+import { getDefaultEmbeddingParams } from "./lib/get-default-embedding-params";
+import { getHasParamsChanged } from "./lib/get-has-params-changed";
+import { getLockedPreviewParameters } from "./lib/get-locked-preview-parameters";
 import { EMBED_MODAL_TABS } from "./tabs";
 import type { ActivePreviewPane, EmbedCodePaneVariant } from "./types";
 
-const countEmbeddingParameterOptions = (embeddingParams: EmbeddingParameters) =>
-  Object.values(embeddingParams).reduce(
-    (acc, value) => {
-      acc[value] += 1;
-      return acc;
-    },
-    { disabled: 0, locked: 0, enabled: 0 } as Record<
-      EmbeddingParameterVisibility,
-      number
-    >,
-  );
-
 export interface StaticEmbedSetupPaneProps {
   resource: EmbedResource;
-  resourceType: EmbedResourceType;
+  resourceType: GuestEmbedResourceType;
   resourceParameters: EmbedResourceParameter[];
 
-  onUpdateEnableEmbedding: (enableEmbedding: boolean) => void | Promise<void>;
-  onUpdateEmbeddingParams: (
-    embeddingParams: EmbeddingParameters,
-  ) => void | Promise<void>;
+  onUpdateEnableEmbedding: (enableEmbedding: boolean) => void;
+  onUpdateEmbeddingParams: (embeddingParams: EmbeddingParameters) => void;
 }
 
 export const StaticEmbedSetupPane = ({
@@ -89,7 +71,7 @@ export const StaticEmbedSetupPane = ({
     useState<EmbeddingParametersValues>({});
 
   const canWhitelabel = useSelector(getCanWhitelabel);
-  const shouldShowDownloadData = canWhitelabel && resourceType === "question";
+  const shouldShowDownloadData = canWhitelabel;
   const [displayOptions, setDisplayOptions] = useState<EmbeddingDisplayOptions>(
     getDefaultDisplayOptions(shouldShowDownloadData),
   );
@@ -120,6 +102,7 @@ export const StaticEmbedSetupPane = ({
     resourceId: resource.id,
     params: previewParametersBySlug,
     displayOptions,
+    withIframeSnippet: true,
   });
 
   const [selectedServerCodeOptionId, setSelectedServerCodeOptionId] = useState(
@@ -130,13 +113,13 @@ export const StaticEmbedSetupPane = ({
     ({ id }) => id === selectedServerCodeOptionId,
   );
 
-  const hasSettingsChanges = getHasSettingsChanges({
+  const hasParamsChanged = getHasParamsChanged({
     initialEmbeddingParams,
     embeddingParams,
   });
 
-  const iframeUrlWithoutHash = useMemo(
-    () =>
+  const { value: iframeUrlWithoutHash = null } = useAsync(
+    async () =>
       getSignedPreviewUrlWithoutHash(
         siteUrl,
         resourceType,
@@ -146,47 +129,30 @@ export const StaticEmbedSetupPane = ({
         embeddingParams,
       ),
     [
-      embeddingParams,
-      previewParametersBySlug,
-      resource.id,
-      resourceType,
-      secretKey,
       siteUrl,
+      resourceType,
+      resource.id,
+      previewParametersBySlug,
+      secretKey,
+      embeddingParams,
     ],
   );
 
-  const iframeUrl = iframeUrlWithoutHash + optionsToHashParams(displayOptions);
+  const iframeUrl = iframeUrlWithoutHash
+    ? iframeUrlWithoutHash + getIframeQueryWithoutDefaults(displayOptions)
+    : null;
 
-  const handleSave = async () => {
-    if (!resource.enable_embedding) {
-      await onUpdateEnableEmbedding(true);
-    }
-    await onUpdateEmbeddingParams(embeddingParams);
-    trackStaticEmbedPublished({
-      artifact: resourceType,
+  const { handleSave, handleUnpublish, handleDiscard } =
+    getStaticEmbedSetupPublishHandlers({
       resource,
-      isExampleDashboard: exampleDashboardId === resource.id,
-      params: countEmbeddingParameterOptions({
-        ...convertResourceParametersToEmbeddingParams(resourceParameters),
-        ...embeddingParams,
-      }),
+      resourceType,
+      resourceParameters,
+      onUpdateEnableEmbedding,
+      onUpdateEmbeddingParams,
+      embeddingParams,
+      setEmbeddingParams,
+      exampleDashboardId,
     });
-  };
-
-  const handleUnpublish = async () => {
-    await onUpdateEnableEmbedding(false);
-    trackStaticEmbedUnpublished({
-      artifact: resourceType,
-      resource,
-    });
-  };
-
-  const handleDiscard = () => {
-    setEmbeddingParams(getDefaultEmbeddingParams(resource, resourceParameters));
-    trackStaticEmbedDiscarded({
-      artifact: resourceType,
-    });
-  };
 
   const getServerEmbedCodePane = (variant: EmbedCodePaneVariant) => {
     return (
@@ -226,7 +192,7 @@ export const StaticEmbedSetupPane = ({
     const locationMap = {
       overview: "code_overview",
       parameters: "code_params",
-      appearance: "code_appearance",
+      lookAndFeel: "code_appearance",
     } as const;
     trackStaticEmbedCodeCopied({
       artifact: resourceType,
@@ -238,18 +204,27 @@ export const StaticEmbedSetupPane = ({
   };
 
   const [activeTab, setActiveTab] = useState<
-    typeof EMBED_MODAL_TABS[keyof typeof EMBED_MODAL_TABS]
+    (typeof EMBED_MODAL_TABS)[keyof typeof EMBED_MODAL_TABS]
   >(EMBED_MODAL_TABS.Overview);
+
   return (
-    <Stack spacing={0}>
-      <EmbedModalContentStatusBar
-        resourceType={resourceType}
-        isPublished={resource.enable_embedding}
-        hasSettingsChanges={hasSettingsChanges}
-        onSave={handleSave}
-        onUnpublish={handleUnpublish}
-        onDiscard={handleDiscard}
-      />
+    <Stack gap={0}>
+      <Paper
+        withBorder
+        shadow="sm"
+        m="1.5rem 2rem"
+        p="0.75rem 1rem"
+        data-testid="embed-modal-content-status-bar"
+      >
+        <EmbedModalContentStatusBar
+          resourceType={resourceType}
+          isPublished={resource.enable_embedding}
+          hasSettingsChanges={hasParamsChanged}
+          onSave={handleSave}
+          onUnpublish={handleUnpublish}
+          onDiscard={handleDiscard}
+        />
+      </Paper>
 
       <Tabs
         defaultValue={EMBED_MODAL_TABS.Overview}
@@ -265,9 +240,9 @@ export const StaticEmbedSetupPane = ({
             onClick={() => setActiveTab(EMBED_MODAL_TABS.Parameters)}
           >{t`Parameters`}</Tabs.Tab>
           <Tabs.Tab
-            value={EMBED_MODAL_TABS.Appearance}
-            onClick={() => setActiveTab(EMBED_MODAL_TABS.Appearance)}
-          >{t`Appearance`}</Tabs.Tab>
+            value={EMBED_MODAL_TABS.LookAndFeel}
+            onClick={() => setActiveTab(EMBED_MODAL_TABS.LookAndFeel)}
+          >{t`Look and Feel`}</Tabs.Tab>
         </Tabs.List>
         {/**
          * Please do not add more than one `Tabs.Panel` here.
@@ -290,7 +265,7 @@ export const StaticEmbedSetupPane = ({
               serverEmbedCodeSlot={getServerEmbedCodePane(
                 EMBED_MODAL_TABS.Overview,
               )}
-              onClientCodeCopy={language =>
+              onClientCodeCopy={(language) =>
                 handleCodeCopy({ code: "view", variant: "overview", language })
               }
             />
@@ -300,15 +275,23 @@ export const StaticEmbedSetupPane = ({
                 <ParametersSettings
                   resourceType={resourceType}
                   resourceParameters={resourceParameters}
+                  withInitialValues={false}
                   embeddingParams={embeddingParams}
                   lockedParameters={lockedParameters}
                   parameterValues={parameterValues}
                   onChangeEmbeddingParameters={setEmbeddingParams}
-                  onChangeParameterValue={(id: string, value: string) =>
-                    setParameterValues(state => ({
+                  onChangeParameterValue={({ id, value }) =>
+                    setParameterValues((state) => ({
                       ...state,
                       [id]: value,
                     }))
+                  }
+                  onRemoveParameterValue={({ id }) =>
+                    setParameterValues((state) => {
+                      const nextState = { ...state };
+                      delete nextState[id];
+                      return nextState;
+                    })
                   }
                 />
               }
@@ -322,7 +305,11 @@ export const StaticEmbedSetupPane = ({
                     hidden={activePane !== "preview"}
                     className={CS.flexFull}
                     previewUrl={iframeUrl}
-                    isTransparent={displayOptions.theme === "transparent"}
+                    backgroundType={
+                      !displayOptions.background
+                        ? "checkerboard-light"
+                        : "no-background"
+                    }
                   />
                   {activePane === "code"
                     ? getServerEmbedCodePane(EMBED_MODAL_TABS.Parameters)
@@ -330,10 +317,10 @@ export const StaticEmbedSetupPane = ({
                 </>
               }
             />
-          ) : activeTab === EMBED_MODAL_TABS.Appearance ? (
+          ) : activeTab === EMBED_MODAL_TABS.LookAndFeel ? (
             <SettingsTabLayout
               settingsSlot={
-                <AppearanceSettings
+                <LookAndFeelSettings
                   resourceType={resourceType}
                   displayOptions={displayOptions}
                   onChangeDisplayOptions={setDisplayOptions}
@@ -349,10 +336,10 @@ export const StaticEmbedSetupPane = ({
                     hidden={activePane !== "preview"}
                     className={CS.flexFull}
                     previewUrl={iframeUrl}
-                    isTransparent={displayOptions.theme === "transparent"}
+                    backgroundType={getBackgroundType(displayOptions)}
                   />
                   {activePane === "code"
-                    ? getServerEmbedCodePane(EMBED_MODAL_TABS.Appearance)
+                    ? getServerEmbedCodePane(EMBED_MODAL_TABS.LookAndFeel)
                     : null}
                 </>
               }
@@ -364,103 +351,17 @@ export const StaticEmbedSetupPane = ({
   );
 };
 
-function getDefaultEmbeddingParams(
-  resource: EmbedResource,
-  resourceParameters: EmbedResourceParameter[],
-): EmbeddingParameters {
-  const validSlugs = resourceParameters.map(param => param.slug);
-  // We first pick only dashboard parameters with valid slugs
-  const defaultParams = _.pick(resource.embedding_params || {}, validSlugs);
-  // Then pick valid required dashboard parameters
-  const validRequiredParams = resourceParameters.filter(
-    param => param.slug && param.required,
-  );
-
-  // And for each required parameter set its value to "enabled"
-  // (Editable) because this is the default for a required parameter.
-  // This is needed to save embedding_params when a user clicks
-  // "Publish" without changing parameter visibility.
-  return validRequiredParams.reduce((acc, param) => {
-    if (!acc[param.slug] || acc[param.slug] === "disabled") {
-      acc[param.slug] = "enabled";
-    }
-    return acc;
-  }, defaultParams);
-}
-
-function getPreviewParamsBySlug({
-  resourceParameters,
-  embeddingParams,
-  parameterValues,
-}: {
-  resourceParameters: EmbedResourceParameter[];
-  embeddingParams: EmbeddingParameters;
-  parameterValues: EmbeddingParametersValues;
-}) {
-  const lockedParameters = getLockedPreviewParameters(
-    resourceParameters,
-    embeddingParams,
-  );
-
-  return Object.fromEntries(
-    lockedParameters.map(parameter => [
-      parameter.slug,
-      getParameterValue({
-        parameter,
-        values: parameterValues,
-        defaultRequired: true,
-      }),
-    ]),
-  );
-}
-
-function getLockedPreviewParameters(
-  resourceParameters: EmbedResourceParameter[],
-  embeddingParams: EmbeddingParameters,
-) {
-  return resourceParameters.filter(
-    parameter => embeddingParams[parameter.slug] === "locked",
-  );
-}
-
-function getHasSettingsChanges({
-  initialEmbeddingParams,
-  embeddingParams,
-}: {
-  initialEmbeddingParams: EmbeddingParameters;
-  embeddingParams: EmbeddingParameters;
-}): boolean {
-  const nonDisabledInitialEmbeddingParams = getNonDisabledEmbeddingParams(
-    initialEmbeddingParams,
-  );
-  const nonDisabledEmbeddingParams =
-    getNonDisabledEmbeddingParams(embeddingParams);
-
-  return !_.isEqual(
-    nonDisabledInitialEmbeddingParams,
-    nonDisabledEmbeddingParams,
-  );
-}
-
-function getNonDisabledEmbeddingParams(
-  embeddingParams: EmbeddingParameters,
-): EmbeddingParameters {
-  return Object.keys(embeddingParams).reduce((result, key) => {
-    if (embeddingParams[key] !== "disabled") {
-      result[key] = embeddingParams[key];
-    }
-
-    return result;
-  }, {} as EmbeddingParameters);
-}
-
-function convertResourceParametersToEmbeddingParams(
-  resourceParameters: EmbedResourceParameter[],
-) {
-  const embeddingParams: EmbeddingParameters = {};
-  for (const parameter of resourceParameters) {
-    embeddingParams[parameter.slug] = "disabled";
+function getBackgroundType(
+  displayOptions: Pick<EmbeddingDisplayOptions, "background" | "theme">,
+): PreviewBackgroundType {
+  if (displayOptions.background) {
+    return "no-background";
   }
 
-  return embeddingParams;
+  if (displayOptions.theme === "night") {
+    return "checkerboard-dark";
+  }
+
+  // `light` and `transparent` (backward compatible) theme
+  return "checkerboard-light";
 }

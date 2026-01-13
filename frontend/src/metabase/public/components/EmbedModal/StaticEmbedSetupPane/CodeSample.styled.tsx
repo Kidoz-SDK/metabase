@@ -1,3 +1,4 @@
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
 
 export const CopyButtonContainer = styled.div`
@@ -8,6 +9,6 @@ export const CopyButtonContainer = styled.div`
   z-index: 2;
 
   &:hover {
-    color: ${({ theme }) => theme.fn.themeColor("brand")};
+    color: var(--mb-color-brand);
   }
 `;

@@ -16,12 +16,32 @@
    TODO: Names of protocol functions and protocols are bit misleading as were in monger.
 
    TODOs should be addressed during follow-up of monger removal."
+  (:refer-clojure :exclude [mapv])
   (:require
    [flatland.ordered.map :as ordered-map]
    [java-time.api :as t]
-   [metabase.query-processor.timezone :as qp.timezone]))
+   [metabase.driver-api.core :as driver-api]
+   [metabase.driver.mongo.query-processor :as mongo.qp]
+   [metabase.util.performance :refer [mapv]])
+  (:import
+   (java.nio ByteBuffer)
+   (java.util UUID)
+   (org.bson.types Binary)))
 
 (set! *warn-on-reflection* true)
+
+(def bson-uuid-type
+  "UUIDs are BSON subtype 4, see https://bsonspec.org/spec.html
+  and https://www.mongodb.com/docs/manual/reference/bson-types/#binary-data"
+  4)
+
+(defn bsonuuid->uuid
+  "Converts a BSON UUID to a Java UUID"
+  [^Binary bin]
+  (let [buffer (ByteBuffer/wrap (.getData bin))
+        most-sig-bits (.getLong buffer)
+        least-sig-bits (.getLong buffer)]
+    (UUID. most-sig-bits least-sig-bits)))
 
 ;;;; Protocols defined originally in monger, adjusted for `Document` follow.
 
@@ -32,12 +52,22 @@
   nil
   (from-document [input _opts] input)
 
+  Binary
+  (from-document [input _opts]
+    (if (= (.getType input) bson-uuid-type)
+      (bsonuuid->uuid input)
+      input))
+
   Object
   (from-document [input _opts] input)
 
   org.bson.types.Decimal128
   (from-document [^org.bson.types.Decimal128 input _opts]
-    (.bigDecimalValue input))
+    ;; As per https://mongodb.github.io/mongo-java-driver/5.1/apidocs/bson/org/bson/types/Decimal128.html#bigDecimalValue()
+    ;; org.bson.types.Decimal128/POSITIVE_ZERO is convertible to big decimal.
+    (if (.equals input org.bson.types.Decimal128/NEGATIVE_ZERO)
+      0M
+      (.bigDecimalValue input)))
 
   java.util.List
   (from-document [^java.util.List input opts]
@@ -86,6 +116,9 @@
   java.util.Set
   (to-document [input] (mapv to-document input))
 
+  UUID
+  (to-document [input] (@#'mongo.qp/uuid->bsonbinary input))
+
   Object
   (to-document [input] input))
 
@@ -106,7 +139,7 @@
   (to-document [t]
     ;; QP store won't be bound when loading test data for example.
     (to-document (t/instant t (t/zone-id (try
-                                           (qp.timezone/results-timezone-id)
+                                           (driver-api/results-timezone-id)
                                            (catch Throwable _
                                              "UTC"))))))
 

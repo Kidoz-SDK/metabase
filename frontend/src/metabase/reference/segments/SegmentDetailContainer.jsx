@@ -2,20 +2,20 @@
 import cx from "classnames";
 import PropTypes from "prop-types";
 import { Component } from "react";
-import { connect } from "react-redux";
 
-import SidebarLayout from "metabase/components/SidebarLayout";
+import SidebarLayout from "metabase/common/components/SidebarLayout";
 import CS from "metabase/css/core/index.css";
+import { connect } from "metabase/lib/redux";
 import * as metadataActions from "metabase/redux/metadata";
 import * as actions from "metabase/reference/reference";
 import SegmentDetail from "metabase/reference/segments/SegmentDetail";
 
 import {
-  getUser,
-  getSegment,
-  getSegmentId,
   getDatabaseId,
   getIsEditing,
+  getSegment,
+  getSegmentId,
+  getUser,
 } from "../selectors";
 
 import SegmentSidebar from "./SegmentSidebar";

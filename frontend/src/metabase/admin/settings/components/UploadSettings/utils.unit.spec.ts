@@ -3,7 +3,7 @@ import { checkNotNull } from "metabase/lib/types";
 import type { Database, Schema } from "metabase-types/api";
 import { createMockDatabase, createMockSchema } from "metabase-types/api/mocks";
 
-import { getDatabaseOptions, getSchemaOptions, dbHasSchema } from "./utils";
+import { dbHasSchema, getDatabaseOptions, getSchemaOptions } from "./utils";
 
 interface SetupOpts {
   databases: Database[];
@@ -14,7 +14,9 @@ const setup = ({ databases, schemas }: SetupOpts) => {
   const metadata = createMockMetadata({ databases, schemas });
 
   return {
-    databases: databases.map(({ id }) => checkNotNull(metadata.database(id))),
+    databases: databases.map(({ id }) =>
+      checkNotNull(metadata.database(id)),
+    ) as Database[],
     schemas: schemas.map(({ id }) => checkNotNull(metadata.schema(id))),
   };
 };
@@ -47,22 +49,46 @@ describe("Admin > UploadSettings > utils", () => {
   describe("getDatabaseOptions", () => {
     it("should return an array of databases", () => {
       expect(getDatabaseOptions(databases)).toEqual([
-        { name: "Database", value: 100 },
-        { name: "Database", value: 200 },
-        { name: "Database", value: 300 },
+        { label: "Database", value: "100", disabled: false },
+        { label: "Database", value: "200", disabled: false },
+        { label: "Database", value: "300", disabled: false },
       ]);
     });
+
     it("should return an empty array if there are no databases", () => {
       expect(getDatabaseOptions([])).toEqual([]);
     });
   });
 
+  it("should disable any options for dbs with db routing enabled", () => {
+    expect(
+      getDatabaseOptions([
+        ...databases,
+        createMockDatabase({
+          id: 700,
+          name: "Routed",
+          engine: "postgres",
+          router_user_attribute: "wut",
+        }),
+      ]),
+    ).toEqual([
+      { label: "Database", value: "100", disabled: false },
+      { label: "Database", value: "200", disabled: false },
+      { label: "Database", value: "300", disabled: false },
+      { label: "Routed (DB Routing Enabled)", value: "700", disabled: true },
+    ]);
+  });
+
+  it("should return an empty array if there are no databases", () => {
+    expect(getDatabaseOptions([])).toEqual([]);
+  });
+
   describe("getSchemaOptions", () => {
     it("should return an array of schema", () => {
-      expect(getSchemaOptions(schemas)).toEqual([
-        { name: "schema1", value: "schema1" },
-        { name: "schema2", value: "schema2" },
-        { name: "schema3", value: "schema3" },
+      expect(getSchemaOptions(schemas.map((schema) => schema.name))).toEqual([
+        { label: "schema1", value: "schema1" },
+        { label: "schema2", value: "schema2" },
+        { label: "schema3", value: "schema3" },
       ]);
     });
   });

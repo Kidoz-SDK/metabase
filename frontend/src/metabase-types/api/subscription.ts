@@ -1,7 +1,8 @@
 import type { Card } from "./card";
 import type { RegularCollectionId } from "./collection";
 import type { DashboardId } from "./dashboard";
-import type { Channel } from "./notifications";
+import type { BaseEntityId } from "./entity-id";
+import type { Channel } from "./notification-channels";
 import type { Parameter } from "./parameters";
 import type { User } from "./user";
 
@@ -21,7 +22,7 @@ export interface DashboardSubscription {
   creator: User;
   creator_id: number;
   dashboard_id: DashboardId;
-  entity_id: string;
+  entity_id: BaseEntityId;
   id: number;
   name: string;
   parameters: Parameter[];

@@ -2,9 +2,7 @@ import { t } from "ttag";
 import _ from "underscore";
 
 import { PLUGIN_IS_EE_BUILD } from "metabase/plugins";
-
-const EMAIL_REGEX =
-  /^(([^<>()[\]\\.,;:\s@\"]+(\.[^<>()[\]\\.,;:\s@\"]+)*)|(\".+\"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
+import type { EntityToken } from "metabase-types/api/entity";
 
 export function isEmpty(str: string | null) {
   if (str != null) {
@@ -35,23 +33,11 @@ export function numberToWord(num: number) {
   }
 }
 
-export function isJWT(string: unknown) {
+export function isJWT(string: unknown): string is string {
   return (
     typeof string === "string" &&
     /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(string)
   );
-}
-
-export function isEmail(email: string | undefined | null) {
-  if (email === null || email === undefined) {
-    return false;
-  }
-  return EMAIL_REGEX.test(email);
-}
-
-export function getEmailDomain(email: string) {
-  const match = EMAIL_REGEX.exec(email);
-  return match && match[5];
 }
 
 export function equals(a: unknown, b: unknown) {
@@ -113,7 +99,7 @@ export function versionToNumericComponents(version: string): number[] | null {
     patch,
     SPECIAL_COMPONENTS[label?.toLowerCase()] ?? 0,
     build,
-  ].map(part => (typeof part === "string" ? parseInt(part, 10) : part));
+  ].map((part) => (typeof part === "string" ? parseInt(part, 10) : part));
 }
 
 /**
@@ -153,17 +139,58 @@ export function compareVersions(
   return 0;
 }
 
+export function newVersionAvailable({
+  currentVersion,
+  latestVersion,
+}: {
+  currentVersion: string;
+  latestVersion: string;
+}) {
+  const result = compareVersions(currentVersion, latestVersion);
+  return result != null && result < 0;
+}
+
+export function versionIsLatest({
+  currentVersion,
+  latestVersion,
+}: {
+  currentVersion: string;
+  latestVersion: string;
+}) {
+  const result = compareVersions(currentVersion, latestVersion);
+  return result != null && result >= 0;
+}
+
 export const isEEBuild = () => PLUGIN_IS_EE_BUILD.isEEBuild();
 
-export const safeJsonParse = (value: string | null | undefined) => {
-  if (!value) {
-    return null;
-  }
-
+// Extract resource id from signed JWT token used in Static Embedding
+export const extractResourceIdFromJwtToken = (jwtToken: EntityToken) => {
   try {
-    return JSON.parse(value);
-  } catch (e) {
-    console.error("Unable to parse JSON: ", value, e);
+    const parts = jwtToken.split(".");
+    const payloadPart = parts[1];
+
+    let base64 = payloadPart.replace(/-/g, "+").replace(/_/g, "/");
+    const padding = base64.length % 4;
+
+    if (padding === 2) {
+      base64 += "==";
+    } else if (padding === 3) {
+      base64 += "=";
+    } else if (padding !== 0) {
+      throw new Error("Invalid base64url payload");
+    }
+
+    const jsonString = decodeURIComponent(
+      Array.from(window.atob(base64))
+        .map((c) => "%" + c.charCodeAt(0).toString(16).padStart(2, "0"))
+        .join(""),
+    );
+    const payload = JSON.parse(jsonString);
+    const resource = payload.resource;
+    const entityId = resource.dashboard || resource.question;
+
+    return entityId;
+  } catch {
     return null;
   }
 };

@@ -1,33 +1,28 @@
+// eslint-disable-next-line no-restricted-imports
+import { css } from "@emotion/react";
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
-
-import { color } from "metabase/lib/colors";
 
 export const Panel = styled.section<{ hasLeftBorder?: boolean }>`
   overflow-y: auto;
-  background-color: ${color("white")};
+  background-color: var(--mb-color-bg-white);
   height: 100%;
 
-  ${props =>
-    props.hasLeftBorder && `border-left: 1px solid ${color("border")};`}
+  ${(props) =>
+    props.hasLeftBorder &&
+    css`
+      border-left: 1px solid var(--mb-color-border);
+    `}
 `;
 
 export const RoundedBox = styled.div<{ twoColumns?: boolean }>`
   margin-bottom: 1rem;
   width: 100%;
-
   display: grid;
-  grid-template-columns: minmax(5rem, 30rem) ${props =>
+  grid-template-columns: minmax(5rem, 30rem) ${(props) =>
       props.twoColumns ? "minmax(5rem, auto)" : ""};
-  max-width: ${props => (props.twoColumns ? "100%" : "30rem")};
-
+  max-width: ${(props) => (props.twoColumns ? "100%" : "30rem")};
   overflow: hidden;
-
   border-radius: 1rem;
-  border: 2px solid ${color("border")};
-`;
-
-export const TabWrapper = styled.div`
-  display: grid;
-  grid-template-rows: auto 1fr;
-  width: 100%;
+  border: 2px solid var(--mb-color-border);
 `;

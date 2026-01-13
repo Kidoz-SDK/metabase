@@ -1,5 +1,4 @@
 import { useCallback, useMemo } from "react";
-import { withRouter } from "react-router";
 import { t } from "ttag";
 import _ from "underscore";
 
@@ -7,20 +6,23 @@ import { StrategyForm } from "metabase/admin/performance/components/StrategyForm
 import { useCacheConfigs } from "metabase/admin/performance/hooks/useCacheConfigs";
 import { useConfirmIfFormIsDirty } from "metabase/admin/performance/hooks/useConfirmIfFormIsDirty";
 import { useSaveStrategy } from "metabase/admin/performance/hooks/useSaveStrategy";
-import { DelayedLoadingAndErrorWrapper } from "metabase/components/LoadingAndErrorWrapper/DelayedLoadingAndErrorWrapper";
-import { color } from "metabase/lib/colors";
+import { DelayedLoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper/DelayedLoadingAndErrorWrapper";
+import { SidesheetSubPage } from "metabase/common/components/Sidesheet";
 import type { SidebarCacheFormProps } from "metabase/plugins";
-import { Button, Flex, Icon, Title } from "metabase/ui";
-import type { Strategy } from "metabase-types/api";
+import { Stack } from "metabase/ui";
+import type { CacheStrategy } from "metabase-types/api";
 
-import { SidebarCacheFormBody } from "./SidebarCacheForm.styled";
 import { getItemId, getItemName } from "./utils";
 
-const SidebarCacheForm_Base = ({
+export const SidebarCacheForm = ({
   item,
   model,
-  setPage,
-  ...groupProps
+  isOpen,
+  onClose,
+  withOverlay = true,
+  overlayProps,
+  onBack,
+  ...stackProps
 }: SidebarCacheFormProps) => {
   const configurableModels = useMemo(() => [model], [model]);
   const id: number = getItemId(model, item);
@@ -37,74 +39,60 @@ const SidebarCacheForm_Base = ({
   }, [configs, id]);
 
   const saveStrategy = useSaveStrategy(id, filteredConfigs, setConfigs, model);
-  const saveAndCloseSidebar = useCallback(
-    async (values: Strategy) => {
+  const saveAndBack = useCallback(
+    async (values: CacheStrategy) => {
       await saveStrategy(values);
-      setPage("default");
+      onBack();
     },
-    [saveStrategy, setPage],
+    [saveStrategy, onBack],
   );
 
-  const closeSidebar = useCallback(async () => {
-    setPage("default");
-  }, [setPage]);
-
   const {
-    askBeforeDiscardingChanges,
     confirmationModal,
-    isStrategyFormDirty,
     setIsStrategyFormDirty,
+    isStrategyFormDirty,
+    askBeforeDiscardingChanges,
   } = useConfirmIfFormIsDirty();
-
-  const goBack = () => setPage("default");
 
   const headingId = `${model}-sidebar-caching-settings-heading`;
 
   return (
-    <SidebarCacheFormBody
-      align="flex-start"
-      spacing="md"
-      aria-labelledby={headingId}
-      {...groupProps}
+    <SidesheetSubPage
+      title={t`Caching settings`}
+      isOpen={isOpen}
+      onClose={() =>
+        isStrategyFormDirty ? askBeforeDiscardingChanges(onClose) : onClose()
+      }
+      withOverlay={withOverlay}
+      overlayProps={overlayProps}
+      onBack={() =>
+        isStrategyFormDirty ? askBeforeDiscardingChanges(onBack) : onBack()
+      }
     >
-      <Flex align="center">
-        <BackButton
-          onClick={() => {
-            isStrategyFormDirty ? askBeforeDiscardingChanges(goBack) : goBack();
-          }}
-        />
-        <Title order={2} id={headingId}>
-          Caching settings
-        </Title>
-      </Flex>
-      <DelayedLoadingAndErrorWrapper loading={loading} error={error}>
-        <StrategyForm
-          targetId={id}
-          targetModel={model}
-          targetName={getItemName(model, item)}
-          setIsDirty={setIsStrategyFormDirty}
-          saveStrategy={saveAndCloseSidebar}
-          savedStrategy={savedStrategy}
-          shouldAllowInvalidation
-          shouldShowName={false}
-          onReset={closeSidebar}
-          buttonLabels={{ save: t`Save`, discard: t`Cancel` }}
-        />
-      </DelayedLoadingAndErrorWrapper>
-      {confirmationModal}
-    </SidebarCacheFormBody>
+      <Stack
+        align="space-between"
+        h="calc(100% + 2.5rem)" // to make bottom padding nice with scroll containers
+        gap="md"
+        aria-labelledby={headingId}
+        {...stackProps}
+      >
+        <DelayedLoadingAndErrorWrapper loading={loading} error={error}>
+          <StrategyForm
+            targetId={id}
+            targetModel={model}
+            targetName={getItemName(model, item)}
+            setIsDirty={setIsStrategyFormDirty}
+            saveStrategy={saveAndBack}
+            savedStrategy={savedStrategy}
+            shouldAllowInvalidation
+            shouldShowName={false}
+            onReset={onBack}
+            buttonLabels={{ save: t`Save`, discard: t`Cancel` }}
+            isInSidebar
+          />
+        </DelayedLoadingAndErrorWrapper>
+        {confirmationModal}
+      </Stack>
+    </SidesheetSubPage>
   );
 };
-
-export const SidebarCacheForm = withRouter(SidebarCacheForm_Base);
-
-const BackButton = ({ onClick }: { onClick: () => void }) => (
-  <Button
-    lh={0}
-    style={{ marginInlineStart: ".5rem" }}
-    variant="subtle"
-    onClick={onClick}
-  >
-    <Icon name="chevronleft" color={color("text-dark")} />
-  </Button>
-);

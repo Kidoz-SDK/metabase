@@ -1,12 +1,12 @@
 import { useMemo } from "react";
-import { connect } from "react-redux";
 import { t } from "ttag";
 
 import { ConnectedActionPicker } from "metabase/actions/containers/ActionPicker";
-import EmptyState from "metabase/components/EmptyState";
-import Button from "metabase/core/components/Button";
+import Button from "metabase/common/components/Button";
+import EmptyState from "metabase/common/components/EmptyState";
 import CS from "metabase/css/core/index.css";
 import { setActionForDashcard } from "metabase/dashboard/actions";
+import { connect } from "metabase/lib/redux";
 import type {
   ActionDashboardCard,
   Dashboard,
@@ -14,12 +14,12 @@ import type {
 } from "metabase-types/api";
 
 import {
-  ActionSettingsWrapper,
-  ParameterMapperContainer,
   ActionSettingsHeader,
   ActionSettingsLeft,
   ActionSettingsRight,
+  ActionSettingsWrapper,
   ModalActions,
+  ParameterMapperContainer,
 } from "./ActionDashcardSettings.styled";
 import {
   ActionParameterMappingForm,
@@ -62,7 +62,7 @@ export function ActionDashcardSettings({
   const currentMappings = useMemo(
     () =>
       Object.fromEntries(
-        dashcard.parameter_mappings?.map(mapping => [
+        dashcard.parameter_mappings?.map((mapping) => [
           getTargetKey(mapping),
           mapping.parameter_id,
         ]) ?? [],
@@ -71,8 +71,8 @@ export function ActionDashcardSettings({
   );
 
   const isFormInvalid =
-    !!action &&
-    action.parameters.some(actionParameter => {
+    action != null &&
+    action.parameters?.some((actionParameter) => {
       const isHidden = isParameterHidden(action, actionParameter);
       const isRequired = isParameterRequired(action, actionParameter);
       const isParameterMapped =
@@ -84,7 +84,7 @@ export function ActionDashcardSettings({
     });
 
   return (
-    <ActionSettingsWrapper>
+    <ActionSettingsWrapper data-testid="action-dashcard-settings">
       <ActionSettingsLeft>
         <h4 className={CS.pb2}>{t`Action Library`}</h4>
         <ConnectedActionPicker currentAction={action} onClick={setAction} />

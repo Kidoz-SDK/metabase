@@ -1,32 +1,30 @@
-/* eslint jest/expect-expect: ["error", { "assertFunctionNames": ["expect", "expectSectionToHaveLabel", "expectSectionsToHaveLabelsInOrder"] }] */
-
 import userEvent from "@testing-library/user-event";
 
 import { screen } from "__support__/ui";
 import { createMockSettingDefinition } from "metabase-types/api/mocks";
 
+import { SUBSCRIBE_TOKEN, SUBSCRIBE_URL } from "../constants";
+
 import {
   clickNextStep,
-  expectSectionsToHaveLabelsInOrder,
   expectSectionToHaveLabel,
+  expectSectionsToHaveLabelsInOrder,
+  getLastSettingsPutPayload,
   getSection,
   selectUsageReason,
   setup,
-  skipLanguageStep,
   skipWelcomeScreen,
   submitUserInfoStep,
-  getLastSettingsPutPayload,
 } from "./setup";
 
 describe("setup (OSS)", () => {
   it("default step order should be correct", async () => {
     await setup();
     await skipWelcomeScreen();
-    expectSectionToHaveLabel("What's your preferred language?", "1");
-    expectSectionToHaveLabel("What should we call you?", "2");
-    expectSectionToHaveLabel("What will you use Metabase for?", "3");
-    expectSectionToHaveLabel("Add your data", "4");
-    expectSectionToHaveLabel("Usage data preferences", "5");
+    expectSectionToHaveLabel("What should we call you?", "1");
+    expectSectionToHaveLabel("What will you use Metabase for?", "2");
+    expectSectionToHaveLabel("Add your data", "3");
+    expectSectionToHaveLabel("Usage data preferences", "4");
 
     expectSectionsToHaveLabelsInOrder();
   });
@@ -36,24 +34,20 @@ describe("setup (OSS)", () => {
     await skipWelcomeScreen();
     expectSectionsToHaveLabelsInOrder({ from: 0 });
 
-    await skipLanguageStep();
+    await submitUserInfoStep();
     expectSectionsToHaveLabelsInOrder({ from: 1 });
 
-    await submitUserInfoStep();
+    await clickNextStep(); // Usage question
     expectSectionsToHaveLabelsInOrder({ from: 2 });
 
-    await clickNextStep(); // Usage question
+    await userEvent.click(screen.getByText("Continue with sample data"));
     expectSectionsToHaveLabelsInOrder({ from: 3 });
-
-    await userEvent.click(screen.getByText("I'll add my data later"));
-    expectSectionsToHaveLabelsInOrder({ from: 4 });
   });
 
   describe("Usage question", () => {
     async function setupForUsageQuestion() {
       await setup();
       await skipWelcomeScreen();
-      await skipLanguageStep();
       await submitUserInfoStep();
     }
 
@@ -70,8 +64,8 @@ describe("setup (OSS)", () => {
           "step",
         );
 
-        expectSectionToHaveLabel("Add your data", "4");
-        expectSectionToHaveLabel("Usage data preferences", "5");
+        expectSectionToHaveLabel("Add your data", "3");
+        expectSectionToHaveLabel("Usage data preferences", "4");
       });
     });
 
@@ -88,7 +82,7 @@ describe("setup (OSS)", () => {
           "step",
         );
 
-        expectSectionToHaveLabel("Usage data preferences", "4");
+        expectSectionToHaveLabel("Usage data preferences", "3");
       });
     });
 
@@ -105,8 +99,8 @@ describe("setup (OSS)", () => {
           "step",
         );
 
-        expectSectionToHaveLabel("Add your data", "4");
-        expectSectionToHaveLabel("Usage data preferences", "5");
+        expectSectionToHaveLabel("Add your data", "3");
+        expectSectionToHaveLabel("Usage data preferences", "4");
       });
     });
 
@@ -123,8 +117,8 @@ describe("setup (OSS)", () => {
           "step",
         );
 
-        expectSectionToHaveLabel("Add your data", "4");
-        expectSectionToHaveLabel("Usage data preferences", "5");
+        expectSectionToHaveLabel("Add your data", "3");
+        expectSectionToHaveLabel("Usage data preferences", "4");
       });
     });
   });
@@ -133,18 +127,15 @@ describe("setup (OSS)", () => {
     it("should set the correct flags when interested in embedding", async () => {
       await setup();
       await skipWelcomeScreen();
-      await skipLanguageStep();
       await submitUserInfoStep();
 
       await selectUsageReason("embedding");
       await clickNextStep();
 
-      await screen.getByText("Finish").click();
+      await userEvent.click(screen.getByText("Finish"));
 
       expect(await getLastSettingsPutPayload()).toEqual({
         "embedding-homepage": "visible",
-        "enable-embedding": true,
-        "setup-embedding-autoenabled": true,
         "setup-license-active-at-setup": false,
       });
     });
@@ -152,15 +143,14 @@ describe("setup (OSS)", () => {
     it("should not set 'embedding-homepage' when not interested in embedding", async () => {
       await setup();
       await skipWelcomeScreen();
-      await skipLanguageStep();
       await submitUserInfoStep();
 
       await selectUsageReason("self-service-analytics");
       await clickNextStep();
 
-      await screen.getByText("I'll add my data later").click();
+      await userEvent.click(screen.getByText("Continue with sample data"));
 
-      await screen.getByText("Finish").click();
+      await userEvent.click(screen.getByText("Finish"));
 
       const flags = await getLastSettingsPutPayload();
 
@@ -180,13 +170,12 @@ describe("setup (OSS)", () => {
         ],
       });
       await skipWelcomeScreen();
-      await skipLanguageStep();
       await submitUserInfoStep();
 
       await selectUsageReason("embedding");
       await clickNextStep();
 
-      await screen.getByText("Finish").click();
+      await userEvent.click(screen.getByText("Finish"));
 
       const flags = await getLastSettingsPutPayload();
 
@@ -194,6 +183,62 @@ describe("setup (OSS)", () => {
         "embedding-homepage": "visible",
         "setup-license-active-at-setup": false,
       });
+    });
+  });
+
+  describe("newsletter step", () => {
+    let originalSendBeacon: typeof window.navigator.sendBeacon;
+
+    beforeEach(() => {
+      originalSendBeacon = window.navigator.sendBeacon;
+      window.navigator.sendBeacon = jest.fn();
+    });
+
+    afterEach(() => {
+      window.navigator.sendBeacon = originalSendBeacon;
+      jest.clearAllMocks();
+    });
+
+    it("should call navigator.sendBeacon if the user checked the box", async () => {
+      await setup();
+      await skipWelcomeScreen();
+      await submitUserInfoStep();
+      await selectUsageReason("self-service-analytics");
+      await clickNextStep();
+      await userEvent.click(screen.getByText("Continue with sample data"));
+      await userEvent.click(screen.getByText("Finish"));
+
+      await userEvent.click(
+        screen.getByText(
+          "Get infrequent emails about new releases and feature updates.",
+        ),
+      );
+
+      await userEvent.click(screen.getByText("Take me to Metabase"));
+
+      const formData = new FormData();
+      formData.append("EMAIL", "john@example.org"); // email from user step
+      formData.append(SUBSCRIBE_TOKEN, "");
+
+      expect(window.navigator.sendBeacon).toHaveBeenCalledWith(
+        SUBSCRIBE_URL,
+        formData,
+      );
+    });
+
+    it("should *NOT* call navigator.sendBeacon if the user has not checked the box", async () => {
+      await setup();
+      await skipWelcomeScreen();
+      await submitUserInfoStep();
+      await selectUsageReason("self-service-analytics");
+      await clickNextStep();
+      await userEvent.click(screen.getByText("Continue with sample data"));
+
+      await userEvent.click(screen.getByText("Finish"));
+
+      userEvent.click(screen.getByText("Take me to Metabase"));
+
+      expect(window.navigator.sendBeacon).not.toHaveBeenCalled();
     });
   });
 });

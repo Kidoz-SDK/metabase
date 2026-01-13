@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { t } from "ttag";
 
+import { skipToken, useGetCardQuery, useGetDashboardQuery } from "metabase/api";
 import { isPublicCollection } from "metabase/collections/utils";
-import { DashboardPickerModal } from "metabase/common/components/DashboardPicker";
-import { QuestionPickerModal } from "metabase/common/components/QuestionPicker";
+import { LoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper";
+import { DashboardPickerModal } from "metabase/common/components/Pickers/DashboardPicker";
+import { QuestionPickerModal } from "metabase/common/components/Pickers/QuestionPicker";
 import { useDashboardQuery } from "metabase/common/hooks";
 import CS from "metabase/css/core/index.css";
 import {
@@ -11,29 +13,27 @@ import {
   clickTargetObjectType,
 } from "metabase/dashboard/components/ClickMappings";
 import { getDashboard } from "metabase/dashboard/selectors";
-import { ROOT_COLLECTION } from "metabase/entities/collections";
-import Dashboards from "metabase/entities/dashboards";
-import Questions from "metabase/entities/questions";
+import { ROOT_COLLECTION } from "metabase/entities/collections/constants";
+import { Dashboards } from "metabase/entities/dashboards";
+import { Questions } from "metabase/entities/questions";
 import { useSelector } from "metabase/lib/redux";
-import { Icon, Select } from "metabase/ui";
-import type Question from "metabase-lib/v1/Question";
+import { checkNotNull } from "metabase/lib/types";
+import { getMetadata } from "metabase/selectors/metadata";
+import { Button, Icon, Select } from "metabase/ui";
+import Question from "metabase-lib/v1/Question";
 import type {
-  Dashboard,
-  DashboardId,
-  QuestionDashboardCard,
   CardId,
   ClickBehavior,
-  EntityCustomDestinationClickBehavior,
+  Dashboard,
+  DashboardCard,
+  DashboardId,
   DashboardTab,
+  EntityCustomDestinationClickBehavior,
 } from "metabase-types/api";
 
-import { Heading } from "../../ClickBehaviorSidebar.styled";
+import { Heading } from "../../ClickBehaviorSidebarComponents";
 import { SidebarItem } from "../../SidebarItem";
-import {
-  LinkTargetEntityPickerContent,
-  SelectedEntityPickerIcon,
-  SelectedEntityPickerContent,
-} from "../LinkOptions.styled";
+import S from "../LinkOptions.module.css";
 
 const LINK_TARGETS = {
   question: {
@@ -75,16 +75,30 @@ function PickerControl({
   }, [Entity, clickBehavior.targetId, getPickerButtonLabel]);
 
   return (
-    <SidebarItem.Selectable isSelected padded={false}>
-      <LinkTargetEntityPickerContent onClick={onClick}>
-        <SelectedEntityPickerIcon name={pickerIcon} />
-        <SelectedEntityPickerContent>
-          {renderLabel()}
-          <Icon name="chevrondown" size={12} className={CS.mlAuto} />
-        </SelectedEntityPickerContent>
-      </LinkTargetEntityPickerContent>
-      <SidebarItem.CloseIcon onClick={onCancel} />
-    </SidebarItem.Selectable>
+    <Button.Group>
+      <Button
+        onClick={onClick}
+        justify="flex-start"
+        leftSection={<Icon name={pickerIcon} />}
+        rightSection={<Icon name="chevrondown" size={12} />}
+        size="lg"
+        variant="filled"
+        classNames={{
+          root: S.ButtonRoot,
+          label: S.ButtonLabel,
+        }}
+        w="100%"
+      >
+        <SidebarItem.Name>{renderLabel()}</SidebarItem.Name>
+      </Button>
+      <Button
+        onClick={onCancel}
+        miw="3rem"
+        size="lg"
+        variant="filled"
+        rightSection={<Icon name="close" />}
+      />
+    </Button.Group>
   );
 }
 
@@ -97,32 +111,57 @@ function getTargetClickMappingsHeading(entity: Question | Dashboard) {
 }
 
 function TargetClickMappings({
-  isDashboard,
   clickBehavior,
   dashcard,
   updateSettings,
 }: {
-  isDashboard: boolean;
   clickBehavior: EntityCustomDestinationClickBehavior;
-  dashcard: QuestionDashboardCard;
+  dashcard: DashboardCard;
   updateSettings: (settings: Partial<ClickBehavior>) => void;
 }) {
-  const Entity = isDashboard ? Dashboards : Questions;
+  const isDashboard = clickBehavior.linkType === "dashboard";
+  const {
+    data: dashboard,
+    isLoading: dashboardIsLoading,
+    error: dashboardError,
+  } = useGetDashboardQuery(
+    isDashboard && clickBehavior.targetId != null
+      ? { id: clickBehavior.targetId }
+      : skipToken,
+  );
+  const {
+    data: card,
+    isLoading: cardIsLoading,
+    error: cardError,
+  } = useGetCardQuery(
+    !isDashboard && clickBehavior.targetId != null
+      ? { id: clickBehavior.targetId }
+      : skipToken,
+  );
+  const metadata = useSelector(getMetadata);
+  const question = useMemo(() => {
+    return card ? new Question(card, metadata) : undefined;
+  }, [card, metadata]);
+
+  const object = isDashboard ? dashboard : question;
+  const isLoading = isDashboard ? dashboardIsLoading : cardIsLoading;
+  const error = isDashboard ? dashboardError : cardError;
+
+  if (error || isLoading) {
+    return <LoadingAndErrorWrapper error={error} loading={isLoading} />;
+  }
+
   return (
-    <Entity.Loader id={clickBehavior.targetId}>
-      {({ object }: { object: Question | Dashboard }) => (
-        <div className={CS.pt1}>
-          <Heading>{getTargetClickMappingsHeading(object)}</Heading>
-          <ClickMappingsConnected
-            object={object}
-            dashcard={dashcard}
-            isDashboard={isDashboard}
-            clickBehavior={clickBehavior}
-            updateSettings={updateSettings}
-          />
-        </div>
-      )}
-    </Entity.Loader>
+    <div className={CS.pt1}>
+      <Heading>{getTargetClickMappingsHeading(checkNotNull(object))}</Heading>
+      <ClickMappingsConnected
+        object={object}
+        dashcard={dashcard}
+        isDashboard={isDashboard}
+        clickBehavior={clickBehavior}
+        updateSettings={updateSettings}
+      />
+    </div>
   );
 }
 
@@ -131,7 +170,7 @@ export function LinkedEntityPicker({
   clickBehavior,
   updateSettings,
 }: {
-  dashcard: QuestionDashboardCard;
+  dashcard: DashboardCard;
   clickBehavior: EntityCustomDestinationClickBehavior;
   updateSettings: (settings: Partial<ClickBehavior>) => void;
 }) {
@@ -186,10 +225,10 @@ export function LinkedEntityPicker({
   const dashboardTabs = targetDashboard?.tabs ?? NO_DASHBOARD_TABS;
   const defaultDashboardTabId: number | undefined = dashboardTabs[0]?.id;
   const dashboardTabId = isDashboard
-    ? clickBehavior.tabId ?? defaultDashboardTabId
+    ? (clickBehavior.tabId ?? defaultDashboardTabId)
     : undefined;
   const dashboardTabExists = dashboardTabs.some(
-    tab => tab.id === dashboardTabId,
+    (tab) => tab.id === dashboardTabId,
   );
   const dashboardTabIdValue =
     typeof dashboardTabId === "undefined" ? undefined : String(dashboardTabId);
@@ -264,7 +303,7 @@ export function LinkedEntityPicker({
         <PickerComponent
           title={getModalTitle()}
           value={initialPickerValue as any} // typescript isn't smart enough to know which picker we're using
-          onChange={newTarget => {
+          onChange={(newTarget) => {
             handleSelectLinkTargetEntityId(newTarget.id);
             setIsPickerOpen(false);
           }}
@@ -284,7 +323,7 @@ export function LinkedEntityPicker({
               ? undefined
               : t`The selected tab is no longer available`
           }
-          data={dashboardTabs.map(tab => ({
+          data={dashboardTabs.map((tab) => ({
             label: tab.name,
             value: String(tab.id),
           }))}
@@ -297,7 +336,6 @@ export function LinkedEntityPicker({
 
       {hasSelectedTarget && (
         <TargetClickMappings
-          isDashboard={isDashboard}
           clickBehavior={clickBehavior}
           dashcard={dashcard}
           updateSettings={updateSettings}

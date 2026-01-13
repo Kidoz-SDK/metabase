@@ -6,7 +6,7 @@ redirect_from:
 
 # Events and timelines
 
-A lot of discussions around data have a moment when someone asks a question related to a specific point in time: "Wait, what's the spike in March again?", or "When did the new widget launch?"
+A lot of discussions around data have a moment when someone has a question related to a specific point in time: "Wait, what's the spike in March again?", or "When did the new widget launch?"
 
 Events and timelines are a way to capture that chronological knowledge and make it available when you need it, in context (that is, when you're viewing a chart). Events are a great way to store institutional knowledge about what happened and when, so people (including yourself three months from now) won't have to figure out (again) why the line chart spiked back in March.
 
@@ -31,7 +31,6 @@ Collections can have timelines, and timelines can contain events. In practice wh
 - If you don't explicitly create a timeline yet, but you do create events, Metabase will automatically create a timeline for you (which acts as the default timeline for the collection).
 - You can have multiple timelines for the same collection.
 - Timelines associated with collections do not apply to that collection's sub-collections.
-
 
 ### Adding events when viewing a collection
 
@@ -97,7 +96,7 @@ To archive a timeline:
 
 ### View archived events and timelines
 
-> Archived events and timelines can only be viewed from the collection. They don't show up in the [main archive](../exploration-and-organization/history.md).
+> Archived events and timelines can only be viewed from the collection. They don't show up in the [Trash](../exploration-and-organization/delete-and-restore.md).
 
 To view (and resurrect) archived timelines and events:
 
@@ -125,4 +124,4 @@ Note that for questions outside of that collection, you can only temporarily app
 
 ## Further reading
 
-- [Keeping your Metabase organized](https://www.metabase.com/learn/administration/same-page)
+- [Keeping your Metabase organized](https://www.metabase.com/learn/metabase-basics/administration/administration-and-operation/same-page)

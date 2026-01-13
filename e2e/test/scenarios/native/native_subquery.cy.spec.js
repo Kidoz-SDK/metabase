@@ -1,28 +1,21 @@
-import { ORDERS_QUESTION_ID } from "e2e/support/cypress_sample_instance_data";
+const { H } = cy;
 import {
-  openNativeEditor,
-  openQuestionActions,
-  restore,
-  visitQuestion,
-  startNewNativeQuestion,
-  runNativeQuery,
-  entityPickerModal,
-} from "e2e/support/helpers";
-
-import * as SQLFilter from "../native-filters/helpers/e2e-sql-filter-helpers";
+  ADMIN_PERSONAL_COLLECTION_ID,
+  ORDERS_QUESTION_ID,
+} from "e2e/support/cypress_sample_instance_data";
 
 describe("scenarios > question > native subquery", () => {
   beforeEach(() => {
-    restore();
+    H.restore();
     cy.signInAsAdmin();
   });
 
   it("typing a card tag should open the data reference", () => {
-    cy.createNativeQuestion({
+    H.createNativeQuestion({
       name: "A People Question",
       native: { query: "SELECT id AS a_unique_column_name FROM PEOPLE" },
     }).then(({ body: { id: questionId1 } }) => {
-      cy.createNativeQuestion({
+      H.createNativeQuestion({
         name: "A People Model",
         native: {
           query: "SELECT id AS another_unique_column_name FROM PEOPLE",
@@ -32,7 +25,7 @@ describe("scenarios > question > native subquery", () => {
         const tagName1 = `#${questionId1}-a-people-question`;
         const queryText = `{{${tagName1}}}`;
         // create a question with a template tag
-        cy.createNativeQuestion({
+        H.createNativeQuestion({
           name: "Count of People",
           native: { query: queryText },
         }).then(({ body: { id: questionId3 } }) => {
@@ -42,16 +35,13 @@ describe("scenarios > question > native subquery", () => {
           cy.reload();
           cy.findByText("Open Editor").click();
           // placing the cursor inside an existing template tag should open the data reference
-          cy.get(".ace_content:visible").type("{leftarrow}");
+          H.NativeEditor.focus().type("{leftarrow}{leftarrow}");
           cy.findByText("A People Question");
           // subsequently moving the cursor out from the tag should keep the data reference open
-          cy.get(".ace_content:visible").type("{rightarrow}");
+          H.NativeEditor.focus().type("{rightarrow}");
           cy.findByText("A People Question");
           // typing a template tag id should open the editor
-          cy.get(".ace_editor:not(.ace_autocomplete)")
-            .type(" ")
-            .type("{{#")
-            .type(`{leftarrow}{leftarrow}${questionId2}`);
+          H.NativeEditor.focus().type(" ").type(`{{#${questionId2}`);
           cy.findByText("A People Model");
         });
       });
@@ -60,62 +50,64 @@ describe("scenarios > question > native subquery", () => {
 
   it("autocomplete should complete question slugs inside template tags", () => {
     // Create a question and a model.
-    cy.createNativeQuestion({
+    H.createNativeQuestion({
       name: "A People Question",
       native: {
         query: "SELECT id FROM PEOPLE",
       },
     }).then(({ body: { id: questionId1 } }) => {
-      cy.createNativeQuestion({
+      H.createNativeQuestion({
         name: "A People Model",
         native: {
           query: "SELECT id FROM PEOPLE",
         },
         type: "model",
+        collection_id: ADMIN_PERSONAL_COLLECTION_ID,
       }).then(({ body: { id: questionId2 } }) => {
         // Move question 2 to personal collection
         cy.visit(`/question/${questionId2}`);
-        openQuestionActions();
+        H.openQuestionActions();
         cy.findByTestId("move-button").click();
-        entityPickerModal().within(() => {
+        H.entityPickerModal().within(() => {
           cy.findByRole("tab", { name: /Collections/ }).click();
           cy.findByText("Bobby Tables's Personal Collection").click();
           cy.button("Move").click();
         });
 
-        openNativeEditor();
+        H.startNewNativeQuestion();
         cy.reload(); // Refresh the state, so previously created questions need to be loaded again.
-        cy.get(".ace_editor").should("be.visible").type(" ").type("{{#people");
+        H.NativeEditor.focus();
+
+        cy.wait(200); // This reduces flakiness
+
+        H.NativeEditor.focus().type(" {{#people");
 
         // Wait until another explicit autocomplete is triggered
         // (slightly longer than AUTOCOMPLETE_DEBOUNCE_DURATION)
         // See https://github.com/metabase/metabase/pull/20970
         cy.wait(1000);
-        cy.get(".ace_autocomplete")
-          .should("be.visible")
-          .findByText(`${questionId2}-a-`);
-        cy.get(".ace_autocomplete")
-          .should("be.visible")
-          .findByText("Model in Bobby Tables's Personal Collection");
-        cy.get(".ace_autocomplete")
-          .should("be.visible")
-          .findByText(`${questionId1}-a-`);
-        cy.get(".ace_autocomplete")
-          .should("be.visible")
-          .findByText("Question in Our analytics");
+
+        H.NativeEditor.completions().within(() => {
+          H.NativeEditor.completion(`${questionId2}-a-`)
+            .should("be.visible")
+            .should("contain", "Model in Bobby Tables's Personal Collection");
+          H.NativeEditor.completion(`${questionId1}-a-`)
+            .should("be.visible")
+            .should("contain", "Question in Our analytics");
+        });
       });
     });
   });
 
   it("autocomplete should work for columns from referenced questions", () => {
     // Create two saved questions, the first will be referenced in the query when it is opened, and the second will be added to the query after it is opened.
-    cy.createNativeQuestion({
+    H.createNativeQuestion({
       name: "A People Question 1",
       native: {
         query: "SELECT id AS a_unique_column_name FROM PEOPLE",
       },
     }).then(({ body: { id: questionId1 } }) => {
-      cy.createNativeQuestion({
+      H.createNativeQuestion({
         name: "A People Question 2",
         native: {
           query: "SELECT id AS another_unique_column_name FROM PEOPLE",
@@ -124,7 +116,7 @@ describe("scenarios > question > native subquery", () => {
         const tagID = `#${questionId1}`;
 
         // create a question with a template tag
-        cy.createNativeQuestion({
+        H.createNativeQuestion({
           name: "Count of People",
           native: {
             query: `select COUNT(*) from {{#${questionId1}}}`,
@@ -145,42 +137,34 @@ describe("scenarios > question > native subquery", () => {
           // Refresh the state, so previously created questions need to be loaded again.
           cy.reload();
           cy.findByText("Open Editor").click();
-          cy.get(".ace_editor").should("be.visible").type(" ").type("a_unique");
+          H.NativeEditor.focus().type(" ").type("a_unique");
 
           // Wait until another explicit autocomplete is triggered
           // (slightly longer than AUTOCOMPLETE_DEBOUNCE_DURATION)
           // See https://github.com/metabase/metabase/pull/20970
           cy.wait(1000);
 
-          cy.get(".ace_autocomplete")
-            .should("be.visible")
-            .findByText("A_UNIQUE");
+          H.NativeEditor.completion("A_UNIQUE_COLUMN_NAME").should(
+            "be.visible",
+          );
 
-          // For some reason, typing `{{#${questionId2}}}` in one go isn't deterministic,
-          // so type it in two parts
-          cy.get(".ace_editor:not(.ace_autocomplete)")
-            .type(" {{#")
-            .type(`{leftarrow}{leftarrow}${questionId2}`);
+          H.NativeEditor.focus().type(` {{#${questionId2}}}`);
 
           // Wait until another explicit autocomplete is triggered
-          cy.wait(1000);
+          // cy.wait(1000);
 
           // Again, typing in in one go doesn't always work
           // so type it in two parts
-          cy.get(".ace_editor:not(.ace_autocomplete)")
-            .type(" ")
-            .type("another");
+          H.NativeEditor.focus().type(" ").type("another");
 
-          cy.get(".ace_autocomplete")
-            .should("be.visible")
-            .findByText("ANOTHER");
+          H.NativeEditor.completions("ANOTHER").should("be.visible");
         });
       });
     });
   });
 
   it("card reference tags should update when the name of the card changes", () => {
-    cy.createNativeQuestion({
+    H.createNativeQuestion({
       name: "A People Question 1",
       native: {
         query: "SELECT id AS a_unique_column_name FROM PEOPLE",
@@ -188,7 +172,7 @@ describe("scenarios > question > native subquery", () => {
     }).then(({ body: { id: questionId1 } }) => {
       cy.wrap(questionId1).as("questionId");
       const tagID = `#${questionId1}`;
-      cy.createNativeQuestion({
+      H.createNativeQuestion({
         name: "Count of People",
         native: {
           query: `select COUNT(*) from {{#${questionId1}}}`,
@@ -206,10 +190,10 @@ describe("scenarios > question > native subquery", () => {
         // check the original name is in the query
         cy.visit(`/question/${questionId2}`);
         cy.findByText("Open Editor").click();
-        cy.get("@questionId").then(questionId => {
-          cy.get(".ace_content:visible").contains(
-            `{{#${questionId}-a-people-question-1}}`,
-          );
+        cy.get("@questionId").then((questionId) => {
+          H.NativeEditor.get()
+            .should("be.visible")
+            .and("contain", `{{#${questionId}-a-people-question-1}}`);
         });
 
         // change the name
@@ -221,10 +205,10 @@ describe("scenarios > question > native subquery", () => {
         // check the name has changed
         cy.visit(`/question/${questionId2}`);
         cy.findByText("Open Editor").click();
-        cy.get("@questionId").then(questionId => {
-          cy.get(".ace_content:visible").contains(
-            `{{#${questionId}-a-people-question-1-changed}}`,
-          );
+        cy.get("@questionId").then((questionId) => {
+          H.NativeEditor.get()
+            .should("be.visible")
+            .and("contain", `{{#${questionId}-a-people-question-1-changed}}`);
         });
       });
     });
@@ -232,17 +216,17 @@ describe("scenarios > question > native subquery", () => {
 
   it("should allow a user with no data access to execute a native subquery", () => {
     // Create the initial SQL question and followup nested question
-    cy.createNativeQuestion({
+    H.createNativeQuestion({
       name: "People in WA",
       native: {
         query: "select * from PEOPLE where STATE = 'WA'",
       },
     })
-      .then(response => {
+      .then((response) => {
         cy.wrap(response.body.id).as("nestedQuestionId");
         const tagID = `#${response.body.id}`;
 
-        cy.createNativeQuestion({
+        H.createNativeQuestion({
           name: "Count of People in WA",
           native: {
             query: `select COUNT(*) from {{#${response.body.id}}}`,
@@ -258,7 +242,7 @@ describe("scenarios > question > native subquery", () => {
           },
         });
       })
-      .then(response => {
+      .then((response) => {
         cy.wrap(response.body.id).as("toplevelQuestionId");
 
         cy.visit(`/question/${response.body.id}`);
@@ -269,14 +253,17 @@ describe("scenarios > question > native subquery", () => {
     cy.signIn("nodata");
 
     // They should be able to access both questions
-    visitQuestion("@nestedQuestionId");
+    H.visitQuestion("@nestedQuestionId");
     cy.findByTestId("question-row-count").should(
       "have.text",
       "Showing 41 rows",
     );
 
-    visitQuestion("@toplevelQuestionId");
-    cy.get("#main-data-grid [data-testid=cell-data]").should("have.text", "41");
+    H.visitQuestion("@toplevelQuestionId");
+    H.tableInteractiveBody()
+      .findAllByTestId("cell-data")
+      .eq(0)
+      .should("have.text", "41");
   });
 
   it("should be able to reference a nested question (metabase#25988)", () => {
@@ -288,47 +275,41 @@ describe("scenarios > question > native subquery", () => {
       },
     };
 
-    cy.createQuestion(questionDetails).then(
+    H.createQuestion(questionDetails).then(
       ({ body: { id: nestedQuestionId } }) => {
         const tagID = `#${nestedQuestionId}`;
         cy.intercept("GET", `/api/card/${nestedQuestionId}`).as("loadQuestion");
 
-        startNewNativeQuestion();
-        SQLFilter.enterParameterizedQuery(`SELECT * FROM {{${tagID}`);
+        H.startNewNativeQuestion();
+        H.NativeEditor.type(`SELECT * FROM {{${tagID}`);
         cy.wait("@loadQuestion");
         cy.findByTestId("sidebar-header-title").should(
           "have.text",
           questionDetails.name,
         );
 
-        runNativeQuery();
-
-        cy.get("[data-testid=cell-data]").should("contain", "37.65");
+        H.runNativeQuery();
+        cy.findAllByTestId("cell-data").should("contain", "37.65");
       },
     );
   });
 
-  it(
-    "should be able to reference a saved native question that ends with a semicolon `;` (metabase#28218)",
-    { tags: "@flaky" },
-    () => {
-      const questionDetails = {
-        name: "28218",
-        native: { query: "select 1;" }, // semicolon is important here
-      };
+  it("should be able to reference a saved native question that ends with a semicolon `;` (metabase#28218)", () => {
+    const questionDetails = {
+      name: "28218",
+      native: { query: "select 1;" }, // semicolon is important here
+    };
 
-      cy.createNativeQuestion(questionDetails).then(
-        ({ body: { id: baseQuestionId } }) => {
-          const tagID = `#${baseQuestionId}`;
+    H.createNativeQuestion(questionDetails).then(
+      ({ body: { id: baseQuestionId } }) => {
+        const tagID = `#${baseQuestionId}`;
 
-          startNewNativeQuestion();
-          SQLFilter.enterParameterizedQuery(`SELECT * FROM {{${tagID}`);
+        H.startNewNativeQuestion({ display: "table" });
+        H.NativeEditor.type(`SELECT * FROM {{${tagID}`);
 
-          runNativeQuery();
-
-          cy.get("[data-testid=cell-data]").should("contain", "1");
-        },
-      );
-    },
-  );
+        H.runNativeQuery();
+        cy.findAllByTestId("cell-data").should("contain", "1");
+      },
+    );
+  });
 });

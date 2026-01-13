@@ -3,9 +3,9 @@ import _ from "underscore";
 import { isNotNull } from "metabase/lib/types";
 import type { RemappingHydratedDatasetColumn } from "metabase/visualizations/types";
 import type {
+  DatasetColumn,
   DatasetData,
   VisualizationSettings,
-  DatasetColumn,
 } from "metabase-types/api";
 
 export type ColumnDescriptor = {
@@ -17,14 +17,20 @@ export const getColumnDescriptors = <TColumn extends DatasetColumn>(
   columnNames: string[],
   columns: TColumn[],
 ): ColumnDescriptor[] => {
-  return columnNames.map(columnName => {
-    const index = columns.findIndex(column => column.name === columnName);
+  const result: ColumnDescriptor[] = [];
 
-    return {
-      index,
-      column: columns[index],
-    };
+  columnNames.forEach((columnName) => {
+    const index = columns.findIndex((column) => column.name === columnName);
+
+    if (index > -1) {
+      result.push({
+        index,
+        column: columns[index],
+      });
+    }
   });
+
+  return result;
 };
 
 export const hasValidColumnsSelected = (
@@ -32,14 +38,14 @@ export const hasValidColumnsSelected = (
   data: DatasetData,
 ) => {
   const metricColumns = (visualizationSettings["graph.metrics"] ?? [])
-    .map(metricColumnName =>
-      data.cols.find(column => column.name === metricColumnName),
+    .map((metricColumnName) =>
+      data.cols.find((column) => column.name === metricColumnName),
     )
     .filter(isNotNull);
 
   const dimensionColumns = (visualizationSettings["graph.dimensions"] ?? [])
-    .map(dimensionColumnName =>
-      data.cols.find(column => column.name === dimensionColumnName),
+    .map((dimensionColumnName) =>
+      data.cols.find((column) => column.name === dimensionColumnName),
     )
     .filter(isNotNull);
 

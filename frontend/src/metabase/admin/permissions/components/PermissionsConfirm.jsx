@@ -1,9 +1,9 @@
 /* eslint-disable react/prop-types */
-import { t, jt, ngettext, msgid } from "ttag";
+import { jt, msgid, ngettext, t } from "ttag";
 
 import { DataPermissionValue } from "metabase/admin/permissions/types";
-import Tooltip from "metabase/core/components/Tooltip";
 import CS from "metabase/css/core/index.css";
+import { Tooltip } from "metabase/ui";
 
 const GroupName = ({ group }) => (
   <span className={CS.textBrand}>{group.name}</span>
@@ -19,7 +19,7 @@ const TableAccessChange = ({ tables, verb, colorClassName }) => {
     <span>
       {verb}
       <Tooltip
-        tooltip={
+        label={
           <div className={CS.p1}>
             {tableEntries.map(([id, table]) => (
               <div key={id}>{table.name}</div>
@@ -30,7 +30,7 @@ const TableAccessChange = ({ tables, verb, colorClassName }) => {
         <span>
           <span className={colorClassName}>
             {" " +
-              (n => ngettext(msgid`${n} table`, `${n} tables`, n))(
+              ((n) => ngettext(msgid`${n} table`, `${n} tables`, n))(
                 tableEntries.length,
               )}
           </span>
@@ -73,27 +73,27 @@ const PermissionsConfirm = ({ diff }) => (
             <div>
               {database.native === DataPermissionValue.QUERY_BUILDER &&
                 jt`${(
-                  <GroupName group={group} />
+                  <GroupName key="group-name" group={group} />
                 )} will only be able to use the query
-                  builder for ${(<DatabaseName database={database} />)}.`}
+                  builder for ${(<DatabaseName key="database-name" database={database} />)}.`}
               {database.native ===
                 DataPermissionValue.QUERY_BUILDER_AND_NATIVE &&
                 jt`${(
-                  <GroupName group={group} />
+                  <GroupName key="group-name" group={group} />
                 )} will be able to use the query builder and write native queries for ${(
-                  <DatabaseName database={database} />
+                  <DatabaseName key="database-name" database={database} />
                 )}.`}
               {database.native === DataPermissionValue.NO &&
                 jt`${(
-                  <GroupName group={group} />
+                  <GroupName key="group-name" group={group} />
                 )} will not be able to use the query builder or write native queries for ${(
-                  <DatabaseName database={database} />
+                  <DatabaseName key="database-name" database={database} />
                 )}.`}
               {database.native === DataPermissionValue.CONTROLLED &&
                 jt`${(
-                  <GroupName group={group} />
+                  <GroupName key="group-name" group={group} />
                 )} will have granular query creation permissions for ${(
-                  <DatabaseName database={database} />
+                  <DatabaseName key="database-name" database={database} />
                 )}.`}
             </div>
           )}

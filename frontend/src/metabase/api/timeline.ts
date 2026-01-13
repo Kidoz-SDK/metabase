@@ -13,18 +13,18 @@ import {
   idTag,
   invalidateTags,
   listTag,
-  tag,
   provideTimelineListTags,
   provideTimelineTags,
+  tag,
 } from "./tags";
 
 export const timelineApi = Api.injectEndpoints({
-  endpoints: builder => ({
+  endpoints: (builder) => ({
     listTimelines: builder.query<Timeline[], ListTimelinesRequest>({
-      query: body => ({
+      query: (params) => ({
         method: "GET",
         url: "/api/timeline",
-        body,
+        params,
       }),
       providesTags: (timelines = []) => provideTimelineListTags(timelines),
     }),
@@ -32,23 +32,24 @@ export const timelineApi = Api.injectEndpoints({
       Timeline[],
       ListCollectionTimelinesRequest
     >({
-      query: ({ id, ...body }) => ({
+      query: ({ id, ...params }) => ({
         method: "GET",
-        url: `/api/collection/${id}/timelines`,
-        body,
+        url: `/api/timeline/collection/${id}`,
+        params,
       }),
       providesTags: (timelines = []) => provideTimelineListTags(timelines),
     }),
     getTimeline: builder.query<Timeline, GetTimelineRequest>({
-      query: ({ id, ...body }) => ({
+      query: ({ id, ...params }) => ({
         method: "GET",
         url: `/api/timeline/${id}`,
-        body,
+        params,
       }),
-      providesTags: timeline => (timeline ? provideTimelineTags(timeline) : []),
+      providesTags: (timeline) =>
+        timeline ? provideTimelineTags(timeline) : [],
     }),
     createTimeline: builder.mutation<Timeline, CreateTimelineRequest>({
-      query: body => ({
+      query: (body) => ({
         method: "POST",
         url: "/api/timeline",
         body,
@@ -70,7 +71,7 @@ export const timelineApi = Api.injectEndpoints({
         ]),
     }),
     deleteTimeline: builder.mutation<Timeline, TimelineId>({
-      query: id => ({
+      query: (id) => ({
         method: "DELETE",
         url: `/api/timeline/${id}`,
       }),
@@ -85,6 +86,7 @@ export const timelineApi = Api.injectEndpoints({
 });
 
 export const {
+  useListCollectionTimelinesQuery,
   useListTimelinesQuery,
   useGetTimelineQuery,
   useCreateTimelineMutation,

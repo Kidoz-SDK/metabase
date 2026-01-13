@@ -12,7 +12,8 @@
   Extra constraints:
 
   - MBQL stages only
-  - Database must support `:regex` feature for the URL and Email extractions to work."
+  - Database must support `:regex/lookaheads-and-lookbehinds` feature for the URL and Email extractions to work."
+  (:refer-clojure :exclude [select-keys not-empty])
   (:require
    [medley.core :as m]
    [metabase.lib.drill-thru.column-filter :as lib.drill-thru.column-filter]
@@ -23,8 +24,9 @@
    [metabase.lib.schema.drill-thru :as lib.schema.drill-thru]
    [metabase.lib.schema.extraction :as lib.schema.extraction]
    [metabase.lib.types.isa :as lib.types.isa]
-   [metabase.shared.util.i18n :as i18n]
-   [metabase.util.malli :as mu]))
+   [metabase.util.i18n :as i18n]
+   [metabase.util.malli :as mu]
+   [metabase.util.performance :refer [select-keys not-empty]]))
 
 (defn- column-extract-drill-for-column [query column]
   (when-let [extractions (not-empty (lib.extraction/column-extractions query column))]
@@ -45,11 +47,12 @@
              (nil? value)
              (lib.drill-thru.common/mbql-stage? query stage-number))
     (when-let [drill (column-extract-drill-for-column query column)]
-      (merge drill
-             {:lib/type :metabase.lib.drill-thru/drill-thru
-              :type     :drill-thru/column-extract}
-             (lib.drill-thru.column-filter/prepare-query-for-drill-addition
-               query stage-number column column-ref :expression)))))
+      (when-let [drill-details (lib.drill-thru.column-filter/prepare-query-for-drill-addition
+                                query stage-number column column-ref :expression)]
+        (merge drill
+               drill-details
+               {:lib/type :metabase.lib.drill-thru/drill-thru
+                :type     :drill-thru/column-extract})))))
 
 (mu/defn extractions-for-drill :- [:sequential ::lib.schema.extraction/extraction]
   "Returns the extractions from a given drill."

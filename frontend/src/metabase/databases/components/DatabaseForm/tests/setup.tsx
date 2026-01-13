@@ -1,12 +1,19 @@
-import { setupEnterprisePlugins } from "__support__/enterprise";
+import { setupEnterpriseOnlyPlugin } from "__support__/enterprise";
 import { mockSettings } from "__support__/settings";
 import { renderWithProviders } from "__support__/ui";
-import type { Engine, Settings } from "metabase-types/api";
+import type {
+  DatabaseData,
+  Engine,
+  EngineKey,
+  Settings,
+} from "metabase-types/api";
 import { createMockState } from "metabase-types/store/mocks";
 
 import { DatabaseForm } from "../DatabaseForm";
 
-const TEST_ENGINES: Record<string, Engine> = {
+import { postgresFormConfig } from "./postgres-form-config.mock";
+
+export const TEST_ENGINES: Record<string, Engine> = {
   h2: {
     source: {
       type: "official",
@@ -77,39 +84,60 @@ const TEST_ENGINES: Record<string, Engine> = {
           "advanced-options": true,
         },
       },
+      {
+        name: "is-destination-database",
+        type: "hidden",
+        default: false,
+      },
     ],
     "driver-name": "H2",
     "superseded-by": null,
+    "extra-info": null,
   },
+  postgres: postgresFormConfig,
 };
 
 export interface SetupOpts {
   settings?: Settings;
-  isCachingEnabled?: boolean;
-  hasEnterprisePlugins?: boolean;
+  enterprisePlugins?: Parameters<typeof setupEnterpriseOnlyPlugin>[0][];
+  engines?: Record<string, Engine>;
+  initialValues?: Partial<DatabaseData> & { engine?: EngineKey };
+  isAdvanced?: boolean;
 }
 
 export const setup = ({
   settings,
-  isCachingEnabled,
-  hasEnterprisePlugins,
+  enterprisePlugins,
+  engines = TEST_ENGINES,
+  initialValues = {},
+  isAdvanced = true,
 }: SetupOpts = {}) => {
   const state = createMockState({
-    settings: mockSettings({
-      ...settings,
-      engines: TEST_ENGINES,
-      "enable-query-caching": isCachingEnabled,
-    }),
+    settings: mockSettings({ ...settings, engines }),
   });
 
-  if (hasEnterprisePlugins) {
-    setupEnterprisePlugins();
+  if (enterprisePlugins) {
+    enterprisePlugins.forEach((plugin) => {
+      setupEnterpriseOnlyPlugin(plugin);
+    });
   }
 
   const onSubmit = jest.fn();
-  renderWithProviders(<DatabaseForm isAdvanced onSubmit={onSubmit} />, {
-    storeInitialState: state,
-  });
+
+  renderWithProviders(
+    <DatabaseForm
+      initialValues={{
+        engine: "h2",
+        ...initialValues,
+      }}
+      config={{ isAdvanced }}
+      onSubmit={onSubmit}
+      location="admin"
+    />,
+    {
+      storeInitialState: state,
+    },
+  );
 
   return { onSubmit };
 };

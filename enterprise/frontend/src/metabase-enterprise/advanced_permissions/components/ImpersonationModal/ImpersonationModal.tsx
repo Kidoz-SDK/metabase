@@ -1,5 +1,4 @@
 import { useCallback } from "react";
-import { useSelector } from "react-redux";
 import { withRouter } from "react-router";
 import { push } from "react-router-redux";
 import { useAsyncFn, useMount } from "react-use";
@@ -10,22 +9,22 @@ import {
   DataPermissionType,
   DataPermissionValue,
 } from "metabase/admin/permissions/types";
+import { LoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper";
 import { useDatabaseQuery } from "metabase/common/hooks";
-import LoadingAndErrorWrapper from "metabase/components/LoadingAndErrorWrapper/LoadingAndErrorWrapper";
 import { getParentPath } from "metabase/hoc/ModalRoute";
 import { useDispatch } from "metabase/lib/redux";
 import { updateImpersonation } from "metabase-enterprise/advanced_permissions/reducer";
 import { getImpersonation } from "metabase-enterprise/advanced_permissions/selectors";
 import type {
-  AdvancedPermissionsStoreState,
   ImpersonationModalParams,
   ImpersonationParams,
 } from "metabase-enterprise/advanced_permissions/types";
 import { getImpersonatedDatabaseId } from "metabase-enterprise/advanced_permissions/utils";
+import { useEnterpriseSelector } from "metabase-enterprise/redux";
 import { ImpersonationApi } from "metabase-enterprise/services";
 import { fetchUserAttributes } from "metabase-enterprise/shared/reducer";
 import { getUserAttributes } from "metabase-enterprise/shared/selectors";
-import type { Impersonation, UserAttribute } from "metabase-types/api";
+import type { Impersonation, UserAttributeKey } from "metabase-types/api";
 
 import { ImpersonationModalView } from "./ImpersonationModalView";
 
@@ -76,11 +75,10 @@ const _ImpersonationModal = ({ route, params }: ImpersonationModalProps) => {
     id: databaseId,
   });
 
-  const attributes = useSelector(getUserAttributes);
-  const draftImpersonation = useSelector<
-    AdvancedPermissionsStoreState,
-    Impersonation | undefined
-  >(getImpersonation(databaseId, groupId));
+  const attributes = useEnterpriseSelector(getUserAttributes);
+  const draftImpersonation = useEnterpriseSelector(
+    getImpersonation(databaseId, groupId),
+  );
 
   const selectedAttribute =
     draftImpersonation?.attribute ?? impersonation?.attribute;
@@ -92,7 +90,7 @@ const _ImpersonationModal = ({ route, params }: ImpersonationModalProps) => {
   }, [dispatch, route]);
 
   const handleSave = useCallback(
-    (attribute: UserAttribute) => {
+    (attribute: UserAttributeKey) => {
       dispatch(
         updateDataPermission({
           groupId,

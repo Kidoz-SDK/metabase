@@ -1,37 +1,35 @@
-import { useCallback, useMemo, useState } from "react";
+import { type ChangeEvent, useCallback, useMemo, useState } from "react";
 import { t } from "ttag";
-import _ from "underscore";
 
-import { getColumnGroupName } from "metabase/common/utils/column-groups";
-import Input from "metabase/core/components/Input";
-import { useDebouncedValue } from "metabase/hooks/use-debounced-value";
+import Input from "metabase/common/components/Input";
+import { useDebouncedValue } from "metabase/common/hooks/use-debounced-value";
 import { SEARCH_DEBOUNCE_DURATION } from "metabase/lib/constants";
-import { DelayGroup } from "metabase/ui";
+import { isNotNull } from "metabase/lib/types";
+import {
+  type UpdateQueryHookProps,
+  useBreakoutQueryHandlers,
+} from "metabase/query_builder/hooks";
+import { Box, DelayGroup } from "metabase/ui";
 import * as Lib from "metabase-lib";
 
-import { ColumnGroupName, SearchContainer } from "./BreakoutColumnList.styled";
+import BreakoutColumnListS from "./BreakoutColumnList.module.css";
 import { BreakoutColumnListItem } from "./BreakoutColumnListItem";
+import { getBreakoutListItem, getColumnSections, isPinnedColumn } from "./util";
 
-const STAGE_INDEX = -1;
-
-export interface BreakoutColumnListProps {
-  query: Lib.Query;
-  onAddBreakout: (column: Lib.ColumnMetadata) => void;
-  onUpdateBreakout: (
-    breakout: Lib.BreakoutClause,
-    nextColumn: Lib.ColumnMetadata,
-  ) => void;
-  onRemoveBreakout: (column: Lib.ColumnMetadata) => void;
-  onReplaceBreakout: (column: Lib.ColumnMetadata) => void;
-}
+export type BreakoutColumnListProps = UpdateQueryHookProps;
 
 export function BreakoutColumnList({
   query,
-  onAddBreakout,
-  onUpdateBreakout,
-  onRemoveBreakout,
-  onReplaceBreakout,
+  onQueryChange,
+  stageIndex = -1,
 }: BreakoutColumnListProps) {
+  const {
+    onAddBreakout,
+    onUpdateBreakout,
+    onRemoveBreakout,
+    onReplaceBreakouts,
+  } = useBreakoutQueryHandlers({ query, onQueryChange, stageIndex });
+
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedSearchQuery = useDebouncedValue(
     searchQuery,
@@ -39,64 +37,67 @@ export function BreakoutColumnList({
   );
   const isSearching = searchQuery.trim().length > 0;
 
-  const breakouts = Lib.breakouts(query, STAGE_INDEX);
-  const [pinnedBreakouts, setPinnedBreakouts] = useState(breakouts);
-
-  const allColumns = useMemo(
-    () => Lib.breakoutableColumns(query, STAGE_INDEX),
-    [query],
-  );
-
-  const [pinnedColumns, unpinnedColumns] = useMemo(
-    () =>
-      _.partition(allColumns, column =>
-        isPinnedColumn(query, pinnedBreakouts, column),
-      ),
-    [query, pinnedBreakouts, allColumns],
-  );
+  const breakouts = Lib.breakouts(query, stageIndex);
+  const [pinnedItemCount, setPinnedItemCount] = useState(breakouts.length);
 
   const pinnedItems = useMemo(
     () =>
-      pinnedColumns.map(column => getColumnListItem(query, breakouts, column)),
-    [query, breakouts, pinnedColumns],
+      breakouts
+        .slice(0, pinnedItemCount)
+        .map((breakout) => getBreakoutListItem(query, stageIndex, breakout))
+        .filter(isNotNull),
+    [query, stageIndex, breakouts, pinnedItemCount],
+  );
+
+  const allColumns = useMemo(
+    () => Lib.breakoutableColumns(query, stageIndex),
+    [query, stageIndex],
+  );
+
+  const unpinnedColumns = useMemo(
+    () =>
+      allColumns.filter(
+        (column) => !isPinnedColumn(query, stageIndex, column, pinnedItemCount),
+      ),
+    [query, stageIndex, allColumns, pinnedItemCount],
   );
 
   const sections = useMemo(
     () =>
       getColumnSections(
         query,
+        stageIndex,
         isSearching ? allColumns : unpinnedColumns,
         debouncedSearchQuery,
       ),
-    [query, allColumns, unpinnedColumns, isSearching, debouncedSearchQuery],
+    [
+      query,
+      stageIndex,
+      allColumns,
+      unpinnedColumns,
+      isSearching,
+      debouncedSearchQuery,
+    ],
   );
 
   const handleRemovePinnedBreakout = useCallback(
-    (column: Lib.ColumnMetadata) => {
-      const { breakoutPosition } = Lib.displayInfo(query, STAGE_INDEX, column);
-      const isPinned =
-        breakoutPosition != null && breakoutPosition < pinnedBreakouts.length;
-
-      if (isPinned) {
-        const breakout = pinnedBreakouts[breakoutPosition];
-        setPinnedBreakouts(breakouts => breakouts.filter(b => b !== breakout));
-      }
-
-      onRemoveBreakout(column);
+    (breakout: Lib.BreakoutClause) => {
+      setPinnedItemCount(pinnedItemCount - 1);
+      onRemoveBreakout(breakout);
     },
-    [query, pinnedBreakouts, onRemoveBreakout],
+    [pinnedItemCount, onRemoveBreakout],
   );
 
-  const handleReplaceBreakout = useCallback(
+  const handleReplaceBreakouts = useCallback(
     (column: Lib.ColumnMetadata) => {
-      onReplaceBreakout(column);
-      setPinnedBreakouts([]);
+      onReplaceBreakouts(column);
+      setPinnedItemCount(0);
     },
-    [onReplaceBreakout],
+    [onReplaceBreakouts],
   );
 
   const handleChangeSearchQuery = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
+    (event: ChangeEvent<HTMLInputElement>) => {
       setSearchQuery(event.target.value);
     },
     [],
@@ -106,7 +107,7 @@ export function BreakoutColumnList({
 
   return (
     <>
-      <SearchContainer>
+      <Box mb="md">
         <Input
           fullWidth
           placeholder={t`Find...`}
@@ -115,26 +116,21 @@ export function BreakoutColumnList({
           onResetClick={handleResetSearch}
           onChange={handleChangeSearchQuery}
         />
-      </SearchContainer>
+      </Box>
       {!isSearching && (
         <DelayGroup>
           <ul data-testid="pinned-dimensions">
-            {pinnedItems.map(item => (
+            {pinnedItems.map((item, itemIndex) => (
               <BreakoutColumnListItem
-                key={item.longDisplayName}
+                key={itemIndex}
                 query={query}
+                stageIndex={stageIndex}
                 item={item}
                 breakout={item.breakout}
                 isPinned
-                onAddColumn={onAddBreakout}
-                onUpdateColumn={column => {
-                  if (item.breakout) {
-                    onUpdateBreakout(item.breakout, column);
-                  } else {
-                    onAddBreakout(column);
-                  }
-                }}
-                onRemoveColumn={handleRemovePinnedBreakout}
+                onAddBreakout={onAddBreakout}
+                onUpdateBreakout={onUpdateBreakout}
+                onRemoveBreakout={handleRemovePinnedBreakout}
               />
             ))}
           </ul>
@@ -142,26 +138,23 @@ export function BreakoutColumnList({
       )}
       <DelayGroup>
         <ul data-testid="unpinned-dimensions">
-          {sections.map(section => (
+          {sections.map((section) => (
             <li key={section.name}>
-              <ColumnGroupName>{section.name}</ColumnGroupName>
+              <Box className={BreakoutColumnListS.ColumnGroupName}>
+                {section.name}
+              </Box>
               <ul>
-                {section.items.map(item => (
+                {section.items.map((item, itemIndex) => (
                   <BreakoutColumnListItem
-                    key={item.longDisplayName}
+                    key={itemIndex}
                     query={query}
+                    stageIndex={stageIndex}
                     item={item}
                     breakout={item.breakout}
-                    onAddColumn={onAddBreakout}
-                    onUpdateColumn={column => {
-                      if (item.breakout) {
-                        onUpdateBreakout(item.breakout, column);
-                      } else {
-                        onAddBreakout(column);
-                      }
-                    }}
-                    onRemoveColumn={onRemoveBreakout}
-                    onReplaceColumns={handleReplaceBreakout}
+                    onAddBreakout={onAddBreakout}
+                    onUpdateBreakout={onUpdateBreakout}
+                    onRemoveBreakout={onRemoveBreakout}
+                    onReplaceBreakouts={handleReplaceBreakouts}
                   />
                 ))}
               </ul>
@@ -171,61 +164,4 @@ export function BreakoutColumnList({
       </DelayGroup>
     </>
   );
-}
-
-function getColumnListItem(
-  query: Lib.Query,
-  breakouts: Lib.BreakoutClause[],
-  column: Lib.ColumnMetadata,
-) {
-  const displayInfo = Lib.displayInfo(query, STAGE_INDEX, column);
-  const breakout =
-    displayInfo.breakoutPosition != null
-      ? breakouts[displayInfo.breakoutPosition]
-      : undefined;
-  return {
-    ...displayInfo,
-    column,
-    breakout,
-  };
-}
-
-function getColumnSections(
-  query: Lib.Query,
-  columns: Lib.ColumnMetadata[],
-  searchQuery: string,
-) {
-  const breakouts = Lib.breakouts(query, STAGE_INDEX);
-  const formattedSearchQuery = searchQuery.trim().toLowerCase();
-
-  const filteredColumns =
-    formattedSearchQuery.length > 0
-      ? columns.filter(column => {
-          const { displayName } = Lib.displayInfo(query, STAGE_INDEX, column);
-          return displayName.toLowerCase().includes(formattedSearchQuery);
-        })
-      : columns;
-
-  return Lib.groupColumns(filteredColumns).map(group => {
-    const groupInfo = Lib.displayInfo(query, STAGE_INDEX, group);
-
-    const items = Lib.getColumnsFromColumnGroup(group).map(column =>
-      getColumnListItem(query, breakouts, column),
-    );
-
-    return {
-      name: getColumnGroupName(groupInfo),
-      items,
-    };
-  });
-}
-
-function isPinnedColumn(
-  query: Lib.Query,
-  pinnedBreakouts: Lib.BreakoutClause[],
-  column: Lib.ColumnMetadata,
-) {
-  const { breakoutPosition } = Lib.displayInfo(query, STAGE_INDEX, column);
-  const maxPinnedBreakoutIndex = pinnedBreakouts.length - 1;
-  return breakoutPosition != null && breakoutPosition <= maxPinnedBreakoutIndex;
 }

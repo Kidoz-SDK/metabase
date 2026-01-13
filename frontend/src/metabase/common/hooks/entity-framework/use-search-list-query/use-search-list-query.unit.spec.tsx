@@ -1,4 +1,3 @@
-import { within } from "@testing-library/react";
 import _ from "underscore";
 
 import { setupSearchEndpoints } from "__support__/server-mocks";
@@ -6,8 +5,9 @@ import {
   renderWithProviders,
   screen,
   waitForLoaderToBeRemoved,
+  within,
 } from "__support__/ui";
-import LoadingAndErrorWrapper from "metabase/components/LoadingAndErrorWrapper";
+import { LoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper";
 import { checkNotNull } from "metabase/lib/types";
 import {
   createMockCollection,
@@ -53,7 +53,7 @@ const TestComponent = () => {
 
   return (
     <div>
-      {data.map(item => (
+      {data.map((item) => (
         <div key={item.id}>{item.name}</div>
       ))}
       <div data-testid="metadata">
@@ -82,7 +82,7 @@ const setup = () => {
 describe("useSearchListQuery", () => {
   it("should be initially loading", () => {
     setup();
-    expect(screen.getByTestId("loading-spinner")).toBeInTheDocument();
+    expect(screen.getByTestId("loading-indicator")).toBeInTheDocument();
   });
 
   it("should show data from the response", async () => {

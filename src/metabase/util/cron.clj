@@ -9,7 +9,6 @@
    [metabase.util.malli.registry :as mr]
    [metabase.util.malli.schema :as ms])
   (:import
-   (net.redhogs.cronparser CronExpressionDescriptor)
    (org.quartz CronExpression)))
 
 (set! *warn-on-reflection* true)
@@ -57,12 +56,11 @@
   "Schema for a frontend-parsable schedule map. Used for Pulses and DB scheduling."
   [:ref ::ScheduleMap])
 
-
 ;;; +----------------------------------------------------------------------------------------------------------------+
 ;;; |                                          SCHEDULE MAP -> CRON STRING                                           |
 ;;; +----------------------------------------------------------------------------------------------------------------+
 
-(mu/defn ^:private cron-string :- CronScheduleString
+(mu/defn- cron-string :- CronScheduleString
   "Build a cron string from key-value pair parts."
   [{:keys [seconds minutes hours day-of-month month day-of-week year]}]
   (str/join " " [(or seconds      "0")
@@ -86,15 +84,15 @@
   (if day-of-week
     ;; specific days of week like Mon or Fri
     (assoc {:day-of-month "?"}
-      :day-of-week (case frame
-                     "first" (str (day-of-week->cron day-of-week) "#1")
-                     "last"  (str (day-of-week->cron day-of-week) "L")))
+           :day-of-week (case frame
+                          "first" (str (day-of-week->cron day-of-week) "#1")
+                          "last"  (str (day-of-week->cron day-of-week) "L")))
     ;; specific CALENDAR DAYS like 1st or 15th
     (assoc {:day-of-week "?"}
-      :day-of-month (case frame
-                      "first" "1"
-                      "mid"   "15"
-                      "last"  "L"))))
+           :day-of-month (case frame
+                           "first" "1"
+                           "mid"   "15"
+                           "last"  "L"))))
 
 (mu/defn schedule-map->cron-string :- CronScheduleString
   "Convert the frontend schedule map into a cron string."
@@ -107,7 +105,7 @@
                            :day-of-week (day-of-week->cron day-of-week)
                            :day-of-month "?"}
                  :monthly (assoc (frame->cron frame day-of-week)
-                            :hours hour))))
+                                 :hours hour))))
 
 ;;; +----------------------------------------------------------------------------------------------------------------+
 ;;; |                                          CRON STRING -> SCHEDULE MAP                                           |
@@ -151,7 +149,7 @@
          (not= hours "*"))                        "daily"
     :else                                         "hourly"))
 
-(mu/defn ^{:style/indent 0} cron-string->schedule-map :- ScheduleMap
+(mu/defn cron-string->schedule-map :- ScheduleMap
   "Convert a normal `cron-string` into the expanded ScheduleMap format used by the frontend."
   [cron-string :- CronScheduleString]
   (let [[_ mins hours day-of-month _ day-of-week _] (str/split cron-string #"\s+")]
@@ -160,8 +158,3 @@
      :schedule_frame  (cron-day-of-week+day-of-month->frame day-of-week day-of-month)
      :schedule_hour   (cron->digit hours)
      :schedule_type   (cron->schedule-type hours day-of-month day-of-week)}))
-
-(mu/defn describe-cron-string :- ms/NonBlankString
-  "Return a human-readable description of a cron expression, localized for the current User."
-  [^String cron-string :- CronScheduleString]
-  (CronExpressionDescriptor/getDescription cron-string (i18n/user-locale)))

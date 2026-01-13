@@ -1,5 +1,9 @@
+import { setIsPublicEmbedding } from "metabase/embedding/config";
+
 import { init } from "./app";
-import reducers from "./reducers-public";
+import { publicReducers } from "./reducers-public";
 import { getRoutes } from "./routes-public";
 
-init(reducers, getRoutes, () => {});
+setIsPublicEmbedding();
+
+init(publicReducers, getRoutes, () => {});

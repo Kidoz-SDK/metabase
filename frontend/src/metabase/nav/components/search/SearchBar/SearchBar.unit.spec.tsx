@@ -10,9 +10,9 @@ import {
 import {
   renderWithProviders,
   screen,
-  within,
-  waitForLoaderToBeRemoved,
   waitFor,
+  waitForLoaderToBeRemoved,
+  within,
 } from "__support__/ui";
 import { checkNotNull } from "metabase/lib/types";
 import { SearchBar } from "metabase/nav/components/search/SearchBar";
@@ -36,7 +36,6 @@ const TEST_SEARCH_RESULTS: CollectionItem[] = [
   createMockCollectionItem({
     name,
     id: index + 1,
-    getUrl: () => "/",
   }),
 );
 
@@ -145,7 +144,7 @@ describe("SearchBar", () => {
       for (const cardName of ["Card ABC", "Card BCD"]) {
         await userEvent.tab();
 
-        const filteredElement = resultItems.find(element =>
+        const filteredElement = resultItems.find((element) =>
           element.textContent?.includes(cardName),
         );
 

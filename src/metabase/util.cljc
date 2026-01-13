@@ -1,63 +1,89 @@
+#_{:clj-kondo/ignore [:metabase/namespace-name]}
 (ns metabase.util
   "Common utility functions useful throughout the codebase."
+  (:refer-clojure :exclude [group-by last #?(:clj for)])
   (:require
+   #?@(:clj ([clojure.core.protocols]
+             [clojure.math.numeric-tower :as math]
+             [me.flowthing.pp :as pp]
+             [metabase.config.core :as config]
+             [clojure.pprint :as pprint]
+             ^{:clj-kondo/ignore [:discouraged-namespace]}
+             [metabase.util.jvm :as u.jvm]
+             [metabase.util.http :as u.http]
+             [metabase.util.string :as u.str]
+             [potemkin :as p]
+             [puget.printer]
+             [ring.util.codec :as codec])
+       :cljs-dev ([clojure.pprint :as pprint]))
    [camel-snake-kebab.internals.macros :as csk.macros]
    [clojure.data :refer [diff]]
-   [clojure.pprint :as pprint]
    [clojure.set :as set]
    [clojure.string :as str]
    [clojure.walk :as walk]
    [flatland.ordered.map :refer [ordered-map]]
    [medley.core :as m]
-   [metabase.shared.util.i18n :refer [tru] :as i18n]
-   [metabase.shared.util.namespaces :as u.ns]
    [metabase.util.format :as u.format]
+   [metabase.util.i18n :refer [tru]]
    [metabase.util.log :as log]
    [metabase.util.memoize :as memoize]
+   [metabase.util.namespaces :as u.ns]
+   [metabase.util.number :as u.number]
+   [metabase.util.performance :as perf :refer [#?(:clj for)]]
+   [metabase.util.polyfills]
    [net.cgrand.macrovich :as macros]
-   [weavejester.dependency :as dep]
-   #?@(:clj  ([clojure.math.numeric-tower :as math]
-              [me.flowthing.pp :as pp]
-              [metabase.config :as config]
-              #_{:clj-kondo/ignore [:discouraged-namespace]}
-              [metabase.util.jvm :as u.jvm]
-              [metabase.util.string :as u.str]
-              [potemkin :as p]
-              [ring.util.codec :as codec])))
+   [taoensso.encore :as encore]
+   [weavejester.dependency :as dep])
   #?(:clj (:import
+           (clojure.core.protocols CollReduce)
            (clojure.lang Reflector)
            (java.text Normalizer Normalizer$Form)
-           (java.util Locale)
+           (java.util Locale Random)
            (org.apache.commons.validator.routines RegexValidator UrlValidator)))
   #?(:cljs (:require-macros [camel-snake-kebab.internals.macros :as csk.macros]
                             [metabase.util])))
 
 #?(:clj (set! *warn-on-reflection* true))
 
+#?(:clj (comment clojure.core.protocols/keep-me))
+
 (u.ns/import-fns
-  [u.format colorize format-bytes format-color format-milliseconds format-nanoseconds format-seconds])
+ [u.format
+  colorize
+  format-bytes
+  format-color
+  format-milliseconds
+  format-nanoseconds
+  format-seconds
+  format-plural
+  qualified-name])
 
 #?(:clj (p/import-vars [u.jvm
                         all-ex-data
+                        all-ex-messages
                         auto-retry
+                        string-to-bytes
+                        bytes-to-string
                         decode-base64
                         decode-base64-to-bytes
                         deref-with-timeout
                         encode-base64
+                        encode-base64-bytes
                         filtered-stacktrace
                         full-exception-chain
-                        generate-nano-id
                         host-port-up?
+                        parse-currency
                         poll
                         host-up?
                         ip-address?
-                        metabase-namespace-symbols
                         sorted-take
                         varargs
                         with-timeout
                         with-us-locale]
                        [u.str
-                        build-sentence]))
+                        build-sentence]
+                       [u.http
+                        valid-host?]))
 
 (defmacro or-with
   "Like or, but determines truthiness with `pred`."
@@ -79,6 +105,30 @@
                          :cljs 'js/Error
                          :clj  'Throwable)
                       ~'_)))
+
+(defn strip-error
+  "Transforms the error in a list of strings to log"
+  ([e]
+   (strip-error e nil))
+  ([e prefix]
+   (->> (for [[e prefix] (map vector
+                              (take-while some? (iterate #(.getCause ^Exception %) e))
+                              (cons prefix (repeat "  caused by")))]
+          (str (when prefix (str prefix ": "))
+               (ex-message e)
+               (when-let [data (-> (ex-data e)
+                                   (dissoc :toucan2/context-trace)
+                                   not-empty)]
+                 (str " " (pr-str data)))))
+        (str/join "\n"))))
+
+(defn last
+  "Like `clojure.core/last`, but tries to be O(1)."
+  [v]
+  (cond
+    (or (list? v) (map? v)) (clojure.core/last v)
+    (zero? (count v))       nil
+    :else                   (nth v (dec (count v)))))
 
 (defmacro prog1
   "Execute `first-form`, then any other expressions in `body`, presumably for side-effects; return the result of
@@ -117,19 +167,6 @@
   #?(:clj  (Exception. msg)
      :cljs (js/Error. msg)))
 
-(defn qualified-name
-  "Return `k` as a string, qualified by its namespace, if any (unlike `name`). Handles `nil` values gracefully as well
-  (also unlike `name`).
-
-     (u/qualified-name :type/FK) -> \"type/FK\""
-  [k]
-  (when (some? k)
-    (if-let [namespac (when #?(:clj  (instance? clojure.lang.Named k)
-                               :cljs (satisfies? INamed k))
-                        (namespace k))]
-      (str namespac "/" (name k))
-      (name k))))
-
 (defn remove-nils
   "Given a map, returns a new map with all nil values removed."
   [m]
@@ -146,15 +183,16 @@
 
 (defn add-period
   "Fixes strings that don't terminate in a period; also accounts for strings
-  that end in `:`. Used for formatting docs."
+  that end in `:` and triple backticks (e.g., if a string ends in codeblock).
+   Used for formatting docs."
   [s]
   (let [text (str s)]
-    (if (or (str/blank? text)
-            (#{\. \? \!} (last text)))
-      text
-      (if (str/ends-with? text ":")
-        (str (subs text 0 (- (count text) 1)) ".")
-        (str text ".")))))
+    (cond
+      (str/blank? text) text
+      (#{\. \? \!} (last text)) text
+      (str/ends-with? text "```") text
+      (str/ends-with? text ":") (str (subs text 0 (dec (count text))) ".")
+      :else (str text "."))))
 
 (defn lower-case-en
   "Locale-agnostic version of [[clojure.string/lower-case]]. [[clojure.string/lower-case]] uses the default locale in
@@ -182,6 +220,11 @@
       (upper-case-en s)
       (str (upper-case-en (subs s 0 1))
            (lower-case-en (subs s 1))))))
+
+(defn truncate
+  "Truncate a string to `n` characters."
+  [s n]
+  (subs s 0 (min (count s) n)))
 
 (defn regex->str
   "Returns the contents of a regex as a string.
@@ -218,24 +261,26 @@
 (def ^{:arglists '([x])} ->kebab-case-en
   "Like [[camel-snake-kebab.core/->kebab-case]], but always uses English for lower-casing, supports keywords with
   namespaces, and returns `nil` when passed `nil` (rather than throwing an exception)."
-  (memoize/lru (wrap-csk-conversion-fn-to-handle-nil-and-namespaced-keywords ->kebab-case-en*) :lru/threshold 256))
+  (memoize/fast-bounded (wrap-csk-conversion-fn-to-handle-nil-and-namespaced-keywords ->kebab-case-en*)
+                        :bounded/threshold 10000))
 
 (def ^{:arglists '([x])} ->snake_case_en
   "Like [[camel-snake-kebab.core/->snake_case]], but always uses English for lower-casing, supports keywords with
   namespaces, and returns `nil` when passed `nil` (rather than throwing an exception)."
-  (memoize/lru (wrap-csk-conversion-fn-to-handle-nil-and-namespaced-keywords ->snake_case_en*) :lru/threshold 256))
+  (memoize/fast-bounded (wrap-csk-conversion-fn-to-handle-nil-and-namespaced-keywords ->snake_case_en*)
+                        :bounded/threshold 10000))
 
 (def ^{:arglists '([x])} ->camelCaseEn
   "Like [[camel-snake-kebab.core/->camelCase]], but always uses English for upper- and lower-casing, supports keywords
   with namespaces, and returns `nil` when passed `nil` (rather than throwing an exception)."
-  (memoize/lru (wrap-csk-conversion-fn-to-handle-nil-and-namespaced-keywords ->camelCaseEn*) :lru/threshold 256))
-
+  (memoize/fast-bounded (wrap-csk-conversion-fn-to-handle-nil-and-namespaced-keywords ->camelCaseEn*)
+                        :bounded/threshold 10000))
 
 (def ^{:arglists '([x])} ->SCREAMING_SNAKE_CASE_EN
   "Like [[camel-snake-kebab.core/->SCREAMING_SNAKE_CASE]], but always uses English for upper- and lower-casing, supports
   keywords with namespaces, and returns `nil` when passed `nil` (rather than throwing an exception)."
-  (memoize/lru (wrap-csk-conversion-fn-to-handle-nil-and-namespaced-keywords ->SCREAMING_SNAKE_CASE_EN*)
-               :lru/threshold 256))
+  (memoize/fast-bounded (wrap-csk-conversion-fn-to-handle-nil-and-namespaced-keywords ->SCREAMING_SNAKE_CASE_EN*)
+                        :bounded/threshold 10000))
 
 (defn capitalize-first-char
   "Like string/capitalize, only it ignores the rest of the string
@@ -246,10 +291,41 @@
     (str (upper-case-en (subs s 0 1))
          (subs s 1))))
 
+(defn kebab->snake
+  "Simple conversion from kebab-case to snake_case by replacing hyphens with underscores.
+  Does not detect or convert camelCase, preserving mixed-case identifiers."
+  [x]
+  (cond
+    (keyword? x) (keyword (namespace x) (str/replace (name x) #"-" "_"))
+    (string? x)  (str/replace x #"-" "_")
+    :else        x))
+
 (defn snake-keys
-  "Convert the keys in a map from `kebab-case` to `snake_case`."
+  "Convert the top-level keys in a map to `snake_case`."
+  [m]
+  (perf/update-keys m ->snake_case_en))
+
+(defn kebab->snake-keys
+  "Convert the top-level kebab-case keys in a map to snake_case by replacing hyphens.
+  Preserves camelCase and other formatting."
+  [m]
+  (perf/update-keys m kebab->snake))
+
+(defn deep-snake-keys
+  "Recursively convert the keys in a map to `snake_case`."
   [m]
   (recursive-map-keys ->snake_case_en m))
+
+(defn deep-kebab-keys
+  "Recursively convert the keys in a map to `kebab_case`."
+  [m]
+  (recursive-map-keys ->kebab-case-en m))
+
+(defn deep-kebab->snake-keys
+  "Recursively convert kebab-case keys in a map to snake_case by replacing hyphens.
+  Preserves camelCase and other formatting."
+  [m]
+  (recursive-map-keys kebab->snake m))
 
 (defn normalize-map
   "Given any map-like object, return it as a Clojure map with :kebab-case keyword keys.
@@ -265,7 +341,7 @@
                 :cljs (if (object? m)
                         (js->clj m)
                         m))]
-    (update-keys base (comp keyword ->kebab-case-en))))
+    (perf/update-keys base (comp keyword ->kebab-case-en))))
 
 ;; Log the maximum memory available to the JVM at launch time as well since it is very handy for debugging things
 #?(:clj
@@ -273,13 +349,13 @@
      (log/infof "Maximum memory available to JVM: %s" (u.format/format-bytes (.maxMemory (Runtime/getRuntime))))))
 
 ;; Set the default width for pprinting to 120 instead of 72. The default width is too narrow and wastes a lot of space
-#?(:clj  (alter-var-root #'pprint/*print-right-margin* (constantly 120))
-   :cljs (set! pprint/*print-right-margin* (constantly 120)))
+#?(:clj      (alter-var-root #'pprint/*print-right-margin* (constantly 120))
+   :cljs-dev (set! pprint/*print-right-margin* (constantly 120)))
 
 (defn email?
   "Is `s` a valid email address string?"
   ^Boolean [^String s]
-  (boolean (when (string? s)
+  (boolean (when (and (string? s) (str/includes? s "@")) ;; early bail
              (re-matches #"[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?"
                          (lower-case-en s)))))
 
@@ -307,10 +383,15 @@
 (defn url?
   "Is `s` a valid HTTP/HTTPS URL string?"
   ^Boolean [s]
-  #?(:clj  (let [validator (UrlValidator. (u.jvm/varargs String ["http" "https"])
-                                          (RegexValidator. url-regex-pattern)
-                                          UrlValidator/ALLOW_LOCAL_URLS)]
-             (.isValid validator (str s)))
+  #?(:clj  (and s
+                ;; UrlValidator is very expensive when non-URLs are passed to it, so we verify if the string looks
+                ;; urlish before passing to UrlValidator.
+                (str/includes? s "://")
+                (let [validator (UrlValidator. (u.jvm/varargs String ["http" "https"])
+                                               (RegexValidator. url-regex-pattern)
+                                               UrlValidator/ALLOW_LOCAL_URLS)]
+                  ;; (swap! -args conj s)
+                  (.isValid validator (str s))))
      :cljs (try
              (let [url (js/URL. (str s))]
                (boolean (and (re-matches (js/RegExp. url-regex-pattern "u")
@@ -364,26 +445,29 @@
 (defn real-number?
   "Is `x` a real number (i.e. not a `NaN` or an `Infinity`)?"
   [x]
-  (and (number? x)
-       (not (NaN? x))
-       (not (infinite? x))))
+  ;; Check for BigDec explicitly. BigDec cannot be nan or infinite, but using those predicates on bigdec with higher
+  ;; precision may allocate.
+  (or #?(:clj (decimal? x) :default false)
+      (and (number? x)
+           (not (NaN? x))
+           (not (infinite? x)))))
 
 (defn remove-diacritical-marks
   "Return a version of `s` with diacritical marks removed."
   ^String [^String s]
   (when (seq s)
     #?(:clj  (str/replace
-               ;; First, "decompose" the characters. e.g. replace 'LATIN CAPITAL LETTER A WITH ACUTE' with
-               ;; 'LATIN CAPITAL LETTER A' + 'COMBINING ACUTE ACCENT'
-               ;; See http://docs.oracle.com/javase/8/docs/api/java/text/Normalizer.html
+              ;; First, "decompose" the characters. e.g. replace 'LATIN CAPITAL LETTER A WITH ACUTE' with
+              ;; 'LATIN CAPITAL LETTER A' + 'COMBINING ACUTE ACCENT'
+              ;; See http://docs.oracle.com/javase/8/docs/api/java/text/Normalizer.html
               (Normalizer/normalize s Normalizer$Form/NFD)
-               ;; next, remove the combining diacritical marks -- this SO answer explains what's going on here best:
-               ;; http://stackoverflow.com/a/5697575/1198455 The closest thing to a relevant JavaDoc I could find was
-               ;; http://docs.oracle.com/javase/7/docs/api/java/lang/Character.UnicodeBlock.html#COMBINING_DIACRITICAL_MARKS
+              ;; next, remove the combining diacritical marks -- this SO answer explains what's going on here best:
+              ;; http://stackoverflow.com/a/5697575/1198455 The closest thing to a relevant JavaDoc I could find was
+              ;; http://docs.oracle.com/javase/7/docs/api/java/lang/Character.UnicodeBlock.html#COMBINING_DIACRITICAL_MARKS
               #"\p{Block=CombiningDiacriticalMarks}+"
               "")
        :cljs (-> s
-                 (.normalize "NFKD")  ;; Renders accented characters as base + accent.
+                 (.normalize "NFKD") ;; Renders accented characters as base + accent.
                  (.replace (js/RegExp. "[\u0300-\u036f]" "gu") ""))))) ;; Drops all the accents.
 
 (def ^:private slugify-valid-chars
@@ -420,11 +504,18 @@
    (slugify s {}))
   (^String [s {:keys [max-length unicode?]}]
    (when (seq s)
-     (let [slug (str/join (for [c (remove-diacritical-marks (lower-case-en s))]
-                            (slugify-char c (not unicode?))))]
-       (if max-length
-         (str/join (take max-length slug))
-         slug)))))
+     (cond->> (remove-diacritical-marks (lower-case-en s))
+       true (map #(slugify-char % (not unicode?)))
+       max-length (reduce (fn [cur-slug next-slug]
+                            (if (<= (+ (count cur-slug)
+                                       (if (char? next-slug)
+                                         1
+                                         (count next-slug)))
+                                    max-length)
+                              (str cur-slug next-slug)
+                              (reduced cur-slug)))
+                          "")
+       true str/join))))
 
 (defn id
   "If passed an integer ID, returns it. If passed a map containing an `:id` key, returns the value if it is an integer.
@@ -480,7 +571,7 @@
 
    The values of `keyseq` can be either regular keys, which work the same way as `select-keys`,
    or vectors of the form `[k & nested-keys]`, which call `select-nested-keys` recursively
-   on the value of `k`. "
+   on the value of `k`."
   [m keyseq]
   ;; TODO - use (empty m) once supported by model instances
   (into {} (for [k     keyseq
@@ -527,7 +618,6 @@
        :present #{:a :b :c}
        :non-nil #{:d :e :f})
      ;; -> {:a 100, :b nil, :d 200}"
-  {:style/indent 1}
   [m & {:keys [present non-nil], :as options}]
   {:pre [(every? #{:present :non-nil} (keys options))]}
   (merge (select-keys m present)
@@ -621,7 +711,7 @@
 (defn lower-case-map-keys
   "Changes the keys of a given map to lower case."
   [m]
-  (update-keys m #(-> % name lower-case-en keyword)))
+  (perf/update-keys m #(-> % name lower-case-en keyword)))
 
 (defn pprint-to-str
   "Returns the output of pretty-printing `x` as a string.
@@ -629,22 +719,32 @@
 
      (pprint-to-str 'green some-obj)"
   (^String [x]
-   (#?@
-    (:clj
-     (with-out-str
-       #_{:clj-kondo/ignore [:discouraged-var]}
-       (pp/pprint x {:max-width 120}))
+   #?(:clj
+      (with-out-str
+        #_{:clj-kondo/ignore [:discouraged-var]}
+        (pp/pprint x {:max-width 120}))
 
-     :cljs
-     ;; we try to set this permanently above, but it doesn't seem to work in Cljs, so just bind it every time. The
-     ;; default value wastes too much space, 120 is a little easier to read actually.
-     (binding [pprint/*print-right-margin* 120]
-       (with-out-str
-         #_{:clj-kondo/ignore [:discouraged-var]}
-         (pprint/pprint x))))))
+      :cljs-dev
+      ;; we try to set this permanently above, but it doesn't seem to work in Cljs, so just bind it every time. The
+      ;; default value wastes too much space, 120 is a little easier to read actually.
+      (binding [pprint/*print-right-margin* 120]
+        (with-out-str
+          #_{:clj-kondo/ignore [:discouraged-var]}
+          (pprint/pprint x)))
+
+      :default
+      ;; For CLJS release, we don't pull cljs.pprint to reduce bundle size.
+      (str x)))
 
   (^String [color-symb x]
    (u.format/colorize color-symb (pprint-to-str x))))
+
+(def ^{:arglists '([x])} cprint-to-str
+  "Like [[pprint-to-str]], but prints to color if color printing is enabled."
+  #?(:clj (if u.format/colorize?
+            puget.printer/cprint-str
+            pprint-to-str)
+     :cljs pprint-to-str))
 
 (def ^:dynamic *profile-level*
   "Impl for `profile` macro -- don't use this directly. Nesting-level for the `profile` macro e.g. 0 for a top-level
@@ -665,7 +765,7 @@
                2 :magenta
                3 :yellow) "%s%s took %s"
              (if (pos? *profile-level*)
-               (str (str/join (repeat (dec *profile-level*) "  ")) " ⮦ ")
+               (str "┌" (str/join (repeat (dec *profile-level*) "─")) "─> ")
                "")
              (message-thunk)
              (u.format/format-nanoseconds (- #?(:cljs (* 1000000 (js/performance.now))
@@ -718,30 +818,6 @@
   [hours]
   (-> (* 60 hours) minutes->seconds seconds->ms))
 
-(defn parse-currency
-  "Parse a currency String to a BigDecimal. Handles a variety of different formats, such as:
-
-    $1,000.00
-    -£127.54
-    -127,54 €
-    kr-127,54
-    € 127,54-
-    ¥200"
-  ^java.math.BigDecimal [^String s]
-  (when-not (str/blank? s)
-    (#?(:clj bigdec :cljs js/parseFloat)
-     (reduce
-      (partial apply str/replace)
-      s
-      [;; strip out any current symbols
-       [#"[^\d,.-]+"          ""]
-       ;; now strip out any thousands separators
-       [#"(?<=\d)[,.](\d{3})" "$1"]
-       ;; now replace a comma decimal seperator with a period
-       [#","                  "."]
-       ;; move minus sign at end to front
-       [#"(^[^-]+)-$"         "-$1"]]))))
-
 (defn email->domain
   "Extract the domain portion of an `email-address`.
 
@@ -758,6 +834,11 @@
   [email-address domain]
   {:pre [(email? email-address)]}
   (= (email->domain email-address) domain))
+
+(defn domain?
+  "Check if `s` is a valid domain name."
+  [s]
+  (sequential? (re-matches #"^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$" s)))
 
 (defn pick-first
   "Returns a pair [match others] where match is the first element of `coll` for which `pred` returns
@@ -802,20 +883,20 @@
   off of `type` in pure Clojure."
   [x]
   (cond
-    (nil? x)        :dispatch-type/nil
-    (boolean? x)    :dispatch-type/boolean
-    (string? x)     :dispatch-type/string
-    (keyword? x)    :dispatch-type/keyword
-    (integer? x)    :dispatch-type/integer
-    (number? x)     :dispatch-type/number
-    (map? x)        :dispatch-type/map
-    (sequential? x) :dispatch-type/sequential
-    (set? x)        :dispatch-type/set
-    (symbol? x)     :dispatch-type/symbol
-    (fn? x)         :dispatch-type/fn
-    (regexp? x)     :dispatch-type/regex
+    (nil? x)              :dispatch-type/nil
+    (boolean? x)          :dispatch-type/boolean
+    (string? x)           :dispatch-type/string
+    (keyword? x)          :dispatch-type/keyword
+    (u.number/integer? x) :dispatch-type/integer
+    (number? x)           :dispatch-type/number
+    (map? x)              :dispatch-type/map
+    (sequential? x)       :dispatch-type/sequential
+    (set? x)              :dispatch-type/set
+    (symbol? x)           :dispatch-type/symbol
+    (fn? x)               :dispatch-type/fn
+    (regexp? x)           :dispatch-type/regex
     ;; we should add more mappings here as needed
-    :else           :dispatch-type/*))
+    :else                 :dispatch-type/*))
 
 (defn assoc-dissoc
   "Called like `(assoc m k v)`, this does [[assoc]] if `(some? v)`, and [[dissoc]] if not.
@@ -846,35 +927,40 @@
        ret))))
 
 (defn row-diff
-  "Given 2 lists of seq maps of changes, where each map an has an `id` key,
-  return a map of 3 keys: `:to-create`, `:to-update`, `:to-delete`.
+  "Given 2 lists of seq maps of changes, where each map in current-rows has an `id` key,
+  return a map of 4 keys: `:to-create`, `:to-update`, `:to-delete`, `:to-skip`.
 
   Where:
-  - `:to-create` is a list of maps that ids in `new-rows`
+  - `:to-create` is a list of maps that either lack ids or have ids only in `new-rows`
   - `:to-delete` is a list of maps that has ids only in `current-rows`
   - `:to-skip`   is a list of identical maps that has ids in both lists
   - `:to-update` is a list of different maps that has ids in both lists
 
   Optional arguments:
   - `id-fn` - function to get row-matching identifiers
-  - `to-compare` - function to get rows into a comparable state
-  "
+  - `to-compare` - function to get rows into a comparable state"
   [current-rows new-rows & {:keys [id-fn to-compare]
-                            :or   {id-fn   :id
+                            :or   {id-fn      :id
                                    to-compare identity}}]
-  (let [[delete-ids
+  (let [new-rows-with-ids    (filter id-fn new-rows)
+        new-rows-without-ids (remove id-fn new-rows)
+        [delete-ids
          create-ids
-         update-ids]     (diff (set (map id-fn current-rows))
-                               (set (map id-fn new-rows)))
-        known-map        (m/index-by id-fn current-rows)
+         update-ids]         (diff (set (map id-fn current-rows))
+                                   (set (map id-fn new-rows-with-ids)))
+        known-map            (m/index-by id-fn current-rows)
         {to-update false
-         to-skip   true} (when (seq update-ids)
-                           (group-by (fn [x]
-                                       (let [y (get known-map (id-fn x))]
-                                         (= (to-compare x) (to-compare y))))
-                                     (filter #(update-ids (id-fn %)) new-rows)))]
-    {:to-create (when (seq create-ids) (filter #(create-ids (id-fn %)) new-rows))
-     :to-delete (when (seq delete-ids) (filter #(delete-ids (id-fn %)) current-rows))
+         to-skip   true}     (when (seq update-ids)
+                               (clojure.core/group-by (fn [x]
+                                                        (let [y (get known-map (id-fn x))]
+                                                          (= (to-compare x) (to-compare y))))
+                                                      (filter #(update-ids (id-fn %)) new-rows-with-ids)))]
+    {:to-create (concat
+                 new-rows-without-ids
+                 (when (seq create-ids)
+                   (filter #(create-ids (id-fn %)) new-rows-with-ids)))
+     :to-delete (when (seq delete-ids)
+                  (filter #(delete-ids (id-fn %)) current-rows))
      :to-update to-update
      :to-skip   to-skip}))
 
@@ -888,18 +974,22 @@
   "Traverses a graph of nodes using a user-defined function.
 
   `nodes`: A collection of initial nodes to start the traversal from.
-  `traverse-fn`: A function that, given a node, returns its directly connected nodes.
+  `traverse-fn`: A function that, given a node, returns a map of connected nodes to source they are connected from.
 
   The function performs a breadth-first traversal starting from the initial nodes, applying
   `traverse-fn` to each node to find connected nodes, and continues until all reachable nodes
   have been visited. Returns a set of all traversed nodes."
   [nodes traverse-fn]
-  (loop [to-traverse (set nodes)
-         traversed   #{}]
+  (loop [to-traverse (zipmap nodes (repeat nil))
+         traversed   {}]
     (let [item        (first to-traverse)
-          found       (traverse-fn item)
+          found       (traverse-fn (key item))
           traversed   (conj traversed item)
-          to-traverse (set/union (disj to-traverse item) (set/difference found traversed))]
+          ;; `merge-with into` allows us to not lose dependency info if an entity was required from a few different
+          ;; locations
+          to-traverse (merge-with into
+                                  (dissoc to-traverse (key item))
+                                  (apply dissoc found (keys traversed)))]
       (if (empty? to-traverse)
         traversed
         (recur to-traverse traversed)))))
@@ -949,11 +1039,30 @@
    nil
    coll))
 
+(defn reduce-preserving-reduced
+  "Like [[reduce]] but preserves the [[reduced]] wrapper around the result. This is important because we have some
+  cases where we want to call [[reduce]] on some rf, but still be able to tell if it returned early.
+
+  Returns a vanilla value if all the `xs` were consumed and `(reduced result)` on an early exit."
+  [rf init xs]
+  (if (reduced? init)
+    init
+    (reduce
+     (fn [acc x]
+       ;; HACK: Wrap the reduced value in [[reduced]] again! [[reduce]] will unwrap the outer layer but we'll still
+       ;; see the inner one.
+       (let [acc' (rf acc x)]
+         (if (reduced? acc')
+           (reduced acc')
+           acc')))
+     init
+     xs)))
+
 #?(:clj
    (let [sym->enum (fn ^Enum [sym]
-                    (Reflector/invokeStaticMethod ^Class (resolve (symbol (namespace sym)))
-                                                  "valueOf"
-                                                  (to-array [(name sym)])))
+                     (Reflector/invokeStaticMethod ^Class (resolve (symbol (namespace sym)))
+                                                   "valueOf"
+                                                   (to-array [(name sym)])))
          ordinal (fn [^Enum e] (.ordinal e))]
      (defmacro case-enum
        "Like `case`, but explicitly dispatch on Java enum ordinals.
@@ -972,3 +1081,245 @@
                          (partition 2 clauses))
                  (when (odd? (count clauses))
                    (list (last clauses))))))))))
+
+(defn update-keys-vals
+  "A combination of [[update-keys]] and [[update-vals]], which simultaneously re-maps keys and values."
+  ([m f]
+   (update-keys-vals m f f))
+  ([m key-f val-f]
+   (let [ret (persistent!
+              (reduce-kv (fn [acc k v]
+                           (assoc! acc (key-f k) (val-f v)))
+                         (transient {})
+                         m))]
+     (with-meta ret (meta m)))))
+
+(def conjv
+  "Like `conj` but returns a vector instead of a list"
+  (fnil conj []))
+
+(defmacro for-map
+  "Like `for` but builds a map for the result stream of pairs."
+  [& args]
+  `(->> (for ~@args) (into {})))
+
+(defmacro for-ordered-map
+  "Like `for-map` but builds an order-preserving map for the result stream of pairs."
+  [& args]
+  `(->> (for ~@args) (into (ordered-map))))
+
+(defn string-byte-count
+  "Number of bytes in a string using UTF-8 encoding."
+  [s]
+  #?(:clj (count (.getBytes (str s) "UTF-8"))
+     :cljs (.. (js/TextEncoder.) (encode s) -length)))
+
+#?(:clj
+   (defn ^:private string-character-at
+     [s i]
+     (str (.charAt ^String s i))))
+
+(defn truncate-string-to-byte-count
+  "Truncate string `s` to `max-length-bytes` UTF-8 bytes (as opposed to truncating to some number of *characters*)."
+  [s max-length-bytes]
+  #?(:clj
+     (loop [i 0, cumulative-byte-count 0]
+       (cond
+         (= cumulative-byte-count max-length-bytes) (subs s 0 i)
+         (> cumulative-byte-count max-length-bytes) (subs s 0 (dec i))
+         (>= i (count s))                           s
+         :else                                      (recur (inc i)
+                                                           (long (+
+                                                                  cumulative-byte-count
+                                                                  (string-byte-count (string-character-at s i)))))))
+
+     :cljs
+     (let [buf (js/Uint8Array. max-length-bytes)
+           result (.encodeInto (js/TextEncoder.) s buf)] ;; JS obj {read: chars_converted, write: bytes_written}
+       (subs s 0 (.-read result)))))
+
+;; The next two helpers exist to squelch the anti-pattern of using `System/currentTimeMillis` for computing durations.
+;; Unlike its better known sibling, `System/nanoTime` avoids a costly system call to fetch the wall clock time,
+;; instead using a relative counter which is unaffected by system clock corrections, and guaranteed to be increasing.
+;;
+;; Our linter won't force you to use these helpers, but they're convenient if you're thinking in milliseconds.
+
+#?(:clj
+   (defn start-timer
+     "Start and return a timer. Treat the \"timer\" as an opaque object, the implementation may change."
+     []
+     (System/nanoTime)))
+
+#?(:clj
+   (defn since-ms
+     "Return how many milliseconds have elapsed since the given timer was started."
+     [timer]
+     (/ (- (System/nanoTime) timer) 1e6)))
+
+#?(:clj
+   (defn since-ms-wall-clock
+     "Return how many milliseconds have elapsed since the given system millisecond time.
+     For cases where you can't use u/start-timer, e.g., external time sources or process boundaries."
+     [start-ms]
+     #_{:clj-kondo/ignore [:metabase/discourage-millis-duration]}
+     (- (System/currentTimeMillis) start-ms)))
+
+(defn group-by
+  "(group-by first                  [[1 3]   [1 4]   [2 5]])   => {1 [[1 3] [1 4]], 2 [[2 5]]}
+   (group-by first second           [[1 3]   [1 4]   [2 5]])   => {1 [3 4],         2 [5]}
+   (group-by first second +      0  [[1 3]   [1 4]   [2 5]])   => {1 7,             2 5}
+   (group-by first second           [[1 [3]] [1 [4]] [2 [5]]]) => {1 [[3] [4]],     2 [[5]]}
+   (group-by first second concat    [[1 [3]] [1 [4]] [2 [5]]]) => {1 (3 4),         2 (5)}
+   (group-by first second into      [[1 [3]] [1 [4]] [2 [5]]]) => {1 [3 4],         2 [5]}
+   (group-by first second into   [] [[1 [3]] [1 [4]] [2 [5]]]) => {1 [3 4],         2 [5]}
+   (group-by first second into   () [[1 [3]] [1 [4]] [2 [5]]]) => {1 (4 3),         2 (5)}
+   ;; as a filter:
+             kf    kpred  vf     vpred rf   init
+   (group-by first any?   second even? conj () [[1 3] [1 4] [2 5]])      => {1 (4)}
+   ;; as a reducer (see index-by below):
+             kf    kpred  vf     vpred rf   init
+   (group-by first any?   second even? max  0  [[1 3] [1 6] [1 4] [2 5]] => {1 6})"
+
+  ([kf coll] (clojure.core/group-by kf coll))
+  ([kf vf coll] (group-by kf vf conj [] coll))
+  ([kf vf rf coll] (group-by kf vf rf [] coll))
+  ([kf vf rf init coll]
+   (->> coll
+        (reduce
+         (fn [m x]
+           (let [k (kf x)]
+             (assoc! m k (rf (get m k init) (vf x)))))
+         (transient {}))
+        (persistent!)))
+  ([kf kpred vf vpred rf init coll]
+   (->> coll
+        (reduce
+         (fn [m x]
+           (let [k (kf x)]
+             (if-not (kpred k)
+               m
+               (let [v (vf x)]
+                 ;; no empty collections as a 'side effect':
+                 (if-not (vpred v)
+                   m
+                   (assoc! m k (rf (get m k init) v)))))))
+         (transient {}))
+        (persistent!))))
+
+(defn index-by
+  "(index-by first second [[1 3] [1 4] [2 5]]) => {1 4, 2 5}"
+  ([kf]
+   (map (juxt kf identity)))
+  ([kf coll]
+   (into {} (index-by kf) coll))
+  ([kf vf coll]
+   (into {} (map (juxt kf vf)) coll)))
+
+(defn rfirst
+  "Return first item from Reducible"
+  [reducible]
+  (reduce (fn [_ fst] (reduced fst)) nil reducible))
+
+(defn rconcat
+  "Concatenate two Reducibles"
+  [r1 r2]
+  #?(:clj
+     (reify CollReduce
+       (coll-reduce [_ f]
+         #_{:clj-kondo/ignore [:reduce-without-init]}
+         (let [acc1 (reduce f r1)
+               acc2 (reduce f acc1 r2)]
+           acc2))
+       (coll-reduce [_ f init]
+         (let [acc1 (reduce f init r1)
+               acc2 (reduce f acc1 r2)]
+           acc2))
+
+       ;; The only reason to implement Seqable is to make it properly renderable by CIDER (and other IDEs, probably).
+       clojure.lang.Seqable
+       (seq [_] (concat (seq r1) (seq r2))))
+     :cljs
+     (reify IReduce
+       (-reduce [_ f]
+         (let [acc1 (reduce f r1)
+               acc2 (reduce f acc1 r2)]
+           acc2))
+       (-reduce [_ f init]
+         (let [acc1 (reduce f init r1)
+               acc2 (reduce f acc1 r2)]
+           acc2)))))
+
+(defn run-count!
+  "Runs the supplied procedure (via reduce), for purposes of side effects, on successive items. See [clojure.core/run!]
+   Returns the number of items processed."
+  [proc reducible]
+  (let [cnt (volatile! 0)]
+    (reduce (fn [_ item] (vswap! cnt inc) (proc item)) nil reducible)
+    @cnt))
+
+(defn generate-nano-id
+  "Generates a random NanoID string. Usually these are used for the entity_id field of various models.
+
+  If an argument is provided, it's taken to be an identity-hash string and used to seed the RNG,
+  producing the same value every time. This is only supported on the JVM!"
+  ([] (encore/nanoid))
+  ([seed-str]
+   #?(:clj  (let [seed (Long/parseLong seed-str 16)
+                  rnd  (Random. seed)
+                  gen  (encore/rand-id-fn {:rand-bytes-fn (fn [len]
+                                                            (let [ba (byte-array len)]
+                                                              (.nextBytes rnd ba)
+                                                              ba))})]
+              (gen))
+      :cljs (throw (ex-info "Seeded NanoIDs are not supported in CLJS" {:seed-str seed-str})))))
+
+(defn update-some
+  "Update a value by key in the `m`, if it's `some?`. If `nil` is returned, dissoc it instead"
+  [m k f & args]
+  (let [v (get m k)
+        res (when v (apply f v args))]
+    (if res
+      (assoc m k res)
+      (dissoc m k))))
+
+(defn not-blank
+  "Like not-empty, but for strings"
+  [s]
+  (when-not (str/blank? s) s))
+
+(defn safe-min
+  "nil safe clojure.core/min"
+  [& args]
+  (when-let [filtered (seq (remove nil? args))]
+    (apply min filtered)))
+
+#?(:clj
+   (defn do-with-timer-ms
+     "Impl of `with-timer-ms` for the JVM."
+     [thunk]
+     (let [start-time     (start-timer)
+           duration-ms-fn (fn [] (since-ms start-time))]
+       (thunk duration-ms-fn))))
+
+#?(:clj
+   (defmacro with-timer-ms
+     "Execute the body with a function that returns the duration in milliseconds.
+
+     (with-timer-ms [elapsed-ms-fn]
+       (do-something)
+       (elapsed-ms-fn))"
+     [[duration-ms-fn] & body]
+     `(do-with-timer-ms (fn [~duration-ms-fn] ~@body))))
+
+(defn find-first-map-indexed
+  "Finds the first map in `maps` that contains the value at the given key path,
+  and returns [index map]."
+  [maps ks value]
+  (first (keep-indexed
+          (fn [idx m] (when (= (get-in m ks) value) [idx m]))
+          maps)))
+
+(defn find-first-map
+  "Finds the first map in `maps` that contains the value at the given key path."
+  [maps ks value]
+  (second (find-first-map-indexed maps ks value)))

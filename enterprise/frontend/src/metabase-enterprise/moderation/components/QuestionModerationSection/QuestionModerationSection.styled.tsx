@@ -1,7 +1,7 @@
 import styled from "@emotion/styled";
 
-import Button from "metabase/core/components/Button";
-import { color } from "metabase/lib/colors";
+import Button, { type ButtonProps } from "metabase/common/components/Button";
+import { color } from "metabase/ui/utils/colors";
 import {
   MODERATION_STATUS,
   getStatusIcon,
@@ -9,19 +9,17 @@ import {
 
 const { color: verifiedIconColor } = getStatusIcon(MODERATION_STATUS.verified);
 
-export const VerifyButton = styled(Button)`
-  color: ${color(verifiedIconColor)};
+export const VerifyButton = styled((props: ButtonProps) => (
+  <Button {...props} iconSize={props.iconSize ?? 20} />
+))`
+  color: ${() => color(verifiedIconColor)};
   border: none;
   padding: 8px;
 
   &:disabled {
-    color: ${color("text-medium")};
+    color: var(--mb-color-text-medium);
   }
 
   position: relative;
   right: 8px;
 `;
-
-VerifyButton.defaultProps = {
-  iconSize: 20,
-};

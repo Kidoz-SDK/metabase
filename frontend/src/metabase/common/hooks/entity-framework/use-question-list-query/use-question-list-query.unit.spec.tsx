@@ -5,7 +5,7 @@ import {
   waitForLoaderToBeRemoved,
   within,
 } from "__support__/ui";
-import LoadingAndErrorWrapper from "metabase/components/LoadingAndErrorWrapper";
+import { LoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper";
 import { createMockCard } from "metabase-types/api/mocks";
 
 import { useQuestionListQuery } from "./use-question-list-query";
@@ -21,7 +21,7 @@ const TestComponent = () => {
 
   return (
     <div>
-      {data.map(question => (
+      {data.map((question) => (
         <div key={question.id()}>{question.displayName()}</div>
       ))}
 
@@ -40,7 +40,7 @@ const setup = () => {
 describe("useQuestionListQuery", () => {
   it("should be initially loading", () => {
     setup();
-    expect(screen.getByTestId("loading-spinner")).toBeInTheDocument();
+    expect(screen.getByTestId("loading-indicator")).toBeInTheDocument();
   });
 
   it("should show data from the response", async () => {

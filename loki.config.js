@@ -1,6 +1,23 @@
 module.exports = {
   diffingEngine: "looks-same",
-  storiesFilter: "static-viz",
+  storiesFilter: [
+    "DataGrid",
+    "static-viz",
+    "viz",
+    "Patterns/Upsells",
+    "^visualizations/shared",
+    "^app/embed",
+    "^design system",
+    "^Patterns/Overlays",
+    "^Components/Inputs/DatePicker Dates range",
+    "^Components/Parameters/DatePicker",
+    "^Components/Buttons/Button Compact size, custom color",
+    "^Components/overlays/Tooltip",
+    "^Components/Documents",
+    "^Components/Feedback/Alert",
+    "^Components/Table",
+    "^App/Palette",
+  ].join("|"),
   configurations: {
     "chrome.laptop": {
       target: "chrome.docker",
@@ -12,9 +29,7 @@ module.exports = {
   },
   "looks-same": {
     strict: false,
-    tolerance: 4,
-    antialiasingTolerance: 0,
-    ignoreAntialiasing: true,
-    ignoreCaret: true,
+    antialiasingTolerance: 9,
+    tolerance: 9,
   },
 };

@@ -52,7 +52,12 @@ function setup(props?: Partial<ActionExecuteModalProps>) {
   setupPrefetch();
 
   renderWithProviders(
-    <ActionExecuteModal {...props} actionId={implicitUpdateAction.id} />,
+    <ActionExecuteModal
+      opened
+      onClose={() => {}}
+      {...props}
+      actionId={implicitUpdateAction.id}
+    />,
   );
 }
 
@@ -64,7 +69,7 @@ describe("Actions > ActionExecuteModal", () => {
       shouldPrefetch: true,
     });
 
-    expect(screen.getByTestId("loading-spinner")).toBeInTheDocument();
+    expect(screen.getByTestId("loading-indicator")).toBeInTheDocument();
 
     await waitForLoaderToBeRemoved();
 

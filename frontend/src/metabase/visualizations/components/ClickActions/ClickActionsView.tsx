@@ -1,3 +1,6 @@
+import type { HTMLAttributes } from "react";
+
+import { trackClickActionPerformed } from "metabase/visualizations/analytics";
 import type { RegularClickAction } from "metabase/visualizations/types";
 
 import { ClickActionControl } from "./ClickActionControl";
@@ -19,13 +22,14 @@ export const ClickActionsView = ({
   clickActions,
   close,
   onClick,
-}: Props): JSX.Element => {
+  ...divProps
+}: Props & Omit<HTMLAttributes<HTMLDivElement>, "onClick">): JSX.Element => {
   const sections = getGroupedAndSortedActions(clickActions);
 
   const hasOnlyOneSection = sections.length === 1;
 
   return (
-    <Container>
+    <Container data-testid="click-actions-view" {...divProps}>
       {sections.map(([sectionKey, actions]) => {
         const sectionTitle = getSectionTitle(sectionKey, actions);
         const contentDirection = getSectionContentDirection(
@@ -44,12 +48,15 @@ export const ClickActionsView = ({
             contentDirection={contentDirection}
           >
             {withTopDivider && <Divider />}
-            {actions.map(action => (
+            {actions.map((action) => (
               <ClickActionControl
                 key={action.name}
                 action={action}
                 close={close}
-                onClick={() => onClick(action)}
+                onClick={() => {
+                  trackClickActionPerformed(action);
+                  onClick(action);
+                }}
               />
             ))}
             {withBottomDivider && <Divider />}

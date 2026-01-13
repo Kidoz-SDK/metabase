@@ -1,5 +1,5 @@
+const { H } = cy;
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
-import { restore, popover, visitDashboard } from "e2e/support/helpers";
 
 const { PEOPLE, PEOPLE_ID, PRODUCTS, PRODUCTS_ID } = SAMPLE_DATABASE;
 
@@ -8,7 +8,7 @@ const { PEOPLE, PEOPLE_ID, PRODUCTS, PRODUCTS_ID } = SAMPLE_DATABASE;
 
 describe("scenarios > dashboard > OLD parameters", () => {
   beforeEach(() => {
-    restore();
+    H.restore();
     cy.signInAsAdmin();
   });
 
@@ -32,7 +32,7 @@ describe("scenarios > dashboard > OLD parameters", () => {
         parameters: [filter],
       };
 
-      cy.createQuestionAndDashboard({ questionDetails, dashboardDetails }).then(
+      H.createQuestionAndDashboard({ questionDetails, dashboardDetails }).then(
         ({ body: { id, card_id, dashboard_id } }) => {
           cy.request("PUT", `/api/dashboard/${dashboard_id}`, {
             dashcards: [
@@ -54,7 +54,7 @@ describe("scenarios > dashboard > OLD parameters", () => {
             ],
           });
 
-          visitDashboard(dashboard_id);
+          H.visitDashboard(dashboard_id);
         },
       );
     });
@@ -64,7 +64,7 @@ describe("scenarios > dashboard > OLD parameters", () => {
 
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.contains("Category").click();
-      popover().within(() => {
+      H.popover().within(() => {
         cy.findByText("Gadget").click();
         cy.findByText("Add filter").click();
       });
@@ -93,7 +93,7 @@ describe("scenarios > dashboard > OLD parameters", () => {
 
       const dashboardDetails = { parameters: [filter] };
 
-      cy.createQuestionAndDashboard({ questionDetails, dashboardDetails }).then(
+      H.createQuestionAndDashboard({ questionDetails, dashboardDetails }).then(
         ({ body: { id, card_id, dashboard_id } }) => {
           cy.request("PUT", `/api/dashboard/${dashboard_id}`, {
             dashcards: [
@@ -115,22 +115,19 @@ describe("scenarios > dashboard > OLD parameters", () => {
             ],
           });
 
-          visitDashboard(dashboard_id);
+          H.visitDashboard(dashboard_id);
         },
       );
     });
 
     it("should work", () => {
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.contains("City").click();
-      popover().within(() => {
-        cy.get("input").type("Flagstaff{enter}");
+      cy.findByLabelText("City").click();
+      H.dashboardParametersPopover().within(() => {
+        H.fieldValuesCombobox().type("Flagstaff{enter}{esc}");
         cy.findByText("Add filter").click();
       });
 
-      cy.findByTestId("dashcard-container")
-        .get("tbody tr")
-        .should("have.length", 1);
+      H.assertTableRowsCount(1);
     });
   });
 
@@ -164,7 +161,7 @@ describe("scenarios > dashboard > OLD parameters", () => {
 
       const dashboardDetails = { parameters: [filter] };
 
-      cy.createNativeQuestionAndDashboard({
+      H.createNativeQuestionAndDashboard({
         questionDetails,
         dashboardDetails,
       }).then(({ body: { id, card_id, dashboard_id } }) => {
@@ -188,7 +185,7 @@ describe("scenarios > dashboard > OLD parameters", () => {
           ],
         });
 
-        visitDashboard(dashboard_id);
+        H.visitDashboard(dashboard_id);
       });
     });
 
@@ -197,7 +194,7 @@ describe("scenarios > dashboard > OLD parameters", () => {
 
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.contains("Category").click();
-      popover().within(() => {
+      H.popover().within(() => {
         cy.findByText("Gadget").click();
         cy.findByText("Add filter").click();
       });

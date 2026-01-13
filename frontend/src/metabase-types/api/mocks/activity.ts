@@ -1,29 +1,35 @@
 import type {
   PopularItem,
-  RecentItem,
-  RecentTableItem,
   RecentCollectionItem,
+  RecentTableDatabaseInfo,
+  RecentTableItem,
 } from "metabase-types/api";
 
 export const createMockRecentTableItem = (
   opts?: Partial<RecentTableItem>,
-): RecentItem => ({
+): RecentTableItem => ({
   id: 1,
   model: "table",
   name: "my_cool_table",
   display_name: "My Cool Table",
   timestamp: "2021-03-01T00:00:00.000Z",
-  database: {
-    id: 1,
-    name: "My Cool Collection",
-    initial_sync_status: "complete",
-  },
+  table_schema: "PUBLIC",
+  database: createMockRecentTableDatabaseInfo(),
+  ...opts,
+});
+
+export const createMockRecentTableDatabaseInfo = (
+  opts?: Partial<RecentTableDatabaseInfo>,
+): RecentTableDatabaseInfo => ({
+  id: 1,
+  name: "My Cool Database",
+  initial_sync_status: "complete",
   ...opts,
 });
 
 export const createMockRecentCollectionItem = (
   opts?: Partial<RecentCollectionItem>,
-): RecentItem => ({
+): RecentCollectionItem => ({
   id: 1,
   model: "card",
   name: "My Cool Question",

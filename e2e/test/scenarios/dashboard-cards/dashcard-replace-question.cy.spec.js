@@ -1,23 +1,10 @@
+const { H } = cy;
 import { USER_GROUPS } from "e2e/support/cypress_data";
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import {
   FIRST_COLLECTION_ID,
   ORDERS_COUNT_QUESTION_ID,
 } from "e2e/support/cypress_sample_instance_data";
-import {
-  saveDashboard,
-  modal,
-  popover,
-  restore,
-  visitDashboard,
-  findDashCardAction,
-  resetSnowplow,
-  enableTracking,
-  describeWithSnowplow,
-  expectGoodSnowplowEvent,
-  expectNoBadSnowplowEvents,
-  entityPickerModal,
-} from "e2e/support/helpers";
 import {
   createMockDashboardCard,
   createMockHeadingDashboardCard,
@@ -113,19 +100,19 @@ function getDashboardCards(mappedQuestionId) {
   ];
 }
 
-describeWithSnowplow("scenarios > dashboard cards > replace question", () => {
+describe("scenarios > dashboard cards > replace question", () => {
   beforeEach(() => {
-    resetSnowplow();
-    restore();
+    H.resetSnowplow();
+    H.restore();
     cy.signInAsAdmin();
-    enableTracking();
+    H.enableTracking();
 
     cy.intercept("POST", "/api/card/*/query").as("cardQuery");
 
-    cy.createQuestion(MAPPED_QUESTION_CREATE_INFO).then(
+    H.createQuestion(MAPPED_QUESTION_CREATE_INFO).then(
       ({ body: { id: mappedQuestionId } }) => {
-        cy.createQuestion(NEXT_QUESTION_CREATE_INFO).then(() => {
-          cy.createDashboard(DASHBOARD_CREATE_INFO).then(
+        H.createQuestion(NEXT_QUESTION_CREATE_INFO).then(() => {
+          H.createDashboard(DASHBOARD_CREATE_INFO).then(
             ({ body: { id: dashboardId } }) => {
               cy.request("PUT", `/api/dashboard/${dashboardId}`, {
                 dashcards: getDashboardCards(mappedQuestionId),
@@ -140,24 +127,25 @@ describeWithSnowplow("scenarios > dashboard cards > replace question", () => {
   });
 
   afterEach(() => {
-    expectNoBadSnowplowEvents();
+    H.expectNoBadSnowplowEvents();
   });
 
   it("should replace a dashboard card question (metabase#36984)", () => {
     visitDashboardAndEdit();
 
-    findDashCardAction(findHeadingDashcard(), "Replace").should("not.exist");
+    findHeadingDashcard()
+      .realHover({ scrollBehavior: "bottom" })
+      .findByLabelText("Replace")
+      .should("not.exist");
 
     // Ensure can replace with a question
     replaceQuestion(findTargetDashcard(), {
-      nextQuestionName: "Next question",
-      collectionName: "First collection",
+      nextQuestionName: "Orders",
     });
-    expectGoodSnowplowEvent({ event: "dashboard_card_replaced" });
+    H.expectUnstructuredSnowplowEvent({ event: "dashboard_card_replaced" });
     findTargetDashcard().within(() => {
-      assertDashCardTitle("Next question");
-      cy.findByText("Ean").should("exist");
-      cy.findByText("Rustic Paper Wallet").should("exist");
+      assertDashCardTitle("Orders");
+      cy.findByText("Product ID").should("exist");
     });
 
     // Ensure can replace with a model
@@ -172,7 +160,7 @@ describeWithSnowplow("scenarios > dashboard cards > replace question", () => {
     });
 
     // Ensure changes are persisted
-    saveDashboard();
+    H.saveDashboard();
     findTargetDashcard().within(() => {
       assertDashCardTitle("Orders Model");
       cy.findByText("Product ID").should("exist");
@@ -183,19 +171,26 @@ describeWithSnowplow("scenarios > dashboard cards > replace question", () => {
   it("should undo the question replace action", () => {
     visitDashboardAndEdit();
 
-    overwriteDashCardTitle(findTargetDashcard(), "Custom name");
+    overwriteDashCardTitle("Custom name");
     connectDashboardFilter(findTargetDashcard(), {
       filterName: PARAMETER.UNUSED.name,
       columnName: "Discount",
     });
 
     replaceQuestion(findTargetDashcard(), {
-      nextQuestionName: "Next question",
-      collectionName: "First collection",
+      nextQuestionName: "Orders",
     });
 
-    // There're two toasts: "Undo replace" and "Undo parameters auto-wiring"
-    cy.findAllByTestId("toast-undo").eq(0).button("Undo").click();
+    // There're two toasts: "Undo replace" and "Auto-connect"
+    H.undoToastList()
+      .should("have.length", 2)
+      .eq(0)
+      .should(($el) => {
+        // we wait for element to take its position after animation
+        expect($el.position().left).to.be.equal(0);
+      })
+      .button("Undo")
+      .click();
 
     // Ensure we kept viz settings and parameter mapping changes from before
     findTargetDashcard().within(() => {
@@ -206,11 +201,11 @@ describeWithSnowplow("scenarios > dashboard cards > replace question", () => {
     });
     assertDashboardFilterMapping(findTargetDashcard(), {
       filterName: PARAMETER.UNUSED.name,
-      expectedColumName: "Order.Discount",
+      expectedColumName: "Orders.Discount",
     });
 
     // Ensure changes are persisted
-    saveDashboard();
+    H.saveDashboard();
     findTargetDashcard().within(() => {
       assertDashCardTitle("Custom name");
       cy.findByText("18,760").should("exist");
@@ -240,7 +235,7 @@ describeWithSnowplow("scenarios > dashboard cards > replace question", () => {
     });
 
     // Ensure changes are persisted
-    saveDashboard();
+    H.saveDashboard();
     findTargetDashcard().within(() => {
       assertDashCardTitle("Next question");
       cy.findByText("Ean").should("exist");
@@ -250,7 +245,7 @@ describeWithSnowplow("scenarios > dashboard cards > replace question", () => {
 });
 
 function visitDashboardAndEdit() {
-  visitDashboard("@dashboardId");
+  H.visitDashboard("@dashboardId");
   cy.findByLabelText("Edit dashboard").click();
 }
 
@@ -267,7 +262,7 @@ function replaceQuestion(
   { nextQuestionName, collectionName, tab },
 ) {
   dashcardElement.realHover().findByLabelText("Replace").click();
-  entityPickerModal().within(() => {
+  H.entityPickerModal().within(() => {
     if (tab) {
       cy.findByRole("tablist").findByText(tab).click();
     }
@@ -283,32 +278,32 @@ function assertDashCardTitle(title) {
   cy.findByTestId("legend-caption-title").should("have.text", title);
 }
 
-function overwriteDashCardTitle(dashcardElement, textTitle) {
-  findDashCardAction(dashcardElement, "Show visualization options").click();
-  modal().within(() => {
-    cy.findByLabelText("Title").type(`{selectall}{del}${textTitle}`);
+function overwriteDashCardTitle(textTitle) {
+  findTargetDashcard()
+    .realHover({ scrollBehavior: "bottom" })
+    .findByLabelText("Show visualization options")
+    .click();
+  H.modal().within(() => {
+    cy.findByLabelText("Title").type(`{selectall}{del}${textTitle}`).blur();
     cy.button("Done").click();
   });
 }
 
+const filterPanel = () =>
+  cy.findByTestId("edit-dashboard-parameters-widget-container");
+
 function connectDashboardFilter(dashcardElement, { filterName, columnName }) {
-  const filterPanel = cy.findByTestId(
-    "edit-dashboard-parameters-widget-container",
-  );
-  filterPanel.findByText(filterName).click();
+  filterPanel().findByText(filterName).click();
   dashcardElement.button(/Select/).click();
-  popover().findByText(columnName).click();
-  filterPanel.findByText(filterName).click();
+  H.popover().findByText(columnName).click();
+  filterPanel().findByText(filterName).click();
 }
 
 function assertDashboardFilterMapping(
   dashcardElement,
   { filterName, expectedColumName },
 ) {
-  const filterPanel = cy.findByTestId(
-    "edit-dashboard-parameters-widget-container",
-  );
-  filterPanel.findByText(filterName).click();
+  filterPanel().findByText(filterName).click();
   dashcardElement.findByText(expectedColumName).should("exist");
-  filterPanel.findByText(filterName).click();
+  filterPanel().findByText(filterName).click();
 }

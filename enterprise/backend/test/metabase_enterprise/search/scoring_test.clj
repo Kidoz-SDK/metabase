@@ -1,14 +1,18 @@
 (ns metabase-enterprise.search.scoring-test
   (:require
-   [cheshire.core :as json]
    [clojure.math.combinatorics :as math.combo]
    [clojure.set :as set]
    [clojure.string :as str]
    [clojure.test :refer :all]
    [java-time.api :as t]
    [metabase-enterprise.search.scoring :as ee-scoring]
-   [metabase.search.scoring :as scoring]
-   [metabase.test :as mt]))
+   [metabase.search.appdb.scoring-test :as appdb.scoring-test]
+   [metabase.search.in-place.scoring :as scoring]
+   [metabase.test :as mt]
+   [metabase.util.json :as json])
+  (:import [java.time Instant]))
+
+(set! *warn-on-reflection* true)
 
 (deftest ^:parallel verified-score-test
   (let [score #'ee-scoring/verified-score
@@ -25,16 +29,16 @@
 (defn- ee-score
   [search-string item]
   (mt/with-premium-features #{:official-collections :content-verification}
-    (-> (scoring/score-and-result search-string item) :score)))
+    (-> (scoring/score-and-result item {:search-string search-string}) :score)))
 
 (defn- oss-score
   [search-string item]
   (mt/with-premium-features #{}
-    (-> (scoring/score-and-result search-string item) :score)))
+    (-> (scoring/score-and-result item {:search-string search-string}) :score)))
 
 (deftest official-collection-tests
   (testing "it should bump up the value of items in official collections"
-    ;; using the ee implementation that isn't wrapped by enable-enhancements? check
+    ;; using the ee implementation that isn't wrapped by premium features token check
     (let [search-string "custom expression examples"
           a             {:id "a" :name "custom expression examples" :model "dashboard"}
           b             {:id "b" :name "examples of custom expressions" :model "dashboard"}
@@ -108,12 +112,12 @@
   {:pre [(> 10 (count values))]}
   (mapv vec (mapcat math.combo/permutations (math.combo/subsets values))))
 
-(defn test-corups [words]
+(defn test-corpus [words]
   (let [corpus (->> words
                     all-permutations-all-orders
                     (mapv #(str/join " " %))
                     (remove #{""}))
-        the-query (json/generate-string {:type :query :query {:source-table 1}})
+        the-query (json/encode {:type :query :query {:source-table 1}})
         ->query (fn [n] {:name n :dataset_query the-query})
         results (map ->query corpus)]
     (doseq [search-string corpus]
@@ -121,14 +125,14 @@
              (-> (scoring/top-results
                   results
                   1
-                  (map #(scoring/score-and-result search-string %)))
+                  (keep #(scoring/score-and-result % {:search-string search-string})))
                  first
                  :name))))))
 
 (deftest identical-results-result-in-identical-hits
-  (test-corups ["foo" "bar"])
-  (test-corups ["foo" "bar" "baz"])
-  (test-corups ["foo" "bar" "baz" "quux"]))
+  (test-corpus ["foo" "bar"])
+  (test-corpus ["foo" "bar" "baz"])
+  (test-corpus ["foo" "bar" "baz" "quux"]))
 
 (deftest score-result-test
   (let [score-result-names (fn [] (set (map :name (scoring/score-result {}))))]
@@ -149,3 +153,61 @@
     (testing "includes both if has both features"
       (mt/with-premium-features #{:official-collections :content-verification}
         (is (set/subset? #{"official collection score" "verified"} (score-result-names)))))))
+
+(deftest appdb-official-collection-test
+  (appdb.scoring-test/with-index-contents
+    [{:model "collection" :id 1 :name "collection normal" :official_collection false}
+     {:model "collection" :id 2 :name "collection official" :official_collection true}]
+    (testing "official collections has higher rank"
+      (mt/with-premium-features #{:official-collections}
+        (is (= [["collection" 2 "collection official"]
+                ["collection" 1 "collection normal"]]
+               (appdb.scoring-test/search-results :official-collection "collection")))))
+    (testing "only if feature is enabled"
+      (mt/with-premium-features #{}
+        (is (= [["collection" 1 "collection normal"]
+                ["collection" 2 "collection official"]]
+               (appdb.scoring-test/search-results* "collection")))))))
+
+(deftest appdb-verified-test
+  (appdb.scoring-test/with-index-contents
+    [{:model "card" :id 1 :name "card normal" :verified false}
+     {:model "card" :id 2 :name "card verified" :verified true}]
+    (testing "verified items have higher rank"
+      (mt/with-premium-features #{:content-verification}
+        (is (= [["card" 2 "card verified"]
+                ["card" 1 "card normal"]]
+               (appdb.scoring-test/search-results :verified "card")))))
+    (testing "only if feature is enabled"
+      (mt/with-premium-features #{}
+        (is (= [["card" 1 "card normal"]
+                ["card" 2 "card verified"]]
+               (appdb.scoring-test/search-results* "card")))))))
+
+(deftest ^:parallel transforms-user-recency-test
+  (mt/with-premium-features #{:transforms}
+    (let [user-id (mt/user->id :crowberto)
+          now     (Instant/now)
+          recent-view (fn [model-id timestamp]
+                        {:model     "card"
+                         :model_id  model-id
+                         :user_id   user-id
+                         :timestamp timestamp})]
+      (mt/with-temp [:model/Card        {c1 :id} {}
+                     :model/Card        {c2 :id} {}
+                     :model/Transform   {t1 :id} {:name "test transform"
+                                                  :source {:type "query"
+                                                           :query (mt/native-query {:query "SELECT 1"})}
+                                                  :target {:type "table"
+                                                           :name "test_table"}}
+                     :model/RecentViews _ (recent-view c1 now)]
+        (appdb.scoring-test/with-index-contents
+          [{:model "card"      :id c1 :name "test card recent"}
+           {:model "card"      :id c2 :name "test card unseen"}
+           {:model "transform" :id t1 :name "test transform"}]
+          (testing "Transforms get a hardcoded 1-day recency (between recently viewed card and never viewed card)"
+            (is (= [["card"      c1 "test card recent"]
+                    ["transform" t1 "test transform"]
+                    ["card"      c2 "test card unseen"]]
+                   (appdb.scoring-test/search-results :user-recency "test" {:current-user-id user-id
+                                                                            :context :metabot})))))))))

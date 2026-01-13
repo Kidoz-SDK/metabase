@@ -1,47 +1,59 @@
 import type {
-  ListCollectionItemsRequest,
-  ListCollectionItemsResponse,
-  UpdateCollectionRequest,
   Collection,
   CreateCollectionRequest,
+  DeleteCollectionRequest,
+  GetCollectionDashboardQuestionCandidatesRequest,
+  GetCollectionDashboardQuestionCandidatesResult,
+  ListCollectionItemsRequest,
+  ListCollectionItemsResponse,
   ListCollectionsRequest,
   ListCollectionsTreeRequest,
-  CollectionId,
-  DeleteCollectionRequest,
+  MoveCollectionDashboardCandidatesRequest,
+  MoveCollectionDashboardCandidatesResult,
+  UpdateCollectionRequest,
+  getCollectionRequest,
 } from "metabase-types/api";
 
 import { Api } from "./api";
 import {
-  provideCollectionItemListTags,
-  provideCollectionTags,
-  provideCollectionListTags,
+  idTag,
   invalidateTags,
   listTag,
-  idTag,
+  provideCollectionItemListTags,
+  provideCollectionListTags,
+  provideCollectionTags,
 } from "./tags";
 
 export const collectionApi = Api.injectEndpoints({
-  endpoints: builder => ({
-    listCollections: builder.query<Collection[], ListCollectionsRequest>({
-      query: params => ({
-        method: "GET",
-        url: `/api/collection`,
-        params,
-      }),
-      providesTags: (collections = []) =>
-        provideCollectionListTags(collections),
-    }),
+  endpoints: (builder) => ({
+    /**
+     * @deprecated This endpoint is extremely slow on large instances, it should not be used
+     * you probably only need a few collections, just fetch those
+     */
+    listCollections: builder.query<Collection[], ListCollectionsRequest | void>(
+      {
+        query: (params) => ({
+          method: "GET",
+          url: `/api/collection`,
+          params,
+        }),
+        providesTags: (collections = []) =>
+          provideCollectionListTags(collections),
+      },
+    ),
     listCollectionsTree: builder.query<
       Collection[],
-      ListCollectionsTreeRequest
+      ListCollectionsTreeRequest | void
     >({
-      query: params => ({
+      query: (params) => ({
         method: "GET",
         url: "/api/collection/tree",
         params,
       }),
-      providesTags: (collections = []) =>
-        provideCollectionListTags(collections),
+      providesTags: (collections = []) => [
+        ...provideCollectionListTags(collections),
+        "collection-tree",
+      ],
     }),
     listCollectionItems: builder.query<
       ListCollectionItemsResponse,
@@ -52,31 +64,35 @@ export const collectionApi = Api.injectEndpoints({
         url: `/api/collection/${id}/items`,
         params,
       }),
-      providesTags: (response, error, { models }) =>
-        provideCollectionItemListTags(response?.data ?? [], models),
+      providesTags: (response, error, { models, id }) => [
+        ...provideCollectionItemListTags(response?.data ?? [], models),
+        { type: "collection", id: `${id}-items` },
+      ],
     }),
-    getCollection: builder.query<Collection, CollectionId>({
-      query: id => ({
-        method: "GET",
-        url: `/api/collection/${id}`,
-      }),
-      providesTags: collection =>
+    getCollection: builder.query<Collection, getCollectionRequest>({
+      query: ({ id, ignore_error, ...params }) => {
+        return {
+          method: "GET",
+          url: `/api/collection/${id}`,
+          params,
+          noEvent: ignore_error,
+        };
+      },
+      providesTags: (collection) =>
         collection ? provideCollectionTags(collection) : [],
     }),
     createCollection: builder.mutation<Collection, CreateCollectionRequest>({
-      query: body => ({
+      query: (body) => ({
         method: "POST",
         url: "/api/collection",
         body,
       }),
       invalidatesTags: (collection, error) =>
         collection
-          ? [
-              ...invalidateTags(error, [listTag("collection")]),
-              ...invalidateTags(error, [
-                idTag("collection", collection.parent_id ?? "root"),
-              ]),
-            ]
+          ? invalidateTags(error, [
+              listTag("collection"),
+              idTag("collection", collection.parent_id ?? "root"),
+            ])
           : [],
     }),
     updateCollection: builder.mutation<Collection, UpdateCollectionRequest>({
@@ -85,8 +101,13 @@ export const collectionApi = Api.injectEndpoints({
         url: `/api/collection/${id}`,
         body,
       }),
-      invalidatesTags: (_, error, { id }) =>
-        invalidateTags(error, [listTag("collection"), idTag("collection", id)]),
+      invalidatesTags: (_, error, payload) => {
+        return invalidateTags(error, [
+          listTag("collection"),
+          idTag("collection", payload.id),
+          idTag("collection", payload.parent_id ?? "root"),
+        ]);
+      },
     }),
     deleteCollection: builder.mutation<void, DeleteCollectionRequest>({
       query: ({ id, ...body }) => ({
@@ -96,6 +117,41 @@ export const collectionApi = Api.injectEndpoints({
       }),
       invalidatesTags: (_, error, { id }) =>
         invalidateTags(error, [listTag("collection"), idTag("collection", id)]),
+    }),
+    listCollectionDashboardQuestionCandidates: builder.query<
+      GetCollectionDashboardQuestionCandidatesResult,
+      GetCollectionDashboardQuestionCandidatesRequest
+    >({
+      query: ({ collectionId, ...params }) => ({
+        method: "GET",
+        url: `/api/collection/${collectionId}/dashboard-question-candidates`,
+        params,
+      }),
+      providesTags: (_, __, { collectionId }) => [
+        idTag("dashboard-question-candidates", collectionId),
+        idTag("collection", collectionId),
+        // HACK: instead of making all dashboard operations aware of dq candidates
+        // rely on the fact that all dashboard mutation operation invalidate the
+        // dashboard list cache tag
+        listTag("dashboard"),
+      ],
+    }),
+    moveCollectionDashboardQuestionCandidates: builder.mutation<
+      MoveCollectionDashboardCandidatesResult,
+      MoveCollectionDashboardCandidatesRequest
+    >({
+      query: ({ collectionId, cardIds }) => ({
+        method: "POST",
+        url: `/api/collection/${collectionId}/move-dashboard-question-candidates`,
+        body: { card_ids: cardIds },
+      }),
+      invalidatesTags: (result, error, { collectionId }) =>
+        invalidateTags(error, [
+          idTag("dashboard-question-candidates", collectionId),
+          idTag("collection", collectionId),
+          listTag("card"),
+          ...(result ? result.moved.map((id) => idTag("card", id)) : []),
+        ]),
     }),
   }),
 });
@@ -108,4 +164,6 @@ export const {
   useCreateCollectionMutation,
   useUpdateCollectionMutation,
   useDeleteCollectionMutation,
+  useListCollectionDashboardQuestionCandidatesQuery,
+  useMoveCollectionDashboardQuestionCandidatesMutation,
 } = collectionApi;

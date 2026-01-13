@@ -1,35 +1,33 @@
 import type { CSSProperties } from "react";
 
-import type {
-  StaticVisualizationProps,
-  RenderingContext,
-} from "metabase/visualizations/types";
+import type { RenderingContext } from "metabase/visualizations/types";
 import {
-  computeTrend,
   CHANGE_TYPE_OPTIONS,
+  computeTrend,
 } from "metabase/visualizations/visualizations/SmartScalar/compute";
 import { formatChange } from "metabase/visualizations/visualizations/SmartScalar/utils";
 
-import { computeSmartScalarSettings } from "./settings";
+import type { StaticChartProps } from "../StaticVisualization";
 
 export function SmartScalar({
   rawSeries,
-  dashcardSettings,
+  settings,
   renderingContext,
-}: StaticVisualizationProps) {
-  const { fontFamily, formatValue, getColor } = renderingContext;
+}: StaticChartProps) {
+  const { fontFamily, getColor } = renderingContext;
   const [{ card, data }] = rawSeries;
   const { insights } = data;
 
-  const settings = computeSmartScalarSettings(rawSeries, dashcardSettings);
-
-  const trend = computeTrend(rawSeries, insights, settings, {
-    formatValue,
+  const { trend, error } = computeTrend(rawSeries, insights, settings, {
     getColor,
   });
 
-  if (!trend) {
-    throw new Error(`Failed to compute trend data for ${card.name}`);
+  if (error || !trend) {
+    throw new Error(
+      `Failed to compute trend data for ${card.name}\: ${
+        (error as { message: string }).message
+      }`,
+    );
   }
 
   const comparisons: any[] = trend.comparisons || [];
@@ -110,11 +108,7 @@ function Comparison({ comparison, renderingContext }: ComparisonProps) {
     percentChange: {
       color: comparison.changeColor || getColor("text-light"),
       fontWeight: 900,
-    },
-    separator: {
-      color: getColor("text-light"),
-      fontSize: "10px",
-      margin: "0 2px",
+      marginRight: 4,
     },
     comparisonDescription: {
       color: getColor("text-medium"),
@@ -131,7 +125,6 @@ function Comparison({ comparison, renderingContext }: ComparisonProps) {
       {!!icon && <span style={styles.icon}>{icon}</span>}
       <span>
         <span style={styles.percentChange}>{changeDisplayValue}</span>
-        <span style={styles.separator}> • </span>
         <span style={styles.comparisonDescription}>
           {`${comparison.comparisonDescStr}: `}
         </span>

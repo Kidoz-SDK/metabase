@@ -1,8 +1,13 @@
 import userEvent from "@testing-library/user-event";
 import fetchMock from "fetch-mock";
 
+import {
+  setupPropertiesEndpoints,
+  setupSettingsEndpoints,
+} from "__support__/server-mocks";
 import { renderWithProviders, screen, waitFor } from "__support__/ui";
 import type { SetupStep } from "metabase/setup/types";
+import { createMockSettings } from "metabase-types/api/mocks";
 import {
   createMockSetupState,
   createMockState,
@@ -23,8 +28,8 @@ const setup = ({ step = "data_usage" }: SetupOpts = {}) => {
     }),
   });
 
-  fetchMock.get("path:/api/setting", 200);
-  fetchMock.get("path:/api/session/properties", 200);
+  setupSettingsEndpoints([]);
+  setupPropertiesEndpoints(createMockSettings());
 
   renderWithProviders(<DataUsageStep stepLabel={0} />, {
     storeInitialState: state,
@@ -47,7 +52,9 @@ describe("DataUsageStep", () => {
     await userEvent.click(toggle);
 
     await waitFor(() => {
-      expect(fetchMock.called(TRACKING_PATH, { method: "PUT" })).toBeTruthy();
+      expect(
+        fetchMock.callHistory.called(TRACKING_PATH, { method: "PUT" }),
+      ).toBeTruthy();
     });
 
     expect(toggle).not.toBeChecked();
@@ -62,7 +69,9 @@ describe("DataUsageStep", () => {
     await userEvent.click(toggle);
 
     await waitFor(() => {
-      expect(fetchMock.called(TRACKING_PATH, { method: "PUT" })).toBeTruthy();
+      expect(
+        fetchMock.callHistory.called(TRACKING_PATH, { method: "PUT" }),
+      ).toBeTruthy();
     });
 
     expect(await screen.findByText("An error occurred")).toBeInTheDocument();

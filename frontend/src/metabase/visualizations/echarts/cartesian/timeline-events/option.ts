@@ -40,15 +40,17 @@ function svgToImageUri(svgString: string) {
 export const getTimelineEventsSeries = (
   timelineEventsModel: TimelineEventsModel,
   selectedEventsIds: TimelineEventId[],
-  { fontFamily, getColor }: RenderingContext,
+  { fontFamily, getColor, theme }: RenderingContext,
 ): LineSeriesOption | null => {
+  const { fontSize } = theme?.cartesian?.label ?? {};
+
   if (timelineEventsModel.length === 0) {
     return null;
   }
 
   const timelineEventsData: MarkLine1DDataItemOption[] =
     timelineEventsModel.map(({ date, events }) => {
-      const isSelected = events.some(event =>
+      const isSelected = events.some((event) =>
         selectedEventsIds.includes(event.id),
       );
 
@@ -74,7 +76,7 @@ export const getTimelineEventsSeries = (
           padding: [0, 0, 0, 24],
           hideOverlap: true,
           color,
-          fontSize: CHART_STYLE.axisTicks.size,
+          fontSize,
           fontWeight: CHART_STYLE.axisTicks.weight,
           fontFamily,
         },
@@ -112,6 +114,7 @@ export const getTimelineEventsSeries = (
       symbol: "none",
       lineStyle: {
         type: "solid",
+        // eslint-disable-next-line no-color-literals
         color: "rgba(105, 110, 123, 0.2)",
         width: 2,
       },

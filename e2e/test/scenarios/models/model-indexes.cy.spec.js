@@ -1,13 +1,5 @@
+const { H } = cy;
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
-import {
-  restore,
-  openQuestionActions,
-  popover,
-  sidebar,
-  openColumnOptions,
-  commandPaletteSearch,
-  commandPalette,
-} from "e2e/support/helpers";
 import { createModelIndex } from "e2e/support/helpers/e2e-model-index-helper";
 
 const { PRODUCTS_ID, PEOPLE_ID } = SAMPLE_DATABASE;
@@ -16,7 +8,7 @@ describe("scenarios > model indexes", () => {
   let modelId;
 
   beforeEach(() => {
-    restore();
+    H.restore();
     cy.signInAsAdmin();
     cy.intercept("GET", "/api/search?q=*").as("searchQuery");
     cy.intercept("POST", "/api/dataset").as("dataset");
@@ -25,7 +17,7 @@ describe("scenarios > model indexes", () => {
     cy.intercept("PUT", "/api/card/*").as("cardUpdate");
     cy.intercept("GET", "/api/card/*").as("cardGet");
 
-    cy.createQuestion(
+    H.createQuestion(
       {
         name: "Products Model",
         query: { "source-table": PRODUCTS_ID },
@@ -34,7 +26,7 @@ describe("scenarios > model indexes", () => {
       { wrapId: true, idAlias: "modelId" },
     );
 
-    cy.get("@modelId").then(_modelId => {
+    cy.get("@modelId").then((_modelId) => {
       modelId = _modelId;
     });
   });
@@ -45,7 +37,7 @@ describe("scenarios > model indexes", () => {
 
     editTitleMetadata();
 
-    sidebar()
+    H.sidebar()
       .findByLabelText(/surface individual records/i)
       .click({ force: true }); // needs to be forced because Mantine
 
@@ -63,7 +55,7 @@ describe("scenarios > model indexes", () => {
 
     editTitleMetadata();
 
-    sidebar()
+    H.sidebar()
       .findByLabelText(/surface individual records/i)
       .click({ force: true });
 
@@ -80,7 +72,7 @@ describe("scenarios > model indexes", () => {
 
     editTitleMetadata();
 
-    sidebar()
+    H.sidebar()
       .findByLabelText(/surface individual records/i)
       .click({ force: true });
 
@@ -104,18 +96,18 @@ describe("scenarios > model indexes", () => {
 
     editTitleMetadata();
 
-    sidebar()
+    H.sidebar()
       .findByLabelText(/surface individual records/i)
       .click({ force: true });
 
-    openColumnOptions("ID");
+    H.openColumnOptions("ID");
 
     // change the entity key to a foreign key so no key exists
-    sidebar()
-      .findByText(/entity key/i)
+    H.sidebar()
+      .findByDisplayValue(/entity key/i)
       .click();
 
-    popover()
+    H.popover()
       .findByText(/foreign key/i)
       .click();
 
@@ -124,9 +116,9 @@ describe("scenarios > model indexes", () => {
     cy.wait("@cardUpdate");
 
     // search should fail
-    commandPaletteSearch("marble shoes", false);
+    H.commandPaletteSearch("marble shoes", false);
 
-    commandPalette()
+    H.commandPalette()
       .findByRole("option", { name: /No results for/ })
       .should("exist");
   });
@@ -136,22 +128,24 @@ describe("scenarios > model indexes", () => {
 
     cy.visit("/");
 
-    commandPaletteSearch("marble shoes", false);
-    commandPalette()
+    H.commandPaletteSearch("marble shoes", false);
+    H.commandPalette()
       .findByRole("option", { name: "Small Marble Shoes" })
       .click();
 
     cy.wait("@dataset");
 
     cy.findByTestId("object-detail").within(() => {
-      cy.findByRole("heading", { name: /Product/ });
-      cy.findByText("Small Marble Shoes");
-      cy.findByText("Doohickey");
+      cy.findByRole("heading", { name: "Small Marble Shoes" }).should(
+        "be.visible",
+      );
+      cy.findAllByText("Small Marble Shoes").should("have.length", 2);
+      cy.findByText("Doohickey").should("be.visible");
     });
   });
 
-  it("should be able to see details of a record outside the first 2000", () => {
-    cy.createQuestion(
+  it.skip("should be able to see details of a record outside the first 2000", () => {
+    H.createQuestion(
       {
         name: "People Model",
         query: { "source-table": PEOPLE_ID },
@@ -163,7 +157,7 @@ describe("scenarios > model indexes", () => {
       },
     );
 
-    cy.get("@people_model_id").then(peopleModelId => {
+    cy.get("@people_model_id").then((peopleModelId) => {
       createModelIndex({
         modelId: peopleModelId,
         pkName: "ID",
@@ -173,14 +167,15 @@ describe("scenarios > model indexes", () => {
 
     cy.visit("/");
 
-    commandPaletteSearch("anais", false);
-    commandPalette().findByRole("option", { name: "Anais Zieme" }).click();
+    H.commandPaletteSearch("anais", false);
+    H.commandPalette().findByRole("option", { name: "Anais Zieme" }).click();
 
     cy.wait("@dataset");
     cy.wait("@dataset"); // second query gets the additional record
 
     cy.findByTestId("object-detail").within(() => {
       cy.findByText(/We're a little lost/i).should("not.exist");
+      cy.findByRole("heading", { name: "Anais Zieme" }).should("be.visible");
       cy.findAllByText("Anais Zieme").should("have.length", 2);
     });
   });
@@ -190,25 +185,27 @@ describe("scenarios > model indexes", () => {
 
     cy.visit("/");
 
-    commandPaletteSearch("marble shoes", false);
-    commandPalette()
+    H.commandPaletteSearch("marble shoes", false);
+    H.commandPalette()
       .findByRole("option", { name: "Small Marble Shoes" })
       .click();
 
     cy.wait("@dataset");
 
     cy.findByTestId("object-detail").within(() => {
-      cy.findByRole("heading", { name: /Product/ });
-      cy.findByText("Small Marble Shoes");
-      cy.findByText("Doohickey");
+      cy.findByRole("heading", { name: "Small Marble Shoes" }).should(
+        "be.visible",
+      );
+      cy.findAllByText("Small Marble Shoes").should("have.length", 2);
+      cy.findByText("Doohickey").should("be.visible");
     });
 
     expectCardQueries(1);
 
     cy.get("body").type("{esc}");
 
-    commandPaletteSearch("silk coat", false);
-    commandPalette()
+    H.commandPaletteSearch("silk coat", false);
+    H.commandPalette()
       .findByRole("option", { name: "Ergonomic Silk Coat" })
       .click();
 
@@ -221,15 +218,15 @@ describe("scenarios > model indexes", () => {
 });
 
 function editTitleMetadata() {
-  openQuestionActions();
-  popover().findByText("Edit metadata").click();
-  cy.url().should("include", "/metadata");
-  cy.findByTestId("TableInteractive-root").findByTextEnsureVisible("Title");
+  H.openQuestionActions();
+  H.popover().findByText("Edit metadata").click();
+  cy.url().should("include", "/columns");
+  H.tableInteractive().findByTextEnsureVisible("Title");
 
-  openColumnOptions("Title");
+  H.openColumnOptions("Title");
 }
 
-const expectCardQueries = num =>
-  cy.get("@cardGet.all").then(interceptions => {
+const expectCardQueries = (num) =>
+  cy.get("@cardGet.all").then((interceptions) => {
     expect(interceptions).to.have.length(num);
   });

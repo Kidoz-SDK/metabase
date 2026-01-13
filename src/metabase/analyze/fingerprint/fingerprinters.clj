@@ -10,6 +10,8 @@
    [metabase.sync.util :as sync-util]
    [metabase.util :as u]
    [metabase.util.date-2 :as u.date]
+   [metabase.util.log]
+   [metabase.util.performance :as perf]
    [redux.core :as redux])
   (:import
    (com.bigml.histogram Histogram)
@@ -21,22 +23,23 @@
 (set! *warn-on-reflection* true)
 
 (defn col-wise
-  "Apply reducing functinons `rfs` coll-wise to a seq of seqs."
+  "Apply reducing functions `rfs` coll-wise to a seq of seqs."
   [& rfs]
-  (fn
-    ([] (mapv (fn [rf] (rf)) rfs))
-    ([accs] (mapv (fn [rf acc] (rf (unreduced acc))) rfs accs))
-    ([accs row]
-     (let [all-reduced? (volatile! true)
-           results      (mapv (fn [rf acc x]
-                                (if-not (reduced? acc)
-                                  (do (vreset! all-reduced? false)
-                                      (rf acc x))
-                                  acc))
-                              rfs accs row)]
-       (if @all-reduced?
-         (reduced results)
-         results)))))
+  (let [rfs (vec rfs)]
+    (fn
+      ([] (perf/mapv (fn [rf] (rf)) rfs))
+      ([accs] (perf/mapv (fn [rf acc] (rf (unreduced acc))) rfs accs))
+      ([accs row]
+       (let [all-reduced? (volatile! true)
+             results      (perf/mapv (fn [rf acc x]
+                                       (if-not (reduced? acc)
+                                         (do (vreset! all-reduced? false)
+                                             (rf acc x))
+                                         acc))
+                                     rfs accs row)]
+         (if @all-reduced?
+           (reduced results)
+           results))))))
 
 (defn constant-fingerprinter
   "Constantly return `init`."
@@ -63,25 +66,30 @@
                                       ~v
                                       (catch Throwable _#))]))))
 
-(defmacro ^:private with-reduced-error
-  [msg & body]
-  `(let [result# (sync-util/with-error-handling ~msg ~@body)]
-     (if (instance? Throwable result#)
-       (reduced result#)
-       result#)))
+(defmacro ^:private do-with-error-handling
+  "This macro and its usage is written in a specific way to ensure that try-catch blocks don't produce closures."
+  [form action-on-exception msg]
+  `(if sync-util/*log-exceptions-and-continue?*
+     (try ~form
+          (catch Throwable e#
+            (metabase.util.log/warn e# ~msg)
+            (~action-on-exception e#)))
+     ~form))
 
 (defn with-error-handling
   "Wrap `rf` in an error-catching transducer."
   [rf msg]
+  ;; This function is written in a specific way to ensure that try-catch blocks don't produce closures.
   (fn
-    ([] (with-reduced-error msg (rf)))
+    ([]
+     (do-with-error-handling (rf) reduced msg))
     ([acc]
-     (unreduced
-      (if (or (reduced? acc)
-              (instance? Throwable acc))
-        acc
-        (with-reduced-error msg (rf acc)))))
-    ([acc e] (with-reduced-error msg (rf acc e)))))
+     (if (or (reduced? acc)
+             (instance? Throwable acc))
+       (unreduced acc)
+       (do-with-error-handling (unreduced (rf acc)) identity msg)))
+    ([acc e]
+     (do-with-error-handling (rf acc e) reduced msg))))
 
 (defn robust-fuse
   "Like `redux/fuse` but wraps every reducing fn in `with-error-handling` and returns `nil` for
@@ -95,29 +103,51 @@
                                     result))))
                              kfs)))
 
-(defmulti fingerprinter
-  "Return a fingerprinter transducer for a given field based on the field's type."
-  {:arglists '([field])}
-  (fn [{base-type :base_type, effective-type :effective_type, semantic-type :semantic_type, :keys [unit]}]
-    [(cond
-       (u.date/extract-units unit)
-       :type/Integer
+(def ^:private supported-coercions
+  #{:Coercion/String->Temporal
+    :Coercion/Bytes->Temporal
+    :Coercion/Temporal->Temporal
+    :Coercion/Number->Temporal
+    :Coercion/String->Number
+    ;; the numeric fingerprinter consider every number as a double
+    :Coercion/Float->Integer})
+
+(defn- ensure-coercion-is-supported [{coercion-strategy :coercion_strategy :as field}]
+  (when coercion-strategy
+    (when-not (some #(isa? coercion-strategy %) supported-coercions)
+      (throw (ex-info (format "Coercion strategy %s not supported by fingerprinters" coercion-strategy) field)))))
+
+(defn- fingerprinter-dispatch
+  [{base-type :base_type, effective-type :effective_type, semantic-type :semantic_type, :keys [unit] :as field}]
+  (ensure-coercion-is-supported field)
+  [(cond
+     (u.date/extract-units unit)
+     :type/Integer
 
        ;; for historical reasons the Temporal fingerprinter is still called `:type/DateTime` so anything that derives
        ;; from `Temporal` (such as DATEs and TIMEs) should still use the `:type/DateTime` fingerprinter
-       (isa? (or effective-type base-type) :type/Temporal)
-       :type/DateTime
+     (isa? (or effective-type base-type) :type/Temporal)
+     :type/DateTime
 
-       :else
-       base-type)
-     (if (isa? semantic-type :Semantic/*)
-       semantic-type
-       :Semantic/*)
-     (if (isa? semantic-type :Relation/*)
-       semantic-type
-       :Relation/*)]))
+     :else
+     (or effective-type base-type))
+   (if (isa? semantic-type :Semantic/*)
+     semantic-type
+     :Semantic/*)
+   (if (isa? semantic-type :Relation/*)
+     semantic-type
+     :Relation/*)])
 
-(def ^:private global-fingerprinter
+(defmulti fingerprinter
+  "Return a fingerprinter transducer for a given field based on the field's type."
+  {:arglists '([field])}
+  (fn [field]
+    (do-with-error-handling
+     (fingerprinter-dispatch field)
+     (fn [_] nil)
+     "Error during fingerprinter dispatch")))
+
+(defn- global-fingerprinter []
   (redux/post-complete
    (robust-fuse {:distinct-count cardinality
                  :nil%           (stats/share nil?)})
@@ -125,11 +155,11 @@
 
 (defmethod fingerprinter :default
   [_]
-  global-fingerprinter)
+  (global-fingerprinter))
 
 (defmethod fingerprinter [:type/* :Semantic/* :type/FK]
   [_]
-  global-fingerprinter)
+  (global-fingerprinter))
 
 (defmethod fingerprinter [:type/* :Semantic/* :type/PK]
   [_]
@@ -147,7 +177,7 @@
   (redux/post-complete
    (redux/juxt
     fingerprinter
-    global-fingerprinter)
+    (global-fingerprinter))
    (fn [[type-fingerprint global-fingerprint]]
      (merge global-fingerprint
             type-fingerprint))))
@@ -193,6 +223,7 @@
 
 (extend-protocol ITemporalCoerceable
   nil      (->temporal [_]    nil)
+  Object   (->temporal [_]    nil)
   String   (->temporal [this] (->temporal (u.date/parse this)))
   Long     (->temporal [this] (->temporal (t/instant this)))
   Integer  (->temporal [this] (->temporal (t/instant this)))
@@ -212,9 +243,23 @@
   ([^Histogram histogram] histogram)
   ([^Histogram histogram x] (hist/insert-simple! histogram x)))
 
+(defprotocol ^:private INumberCoerceable
+  "Protocol for converting objects to a java.lang.Number."
+  (->number ^Number [this] "Coerce object to a java.lang.Number"))
+
+(extend-protocol INumberCoerceable
+  nil (->number [_] nil)
+  Object (->number [_] nil)
+  Boolean (->number [this] (if this 1 0))
+  Number (->number [this] this)
+  String (->number [this]
+           ;; faster to be optimistic and fail than to explicitely test and dispatch
+           (or (parse-long this)
+               (parse-double this))))
+
 (deffingerprinter :type/Number
   (redux/post-complete
-   ((filter u/real-number?) histogram)
+   ((comp (map ->number) (filter u/real-number?)) histogram)
    (fn [h]
      (let [{q1 0.25 q3 0.75} (hist/percentiles h 0.25 0.75)]
        (robust-map
@@ -259,4 +304,4 @@
                      (cond-> field
                        ;; Try to get a better guestimate of what we're dealing with on first sync
                        (every? nil? ((juxt :semantic_type :last_analyzed) field))
-                       (assoc :semantic_type (classifiers.name/infer-semantic-type field)))))))
+                       (assoc :semantic_type (classifiers.name/infer-semantic-type-by-name field)))))))

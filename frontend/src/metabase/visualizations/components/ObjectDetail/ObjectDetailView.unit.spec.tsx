@@ -8,12 +8,7 @@ import {
   setupDatabasesEndpoints,
 } from "__support__/server-mocks";
 import { testDataset } from "__support__/testDataset";
-import {
-  renderWithProviders,
-  screen,
-  waitForLoaderToBeRemoved,
-  within,
-} from "__support__/ui";
+import { renderWithProviders, screen, waitFor, within } from "__support__/ui";
 import { getNextId } from "__support__/utils";
 import { checkNotNull } from "metabase/lib/types";
 import type { WritebackAction } from "metabase-types/api";
@@ -234,7 +229,7 @@ const actions = [
   queryAction,
 ];
 
-const actionsFromDatabaseWithDisabledActions = actions.map(action => ({
+const actionsFromDatabaseWithDisabledActions = actions.map((action) => ({
   ...action,
   database_id: databaseWithActionsDisabled.id,
 }));
@@ -247,6 +242,8 @@ function setup(
   options: Partial<ObjectDetailProps> &
     Required<Pick<ObjectDetailProps, "question">>,
 ) {
+  const fetchTableFks = jest.fn();
+
   renderWithProviders(
     <ObjectDetailView
       data={testDataset}
@@ -264,7 +261,7 @@ function setup(
       followForeignKey={() => null}
       onVisualizationClick={() => null}
       visualizationIsClickable={() => false}
-      fetchTableFks={() => null}
+      fetchTableFks={fetchTableFks}
       loadObjectDetailFKReferences={() => null}
       viewPreviousObjectDetail={() => null}
       viewNextObjectDetail={() => null}
@@ -272,6 +269,10 @@ function setup(
       {...options}
     />,
   );
+
+  return {
+    fetchTableFks,
+  };
 }
 
 describe("ObjectDetailView", () => {
@@ -311,10 +312,26 @@ describe("ObjectDetailView", () => {
     // because this row is not in the test dataset, it should trigger a fetch
     setup({ question: mockQuestion, zoomedRowID: "101", zoomedRow: undefined });
 
-    expect(screen.getByTestId("loading-spinner")).toBeInTheDocument();
+    expect(screen.getByTestId("loading-indicator")).toBeInTheDocument();
     expect(
       await screen.findByText(/Extremely Hungry Toucan/i),
     ).toBeInTheDocument();
+  });
+
+  it("should fetch table foreign keys on mount", async () => {
+    const { fetchTableFks } = setup({
+      question: mockQuestion,
+      table: metadata.table(mockTable.id),
+    });
+    await waitFor(() => expect(fetchTableFks).toHaveBeenCalledTimes(1));
+  });
+
+  it("should not fetch table foreign keys in object detail viz (VIZ-1133)", async () => {
+    const { fetchTableFks } = setup({
+      question: mockQuestion.setDisplay("object"),
+      table: metadata.table(mockTable.id),
+    });
+    await waitFor(() => expect(fetchTableFks).not.toHaveBeenCalled());
   });
 
   it("shows not found if it can't find a missing row", async () => {
@@ -323,7 +340,7 @@ describe("ObjectDetailView", () => {
     // because this row is not in the test dataset, it should trigger a fetch
     setup({ question: mockQuestion, zoomedRowID: "102", zoomedRow: undefined });
 
-    expect(screen.getByTestId("loading-spinner")).toBeInTheDocument();
+    expect(screen.getByTestId("loading-indicator")).toBeInTheDocument();
     expect(await screen.findByText(/we're a little lost/i)).toBeInTheDocument();
   });
 
@@ -464,21 +481,17 @@ describe("ObjectDetailView", () => {
 
     const action = await findActionInActionMenu(implicitUpdateAction);
     expect(action).toBeInTheDocument();
-    action?.click();
+    await userEvent.click(action!);
 
     expect(
       screen.queryByText("Choose a record to update"),
     ).not.toBeInTheDocument();
-    expect(screen.getByTestId("loading-spinner")).toBeInTheDocument();
-
-    await waitForLoaderToBeRemoved();
 
     const modal = await screen.findByTestId("action-execute-modal");
     expect(modal).toBeInTheDocument();
-
-    expect(within(modal).getByTestId("modal-header")).toHaveTextContent(
-      "Update",
-    );
+    expect(
+      within(modal).getByRole("heading", { name: "Update" }),
+    ).toBeInTheDocument();
   });
 
   it("should show delete object modal on delete action click", async () => {
@@ -499,6 +512,44 @@ describe("ObjectDetailView", () => {
       "Are you sure you want to delete this row?",
     );
   });
+
+  describe("keyboard bindings", () => {
+    it("should be added when showControls is true", async () => {
+      const mockViewPreviousObjectDetail = jest.fn();
+      const mockViewNextObjectDetail = jest.fn();
+
+      setup({
+        question: mockQuestion,
+        showControls: true,
+        viewPreviousObjectDetail: mockViewPreviousObjectDetail,
+        viewNextObjectDetail: mockViewNextObjectDetail,
+      });
+
+      await userEvent.keyboard("{ArrowUp}");
+      expect(mockViewPreviousObjectDetail).toHaveBeenCalledTimes(1);
+
+      await userEvent.keyboard("{ArrowDown}");
+      expect(mockViewNextObjectDetail).toHaveBeenCalledTimes(1);
+    });
+
+    it("should not be added when showControls is false", async () => {
+      const mockViewPreviousObjectDetail = jest.fn();
+      const mockViewNextObjectDetail = jest.fn();
+
+      setup({
+        question: mockQuestion,
+        showControls: false,
+        viewPreviousObjectDetail: mockViewPreviousObjectDetail,
+        viewNextObjectDetail: mockViewNextObjectDetail,
+      });
+
+      await userEvent.keyboard("{ArrowUp}");
+      expect(mockViewPreviousObjectDetail).not.toHaveBeenCalled();
+
+      await userEvent.keyboard("{ArrowDown}");
+      expect(mockViewNextObjectDetail).not.toHaveBeenCalled();
+    });
+  });
 });
 
 async function findActionInActionMenu({ name }: Pick<WritebackAction, "name">) {
@@ -510,9 +561,8 @@ async function findActionInActionMenu({ name }: Pick<WritebackAction, "name">) {
 }
 
 /**
- * There is no loading state for useActionListQuery & useDatabaseListQuery
- * in ObjectDetail component, so there is no easy way to wait for relevant
- * API requests to finish. This function relies on DOM changes instead.
+ * There is no loading indicator in ObjectDetail component, so there is no easy way
+ * to wait for relevant API requests to finish. This function relies on DOM changes instead.
  */
 async function findActionsMenu() {
   try {

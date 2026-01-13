@@ -1,7 +1,7 @@
 import { t } from "ttag";
 
-import { useListRecentItemsQuery } from "metabase/api";
-import LoadingAndErrorWrapper from "metabase/components/LoadingAndErrorWrapper";
+import { useListRecentsQuery } from "metabase/api";
+import { LoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper";
 import { getIcon } from "metabase/lib/icon";
 import { getName } from "metabase/lib/name";
 import { useSelector } from "metabase/lib/redux";
@@ -17,11 +17,7 @@ import { HomeModelCard } from "../HomeModelCard";
 import { SectionBody } from "./HomeRecentSection.styled";
 
 export const HomeRecentSection = () => {
-  const {
-    data: recentItems = [],
-    isLoading,
-    error,
-  } = useListRecentItemsQuery();
+  const { data: recentItems = [], isLoading, error } = useListRecentsQuery();
   const user = useSelector(getUser);
   const hasHelpCard =
     user != null && user.is_installer && isWithinWeeks(user.first_login, 2);
@@ -38,7 +34,7 @@ export const HomeRecentSection = () => {
           <HomeModelCard
             key={index}
             title={getName(item)}
-            icon={getIcon(item, { variant: "secondary" })}
+            icon={getIcon(item)}
             url={Urls.modelToUrl(item) ?? ""}
           />
         ))}
@@ -49,5 +45,5 @@ export const HomeRecentSection = () => {
 };
 
 export const recentsFilter = (results: RecentItem[]): RecentItem[] => {
-  return results.filter(item => item.model !== "collection").slice(0, 5);
+  return results.filter((item) => item.model !== "collection").slice(0, 5);
 };

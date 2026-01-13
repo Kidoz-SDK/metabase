@@ -1,17 +1,19 @@
 /* istanbul ignore file */
 
 import { createMockMetadata } from "__support__/metadata";
+import { checkNotNull } from "metabase/lib/types";
 import * as Lib from "metabase-lib";
 import type Metadata from "metabase-lib/v1/metadata/Metadata";
 import type {
   DatabaseId,
-  DatasetQuery,
   DatasetColumn,
+  DatasetQuery,
   RowValue,
+  TableId,
 } from "metabase-types/api";
 import {
-  createSampleDatabase,
   ORDERS_ID,
+  createSampleDatabase,
 } from "metabase-types/api/mocks/presets";
 
 const SAMPLE_DATABASE = createSampleDatabase();
@@ -50,23 +52,25 @@ export function createQuery({
   query = DEFAULT_QUERY,
 }: QueryOpts = {}) {
   const metadataProvider = createMetadataProvider({ databaseId, metadata });
-  return Lib.fromLegacyQuery(databaseId, metadataProvider, query);
+  return Lib.fromJsQuery(metadataProvider, query);
 }
 
 export const columnFinder =
   (query: Lib.Query, columns: Lib.ColumnMetadata[]) =>
-  (tableName: string, columnName: string): Lib.ColumnMetadata => {
-    const column = columns.find(column => {
+  (
+    tableName: string | undefined | null,
+    columnName: string,
+  ): Lib.ColumnMetadata => {
+    const column = columns.find((column) => {
       const displayInfo = Lib.displayInfo(query, 0, column);
 
       // for non-table columns - aggregations, custom columns
-      if (!displayInfo.table) {
-        return displayInfo?.name === columnName;
+      if (!displayInfo.table || tableName == null) {
+        return displayInfo.name === columnName;
       }
 
       return (
-        displayInfo?.table?.name === tableName &&
-        displayInfo?.name === columnName
+        displayInfo.table.name === tableName && displayInfo.name === columnName
       );
     });
 
@@ -87,7 +91,7 @@ export const findBinningStrategy = (
   }
   const buckets = Lib.availableBinningStrategies(query, 0, column);
   const bucket = buckets.find(
-    bucket => Lib.displayInfo(query, 0, bucket).displayName === bucketName,
+    (bucket) => Lib.displayInfo(query, 0, bucket).displayName === bucketName,
   );
   if (!bucket) {
     throw new Error(`Could not find binning strategy ${bucketName}`);
@@ -106,7 +110,7 @@ export const findTemporalBucket = (
 
   const buckets = Lib.availableTemporalBuckets(query, 0, column);
   const bucket = buckets.find(
-    bucket => Lib.displayInfo(query, 0, bucket).displayName === bucketName,
+    (bucket) => Lib.displayInfo(query, 0, bucket).displayName === bucketName,
   );
   if (!bucket) {
     throw new Error(`Could not find temporal bucket ${bucketName}`);
@@ -120,7 +124,7 @@ export const findAggregationOperator = (
 ) => {
   const operators = Lib.availableAggregationOperators(query, 0);
   const operator = operators.find(
-    operator =>
+    (operator) =>
       Lib.displayInfo(query, 0, operator).shortName === operatorShortName,
   );
   if (!operator) {
@@ -132,7 +136,7 @@ export const findAggregationOperator = (
 export const findSegment = (query: Lib.Query, segmentName: string) => {
   const stageIndex = 0;
   const segment = Lib.availableSegments(query, stageIndex).find(
-    segment =>
+    (segment) =>
       Lib.displayInfo(query, stageIndex, segment).displayName === segmentName,
   );
   if (!segment) {
@@ -156,20 +160,28 @@ function withTemporalBucketAndBinningStrategy(
   );
 }
 
-interface AggregationClauseOpts {
-  operatorName: string;
-}
+type AggregationClauseOpts =
+  | {
+      operatorName: string;
+      tableName?: never;
+      columnName?: never;
+    }
+  | {
+      operatorName: string;
+      tableName: string;
+      columnName: string;
+    };
 
 interface BreakoutClauseOpts {
   columnName: string;
-  tableName: string;
+  tableName?: string;
   temporalBucketName?: string;
   binningStrategyName?: string;
 }
 
-interface ExpressionClauseOpts {
+export interface ExpressionClauseOpts {
   name: string;
-  operator: Lib.ExpressionOperatorName;
+  operator: Lib.ExpressionOperator;
   args: (Lib.ExpressionArg | Lib.ExpressionClause)[];
   options?: Lib.ExpressionOptions | null;
 }
@@ -214,6 +226,12 @@ export function createQueryWithClauses({
       -1,
       Lib.aggregationClause(
         findAggregationOperator(query, aggregation.operatorName),
+        aggregation.columnName && aggregation.tableName
+          ? columnFinder(query, Lib.visibleColumns(query, -1))(
+              aggregation.tableName,
+              aggregation.columnName,
+            )
+          : undefined,
       ),
     );
   }, queryWithExpressions);
@@ -253,12 +271,13 @@ export const queryDrillThru = (
   const drills = Lib.availableDrillThrus(
     query,
     stageIndex,
+    undefined,
     clickObject.column,
     clickObject.value,
     clickObject.data,
     clickObject.dimensions,
   );
-  const drill = drills.find(drill => {
+  const drill = drills.find((drill) => {
     const drillInfo = Lib.displayInfo(query, stageIndex, drill);
     return drillInfo.type === drillType;
   });
@@ -284,6 +303,44 @@ export const findDrillThru = (
 interface ColumnClickObjectOpts {
   column: DatasetColumn;
 }
+
+export const getJoinQueryHelpers = (
+  query: Lib.Query,
+  stageIndex: number,
+  tableId: TableId,
+) => {
+  const table = checkNotNull(Lib.tableOrCardMetadata(query, tableId));
+
+  const findLHSColumn = columnFinder(
+    query,
+    Lib.joinConditionLHSColumns(query, stageIndex),
+  );
+  const findRHSColumn = columnFinder(
+    query,
+    Lib.joinConditionRHSColumns(query, stageIndex, table),
+  );
+
+  const defaultStrategy = Lib.availableJoinStrategies(query, stageIndex).find(
+    (strategy) => Lib.displayInfo(query, stageIndex, strategy).default,
+  );
+
+  if (!defaultStrategy) {
+    throw new Error("No default strategy found");
+  }
+
+  const defaultOperator = Lib.joinConditionOperators(query, stageIndex)[0];
+  if (!defaultOperator) {
+    throw new Error("No default operator found");
+  }
+
+  return {
+    table,
+    defaultStrategy,
+    defaultOperator,
+    findLHSColumn,
+    findRHSColumn,
+  };
+};
 
 export function createColumnClickObject({
   column,

@@ -1,6 +1,6 @@
-(ns ^:mb/once metabase.upload.types-test
+(ns metabase.upload.types-test
   (:require
-   [clojure.test :refer [deftest is testing]]
+   [clojure.test :refer [are deftest is testing]]
    [clojure.walk :as walk]
    [java-time.api :as t]
    [metabase.upload.parsing :as upload-parsing]
@@ -152,7 +152,8 @@
            [" 2022-01-01 01:00:00.00-07:00 "  #t "2022-01-01T01:00-07:00" offset-dt-type]
            [" 2022-01-01T01:00:00.00Z "       (t/offset-date-time "2022-01-01T01:00+00:00") offset-dt-type]
            [" 2022-01-01t01:00:00.00Z "       (t/offset-date-time "2022-01-01T01:00+00:00") offset-dt-type]
-           [" 2022-01-01 01:00:00.00Z "       (t/offset-date-time "2022-01-01T01:00+00:00") offset-dt-type]]]
+           [" 2022-01-01 01:00:00.00Z "       (t/offset-date-time "2022-01-01T01:00+00:00") offset-dt-type]
+           [" 2024-06-10T07:55:59+0000 "      (t/offset-date-time "2024-06-10T07:55:59+00:00") offset-dt-type]]]
     (let [settings    {:number-separators (or separators ".,")}
           type->check (#'upload-types/settings->type->check settings)
           value-type  (#'upload-types/value->type type->check string-value)
@@ -330,3 +331,24 @@
     (is (= ::*boolean-int* (ordered-hierarchy/first-common-ancestor h ::*boolean-int* ::*boolean-int*)))
     (is (= ::boolean (ordered-hierarchy/first-common-ancestor h ::*boolean-int* ::boolean)))
     (is (= ::varchar-255 (ordered-hierarchy/first-common-ancestor h ::boolean ::int)))))
+
+(deftest ^:parallel column-types-from-rows-boolean-test
+  ;; #52607 guard against regressions in boolean promotion behaviour
+  (are [column-type values expected-type]
+       (= [expected-type] (upload-types/column-types-from-rows
+                           {:number-separators ".,"}
+                           [column-type]
+                           (map vector values)))
+
+    nil                    ["1" "y" "1.0"] ::upload-types/varchar-255
+    nil                    ["1" "y" "2"]   ::upload-types/varchar-255
+    nil                    ["1" "1.0"]     ::upload-types/float
+    nil                    ["y" "1.0"]     ::upload-types/varchar-255
+
+    ::upload-types/boolean ["1.0"]         ::upload-types/float
+    ::upload-types/boolean ["2.0"]         ::upload-types/float
+
+    ::upload-types/boolean ["1"]           ::upload-types/boolean
+    ::upload-types/boolean ["1" "y"]       ::upload-types/boolean
+    ::upload-types/boolean ["1" "y" "2"]   ::upload-types/varchar-255
+    ::upload-types/boolean ["2"]           ::upload-types/int))

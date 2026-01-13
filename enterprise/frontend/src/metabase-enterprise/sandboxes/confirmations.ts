@@ -18,13 +18,14 @@ export function getSandboxedTableWarningModal(
   // should prompt them that we will have to remove native access for all tables/schemas
   if (
     value === DataPermissionValue.SANDBOXED &&
+    permissions[groupId] &&
     hasPermissionValueInGraph(
       permissions[groupId][entityId.databaseId],
       DataPermissionValue.QUERY_BUILDER_AND_NATIVE,
     )
   ) {
     return {
-      title: t`Change access to this database to “Sandboxed”?`,
+      title: t`Change access to this database to “Row and column security”?`,
       message: t`This group's native querying permissions will be removed from all tables and schemas in this database.`,
       confirmButtonText: t`Change`,
       cancelButtonText: t`Cancel`,

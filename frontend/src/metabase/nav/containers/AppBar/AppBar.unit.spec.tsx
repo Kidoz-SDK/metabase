@@ -2,18 +2,53 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route } from "react-router";
 
-import { setupCollectionsEndpoints } from "__support__/server-mocks";
+import {
+  setupCardEndpoints,
+  setupCollectionByIdEndpoint,
+  setupCollectionsEndpoints,
+  setupDashboardEndpoints,
+} from "__support__/server-mocks";
 import { renderWithProviders } from "__support__/ui";
-import { DEFAULT_EMBED_OPTIONS } from "metabase/redux/embed";
-import { createMockCard } from "metabase-types/api/mocks";
-import type { EmbedOptions } from "metabase-types/store";
+import { DEFAULT_INTERACTIVE_EMBEDDING_OPTIONS } from "metabase/redux/embed";
+import type { Card } from "metabase-types/api";
+import {
+  createMockCard,
+  createMockCollection,
+  createMockDashboard,
+} from "metabase-types/api/mocks";
+import type {
+  DashboardState,
+  InteractiveEmbeddingOptions,
+} from "metabase-types/store";
 import {
   createMockAppState,
+  createMockDashboardState,
+  createMockEmbedOptions,
   createMockEmbedState,
   createMockQueryBuilderState,
+  createMockStoreDashboard,
 } from "metabase-types/store/mocks";
 
 import AppBar from "./AppBar";
+
+const FOO_COLLECTION = createMockCollection({
+  id: 3,
+  name: "Foo Collection",
+});
+
+const BAR_DASHBOARD = createMockDashboard({
+  id: 4,
+  name: "Bar Dashboard",
+  collection_id: 3,
+});
+
+const CARD_IN_COLLECTION = createMockCard({ id: 2, collection_id: 3 });
+const CARD_IN_DASHBOARD = createMockCard({
+  id: 3,
+  collection_id: 3,
+  dashboard_id: 4,
+  dashboard: BAR_DASHBOARD,
+});
 
 describe("AppBar", () => {
   const matchMediaSpy = jest.spyOn(window, "matchMedia");
@@ -35,20 +70,24 @@ describe("AppBar", () => {
 
       it("should be able to toggle side nav", async () => {
         setup({
-          side_nav: true,
+          embedOptions: {
+            side_nav: true,
+          },
         });
 
         expect(await screen.findByText(/Our analytics/)).toBeVisible();
         expect(screen.getByTestId("main-logo")).toBeVisible();
 
-        screen.getByTestId("sidebar-toggle").click();
+        await userEvent.click(screen.getByTestId("sidebar-toggle"));
         expect(screen.getByText(/Our analytics/)).not.toBeVisible();
         expect(screen.getByTestId("main-logo")).toBeVisible();
       });
 
       it("should hide side nav toggle icon", async () => {
         setup({
-          side_nav: false,
+          embedOptions: {
+            side_nav: false,
+          },
         });
 
         expect(await screen.findByText(/Our analytics/)).toBeVisible();
@@ -58,15 +97,17 @@ describe("AppBar", () => {
 
       it("should always show side nav toggle icon when logo is hidden", async () => {
         setup({
-          side_nav: true,
-          logo: false,
+          embedOptions: {
+            side_nav: true,
+            logo: false,
+          },
         });
 
         expect(await screen.findByText(/Our analytics/)).toBeVisible();
         expect(screen.queryByTestId("main-logo")).not.toBeInTheDocument();
         expect(screen.getByTestId("sidebar-toggle")).toBeVisible();
 
-        screen.getByTestId("sidebar-toggle").click();
+        await userEvent.click(screen.getByTestId("sidebar-toggle"));
         expect(screen.getByText(/Our analytics/)).not.toBeVisible();
         expect(screen.queryByTestId("main-logo")).not.toBeInTheDocument();
         expect(screen.getByTestId("sidebar-toggle")).toBeVisible();
@@ -74,8 +115,10 @@ describe("AppBar", () => {
 
       it("should not show either logo or side nav toggle button at all", async () => {
         setup({
-          side_nav: false,
-          logo: false,
+          embedOptions: {
+            side_nav: false,
+            logo: false,
+          },
         });
 
         expect(await screen.findByText(/Our analytics/)).toBeVisible();
@@ -103,19 +146,23 @@ describe("AppBar", () => {
 
       it("should be able to toggle side nav", async () => {
         setup({
-          side_nav: true,
+          embedOptions: {
+            side_nav: true,
+          },
         });
 
         expect(await screen.findByText(/Our analytics/)).toBeVisible();
 
-        screen.getByTestId("sidebar-toggle").click();
+        await userEvent.click(screen.getByTestId("sidebar-toggle"));
         expect(screen.queryByText(/Our analytics/)).not.toBeInTheDocument();
         expect(screen.getByTestId("main-logo")).toBeVisible();
       });
 
       it("should hide side nav toggle icon", async () => {
         setup({
-          side_nav: false,
+          embedOptions: {
+            side_nav: false,
+          },
         });
 
         expect(await screen.findByText(/Our analytics/)).toBeVisible();
@@ -125,15 +172,17 @@ describe("AppBar", () => {
 
       it("should always show side nav toggle icon when logo is hidden", async () => {
         setup({
-          side_nav: true,
-          logo: false,
+          embedOptions: {
+            side_nav: true,
+            logo: false,
+          },
         });
 
         expect(await screen.findByText(/Our analytics/)).toBeVisible();
         expect(screen.queryByTestId("main-logo")).not.toBeInTheDocument();
         expect(screen.getByTestId("sidebar-toggle")).toBeVisible();
 
-        screen.getByTestId("sidebar-toggle").click();
+        await userEvent.click(screen.getByTestId("sidebar-toggle"));
         expect(screen.queryByText(/Our analytics/)).not.toBeInTheDocument();
         expect(screen.queryByTestId("main-logo")).not.toBeInTheDocument();
         expect(screen.getByTestId("sidebar-toggle")).toBeVisible();
@@ -141,8 +190,10 @@ describe("AppBar", () => {
 
       it("should not show either logo or side nav toggle button at all", async () => {
         setup({
-          side_nav: false,
-          logo: false,
+          embedOptions: {
+            side_nav: false,
+            logo: false,
+          },
         });
 
         expect(await screen.findByText(/Our analytics/)).toBeVisible();
@@ -162,24 +213,92 @@ describe("AppBar", () => {
         expect(history.getCurrentLocation().pathname).toBe("/");
       });
     });
+
+    describe("breadcrumbs", () => {
+      it("should work for questions in collections", async () => {
+        setup({
+          embedOptions: {
+            breadcrumbs: true,
+          },
+          card: CARD_IN_COLLECTION,
+        });
+
+        expect(await screen.findByText("Foo Collection")).toBeInTheDocument();
+      });
+
+      it("should work for questions in dashboards", async () => {
+        setup({
+          embedOptions: {
+            breadcrumbs: true,
+          },
+          card: CARD_IN_DASHBOARD,
+        });
+
+        expect(await screen.findByText("Foo Collection")).toBeInTheDocument();
+        expect(await screen.findByText("Bar Dashboard")).toBeInTheDocument();
+      });
+
+      it("should work for dashboards", async () => {
+        setup({
+          initialRoute: `/dashboard/${BAR_DASHBOARD.id}`,
+          embedOptions: {
+            breadcrumbs: true,
+          },
+          dashboardState: {
+            dashboard: createMockDashboardState({
+              dashboardId: BAR_DASHBOARD.id,
+              dashboards: {
+                [BAR_DASHBOARD.id]: createMockStoreDashboard({
+                  id: BAR_DASHBOARD.id,
+                  collection_id: FOO_COLLECTION.id,
+                }),
+              },
+            }),
+          },
+        });
+
+        expect(await screen.findByText("Foo Collection")).toBeInTheDocument();
+      });
+    });
   });
 });
 
-function setup(embedOptions: Partial<EmbedOptions>) {
-  setupCollectionsEndpoints({ collections: [] });
+function setup({
+  embedOptions,
+  card = createMockCard(),
+  dashboardState,
+  initialRoute = "/question/1",
+}: {
+  embedOptions?: Partial<InteractiveEmbeddingOptions>;
+  card?: Card;
+  dashboardState?: { dashboard: DashboardState };
+  initialRoute?: string;
+}) {
+  // Need to set the location because CollectionBreadcrumbs uses the useLocation()
+  window.history.pushState({}, "", initialRoute);
+
+  setupCollectionsEndpoints({
+    collections: [FOO_COLLECTION],
+  });
+  setupCollectionByIdEndpoint({ collections: [FOO_COLLECTION] });
+  setupCardEndpoints(card);
+  setupDashboardEndpoints(BAR_DASHBOARD);
 
   return renderWithProviders(<Route path="*" component={AppBar} />, {
     withRouter: true,
-    initialRoute: "/question/1",
+    initialRoute,
     storeInitialState: {
       app: createMockAppState({ isNavbarOpen: false }),
       embed: createMockEmbedState({
-        ...DEFAULT_EMBED_OPTIONS,
-        ...embedOptions,
+        options: createMockEmbedOptions({
+          ...DEFAULT_INTERACTIVE_EMBEDDING_OPTIONS,
+          ...embedOptions,
+        }),
       }),
       qb: createMockQueryBuilderState({
-        card: createMockCard(),
+        card,
       }),
+      ...dashboardState,
     },
   });
 }

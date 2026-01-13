@@ -1,9 +1,14 @@
+import dayjs from "dayjs";
 import fetchMock from "fetch-mock";
-import moment from "moment-timezone"; // eslint-disable-line no-restricted-imports -- deprecated usage
 
 import { createMockMetadata } from "__support__/metadata";
-import { fireEvent, renderWithProviders, screen } from "__support__/ui";
-import PersistedModels from "metabase/entities/persisted-models";
+import { setupModelPersistenceEndpoints } from "__support__/server-mocks/persist";
+import {
+  fireEvent,
+  renderWithProviders,
+  screen,
+  waitFor,
+} from "__support__/ui";
 import { checkNotNull } from "metabase/lib/types";
 import type { ModelCacheRefreshStatus } from "metabase-types/api";
 import { getMockModelCacheInfo } from "metabase-types/api/mocks";
@@ -12,7 +17,7 @@ import {
   createSampleDatabase,
 } from "metabase-types/api/mocks/presets";
 
-import ModelCacheManagementSection from "./ModelCacheManagementSection";
+import { ModelCacheManagementSection } from "./ModelCacheManagementSection";
 
 const metadata = createMockMetadata({
   databases: [createSampleDatabase()],
@@ -22,10 +27,12 @@ const ordersTable = checkNotNull(metadata.table(ORDERS_ID));
 
 type SetupOpts = Partial<ModelCacheRefreshStatus> & {
   waitForSectionAppearance?: boolean;
+  canManageDB?: boolean;
 };
 
 async function setup({
   waitForSectionAppearance = true,
+  canManageDB = true,
   ...cacheInfo
 }: SetupOpts = {}) {
   const question = ordersTable.question();
@@ -34,6 +41,7 @@ async function setup({
     id: 1,
     name: "Order model",
     type: "model",
+    can_manage_db: canManageDB,
   });
 
   const modelCacheInfo = getMockModelCacheInfo({
@@ -42,18 +50,7 @@ async function setup({
     card_name: model.displayName() as string,
   });
 
-  const onRefreshMock = jest
-    .spyOn(PersistedModels.objectActions, "refreshCache")
-    .mockReturnValue({ type: "__MOCK__" });
-
-  fetchMock.get(`path:/api/persist/card/${model.id()}`, modelCacheInfo);
-
-  if (!waitForSectionAppearance) {
-    jest.spyOn(PersistedModels, "Loader").mockImplementation(props => {
-      const { children } = props as any;
-      return children({ persistedModel: cacheInfo });
-    });
-  }
+  setupModelPersistenceEndpoints([modelCacheInfo]);
 
   renderWithProviders(<ModelCacheManagementSection model={model} />);
 
@@ -63,7 +60,6 @@ async function setup({
 
   return {
     modelCacheInfo,
-    onRefreshMock,
   };
 }
 
@@ -87,7 +83,7 @@ describe("ModelCacheManagementSection", () => {
     expect(
       await screen.findByText("Waiting to create the first model cache"),
     ).toBeInTheDocument();
-    expect(screen.queryByLabelText("refresh icon")).not.toBeInTheDocument();
+    expect(await screen.findByText("Create now")).toBeInTheDocument();
   });
 
   it("displays 'refreshing' state correctly", async () => {
@@ -100,7 +96,7 @@ describe("ModelCacheManagementSection", () => {
 
   it("displays 'persisted' state correctly", async () => {
     const { modelCacheInfo } = await setup({ state: "persisted" });
-    const expectedTimestamp = moment(modelCacheInfo.refresh_end).fromNow();
+    const expectedTimestamp = dayjs(modelCacheInfo.refresh_end).fromNow();
     expect(
       await screen.findByText(`Model last cached ${expectedTimestamp}`),
     ).toBeInTheDocument();
@@ -108,16 +104,18 @@ describe("ModelCacheManagementSection", () => {
   });
 
   it("triggers refresh from 'persisted' state", async () => {
-    const { modelCacheInfo, onRefreshMock } = await setup({
+    await setup({
       state: "persisted",
     });
     fireEvent.click(await screen.findByLabelText("refresh icon"));
-    expect(onRefreshMock).toHaveBeenCalledWith(modelCacheInfo);
+
+    // get, post, get
+    await waitFor(() => expect(fetchMock.callHistory.calls().length).toBe(3));
   });
 
   it("displays 'error' state correctly", async () => {
     const { modelCacheInfo } = await setup({ state: "error" });
-    const expectedTimestamp = moment(modelCacheInfo.refresh_end).fromNow();
+    const expectedTimestamp = dayjs(modelCacheInfo.refresh_end).fromNow();
 
     expect(
       await screen.findByText("Failed to update model cache"),
@@ -129,8 +127,15 @@ describe("ModelCacheManagementSection", () => {
   });
 
   it("triggers refresh from 'error' state", async () => {
-    const { modelCacheInfo, onRefreshMock } = await setup({ state: "error" });
+    await setup({ state: "error" });
     fireEvent.click(await screen.findByLabelText("refresh icon"));
-    expect(onRefreshMock).toHaveBeenCalledWith(modelCacheInfo);
+
+    // get, post, get
+    await waitFor(() => expect(fetchMock.callHistory.calls().length).toBe(3));
+  });
+
+  it("disables refresh when DB management is not available to the user", async () => {
+    await setup({ state: "persisted", canManageDB: false });
+    expect(screen.queryByLabelText("refresh icon")).not.toBeInTheDocument();
   });
 });

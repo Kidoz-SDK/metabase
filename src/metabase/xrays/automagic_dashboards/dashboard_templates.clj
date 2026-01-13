@@ -7,12 +7,14 @@
    [clojure.walk :as walk]
    [malli.core :as mc]
    [malli.transform :as mtx]
+   [metabase.dashboards.constants :as dashboards.constants]
    [metabase.query-processor.util :as qp.util]
-   [metabase.shared.dashboards.constants :as dashboards.constants]
    [metabase.util :as u]
    [metabase.util.files :as u.files]
    [metabase.util.i18n :as i18n]
+   [metabase.util.malli :as mu]
    [metabase.util.malli.registry :as mr]
+   [metabase.util.performance :as perf]
    [metabase.util.yaml :as yaml]
    [metabase.xrays.automagic-dashboards.populate :as populate])
   (:import
@@ -82,26 +84,19 @@
     [:filter MBQL]
     [:score  Score]]])
 
-(defn ga-dimension?
-  "Does string `t` denote a Google Analytics dimension?"
-  [t]
-  (str/starts-with? t "ga:"))
-
 (defn ->type
   "Turn `x` into proper type name."
   [x]
-  (cond
-    (keyword? x)      x
-    (ga-dimension? x) x
-    :else             (keyword "type" x)))
+  (if (keyword? x)
+    x
+    (keyword "type" x)))
 
 (defn ->entity
   "Turn `x` into proper entity name."
   [x]
-  (cond
-    (keyword? x)      x
-    (ga-dimension? x) x
-    :else             (keyword "entity" x)))
+  (if (keyword? x)
+    x
+    (keyword "entity" x)))
 
 (defn- field-type?
   [t]
@@ -120,14 +115,10 @@
    [:fn {:error/message "valid table type"} table-type?]])
 
 (def ^:private FieldType
-  [:or
+  [:and
    {:decode/dashboard-template ->type}
-   [:and
-    :string
-    [:fn {:error/message "Google Analytics dimension"} ga-dimension?]]
-   [:and
-    :keyword
-    [:fn {:error/message "Valid Field type"} field-type?]]])
+   :keyword
+   [:fn {:error/message "Valid Field type"} field-type?]])
 
 (def ^:private AppliesTo
   [:or
@@ -278,38 +269,38 @@
 
 (defn- valid-metrics-references?
   [{:keys [metrics cards]}]
-  (every? (identifiers metrics) (all-references :metrics cards)))
+  (perf/every? (identifiers metrics) (all-references :metrics cards)))
 
 (defn- valid-filters-references?
   [{:keys [filters cards]}]
-  (every? (identifiers filters) (all-references :filters cards)))
+  (perf/every? (identifiers filters) (all-references :filters cards)))
 
 (defn- valid-group-references?
   [{:keys [cards groups]}]
-  (every? groups (keep (comp :group val first) cards)))
+  (perf/every? groups (keep (comp :group val first) cards)))
 
 (defn- valid-order-by-references?
   [{:keys [dimensions metrics cards]}]
-  (every? (comp (into (identifiers dimensions)
-                      (identifiers metrics))
-                identifier)
-          (all-references :order_by cards)))
+  (perf/every? (comp (into (identifiers dimensions)
+                           (identifiers metrics))
+                     identifier)
+               (all-references :order_by cards)))
 
 (defn- valid-dimension-references?
   [{:keys [dimensions] :as dashboard-template}]
-  (every? (some-fn (identifiers dimensions) (comp table-type? ->entity))
-          (collect-dimensions dashboard-template)))
+  (perf/every? (some-fn (identifiers dimensions) (comp table-type? ->entity))
+               (collect-dimensions dashboard-template)))
 
 (defn- valid-dashboard-filters-references?
   [{:keys [dimensions dashboard_filters]}]
-  (every? (identifiers dimensions) dashboard_filters))
+  (perf/every? (identifiers dimensions) dashboard_filters))
 
 (defn- valid-breakout-dimension-references?
   [{:keys [cards dimensions]}]
   (->> cards
        (all-references :dimensions)
        (map identifier)
-       (every? (identifiers dimensions))))
+       (perf/every? (identifiers dimensions))))
 
 (def DashboardTemplate
   "Specification defining an automagic dashboard."
@@ -350,10 +341,10 @@
   values based on the template display type if those dimensions aren't already present."
   [card-spec]
   (update-vals
-    card-spec
-    (fn [{:keys [visualization] :as card-spec}]
-      (let [defaults (get-in dashboards.constants/card-size-defaults [(keyword visualization) :default])]
-        (into defaults card-spec)))))
+   card-spec
+   (fn [{:keys [visualization] :as card-spec}]
+     (let [defaults (get-in dashboards.constants/card-size-defaults [(keyword visualization) :default])]
+       (into defaults card-spec)))))
 
 (defn- set-default-card-dimensions
   "Update the card template dimensions to align with the default FE dimensions."
@@ -420,11 +411,11 @@
     (u.files/with-open-path-to-resource [path dashboard-templates-dir]
       (into {} (load-dashboard-template-dir path)))))
 
-(defn get-dashboard-templates
+(mu/defn get-dashboard-templates
   "Get all dashboard templates with prefix `prefix`.
    prefix is greedy, so [\"table\"] will match table/TransactionTable.yaml, but not
    table/TransactionTable/ByCountry.yaml"
-  [prefix]
+  [prefix :- [:sequential :string]]
   (->> prefix
        (get-in @dashboard-templates)
        (keep (comp ::leaf val))))

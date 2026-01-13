@@ -1,9 +1,9 @@
-(ns ^:mb/once metabase.util.malli.fn-test
+(ns metabase.util.malli.fn-test
   (:require
    [clojure.test :refer :all]
    [clojure.tools.macro :as tools.macro]
    [clojure.walk :as walk]
-   [metabase.config :as config]
+   [metabase.config.core :as config]
    [metabase.test :as mt]
    [metabase.util.malli :as mu]
    [metabase.util.malli.fn :as mu.fn]
@@ -69,6 +69,23 @@
                                       unit :- [:maybe :keyword]]
                                      (str n \space (or unit :day)))))))))
 
+(deftest ^:parallel capture-schemas-test
+  (are [fn-schema expected] (= expected
+                               (#'mu.fn/capture-schemas fn-schema))
+    [:=> [:cat :int :int [:map [:integer? :boolean]]] :map]
+    '[[:=> [:cat :int :int &input-schema-0-a] :map]
+      {&input-schema-0-a [:map [:integer? :boolean]]}]
+
+    [:function
+     [:=> [:cat string? :any] keyword?]
+     [:=> [:cat string? :any [:* :any]] keyword?]]
+    [[:function
+      [:=> [:cat '&input-schema-0-a :any]           '&return-schema]
+      [:=> [:cat '&input-schema-1-a :any [:* :any]] '&return-schema]]
+     {'&input-schema-0-a string?
+      '&return-schema    keyword?
+      '&input-schema-1-a string?}]))
+
 (deftest ^:parallel instrumented-fn-form-test
   (are [form expected] (= expected
                           (walk/macroexpand-all (mu.fn/instrumented-fn-form {} (mu.fn/parse-fn-tail form))))
@@ -114,20 +131,20 @@
          ([x :- :int y] (+ x y)))
     '(let* [&f (fn* ([x]
                      (inc x))
-                    ([x y]
-                     (+ x y)))]
+                 ([x y]
+                  (+ x y)))]
        (fn*
-        ([a]
-         (try
-           (metabase.util.malli.fn/validate-output {} :int (&f a))
-           (catch java.lang.Exception error
-             (throw (metabase.util.malli.fn/fixup-stacktrace error)))))
-        ([a b]
-         (try
-           (metabase.util.malli.fn/validate-input {} :int a)
-           (metabase.util.malli.fn/validate-output {} :int (&f a b))
-           (catch java.lang.Exception error
-             (throw (metabase.util.malli.fn/fixup-stacktrace error)))))))))
+         ([a]
+          (try
+            (metabase.util.malli.fn/validate-output {} :int (&f a))
+            (catch java.lang.Exception error
+              (throw (metabase.util.malli.fn/fixup-stacktrace error)))))
+         ([a b]
+          (try
+            (metabase.util.malli.fn/validate-input {} :int a)
+            (metabase.util.malli.fn/validate-output {} :int (&f a b))
+            (catch java.lang.Exception error
+              (throw (metabase.util.malli.fn/fixup-stacktrace error)))))))))
 
 (deftest ^:parallel fn-test
   (let [f (mu.fn/fn :- :int [y] y)]
@@ -168,10 +185,10 @@
                         [path opts & {:keys [token-check?], :or {token-check? true}}]
                         (merge {:path path, :token-check? token-check?} opts))]
               (clojure.core/fn
-                ([a b & more]
+                ([a b & {:as kvs}]
                  (try
                    (metabase.util.malli.fn/validate-input {:fn-name 'my-fn} :map b)
-                   (clojure.core/apply &f a b more)
+                   (&f a b kvs)
                    (catch java.lang.Exception error
                      (throw (metabase.util.malli.fn/fixup-stacktrace error)))))))
            (macroexpand form)))
@@ -190,22 +207,106 @@
     (is (= {:path "path", :token-check? false, :opts true}
            (f "path" {:opts true} :token-check? false)))))
 
+(deftest ^:parallel varargs-schema-test
+  (testing "Schemas on the varargs should work (#46864)"
+    (let [form '(metabase.util.malli.fn/fn my-plus :- :int
+                  [x :- :int
+                   y :- :int
+                   & more :- [:* :int]]
+                  (reduce + (list* x y more)))]
+      (is (= '(let* [&f (clojure.core/fn [x y & more]
+                          (reduce + (list* x y more)))
+                     &input-schema-0-a [:* :int]]
+                (clojure.core/fn
+                  ([a b & more]
+                   (try
+                     (metabase.util.malli.fn/validate-input {:fn-name 'my-plus} :int a)
+                     (metabase.util.malli.fn/validate-input {:fn-name 'my-plus} :int b)
+                     (metabase.util.malli.fn/validate-input {:fn-name 'my-plus} [:maybe &input-schema-0-a] more)
+                     (clojure.core/->>
+                      (clojure.core/apply &f a b more)
+                      (metabase.util.malli.fn/validate-output {:fn-name 'my-plus} :int))
+                     (catch java.lang.Exception error
+                       (throw (metabase.util.malli.fn/fixup-stacktrace error)))))))
+
+             (macroexpand form)))
+      (is (= [:=>
+              [:cat :int :int [:* :int]]
+              :int]
+             (mu.fn/fn-schema (mu.fn/parse-fn-tail (rest form))))))
+    (let [f (mu.fn/fn my-plus :- :int
+              [x :- :int
+               y :- :int
+               & more :- [:* :int]]
+              (reduce + (list* x y more)))]
+      (is (= 3
+             (f 1 2)))
+      (is (= 6
+             (f 1 2 3)))
+      (is (= 10
+             (f 1 2 3 4))))))
+
+(deftest ^:parallel varargs-map-schema-test
+  (testing "Schemas on the varargs map should work (#46864)"
+    (let [form '(metabase.util.malli.fn/fn my-plus :- :map
+                  [x :- :int
+                   y :- :int
+                   & {:as options} :- [:map [:integer? :boolean]]]
+                  {:options options, :output (+ x y)})]
+      (is (= '(let* [&f (clojure.core/fn [x y & {:as options}]
+                          {:options options, :output (+ x y)})
+                     &input-schema-0-a [:map [:integer? :boolean]]]
+                (clojure.core/fn
+                  ([a b & {:as kvs}]
+                   (try
+                     (metabase.util.malli.fn/validate-input {:fn-name 'my-plus} :int a)
+                     (metabase.util.malli.fn/validate-input {:fn-name 'my-plus} :int b)
+                     (metabase.util.malli.fn/validate-input {:fn-name 'my-plus} &input-schema-0-a kvs)
+                     (clojure.core/->>
+                      (&f a b kvs)
+                      (metabase.util.malli.fn/validate-output {:fn-name 'my-plus} :map))
+                     (catch java.lang.Exception error
+                       (throw (metabase.util.malli.fn/fixup-stacktrace error)))))))
+
+             (macroexpand form)))
+      (is (= [:=>
+              [:cat :int :int [:* :any]]
+              :map]
+             (mu.fn/fn-schema (mu.fn/parse-fn-tail (rest form)) {:target :target/metadata}))))
+    (let [f (mu.fn/fn my-plus :- :map
+              [x :- :int
+               y :- :int
+               & {:as options} :- [:map [:integer? :boolean]]]
+              {:options options, :output (+ x y)})]
+      (is (= {:options {:integer? true}, :output 3}
+             (f 1 2 :integer? true)))
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"Invalid input:"
+           (f 1 2 :integer? 1)))
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"Invalid input:"
+           (f 1 2))))))
+
 (deftest ^:parallel parse-fn-tail-preserve-metadata-test
   (is (= 'Integer
          (-> '(^{:private true} add-ints :- :int ^{:tag Integer} [x :- :int y :- :int] (+ x y))
              mu.fn/parse-fn-tail
+             :values
              :arities
-             second
+             :value
+             :values
              :args
              meta
              :tag))))
 
-(mu/defn ^:private foo :- keyword? [_x :- string?] "bad output")
-(mu/defn ^:private bar :- keyword?
+(mu/defn- foo :- keyword? [_x :- string?] "bad output")
+(mu/defn- bar :- keyword?
   ([_x :- string? _y] "bad output")
   ([_x :- string? _y & _xs] "bad output"))
 
-(mu/defn ^:private works? :- keyword? [_x :- string?] :yes)
+(mu/defn- works? :- keyword? [_x :- string?] :yes)
 
 (defn from-here? [^Exception e]
   (let [top-trace (-> e (.getStackTrace) first)
@@ -247,7 +348,7 @@
             (if (= mode "prod")
               (is (false? (mu.fn/instrument-ns? n)))
               (is (true? (mu.fn/instrument-ns? n))))))
-        (testing (str "\na namespace with :instrument/always meta should not be skipped")
+        (testing "\na namespace with :instrument/always meta should not be skipped"
           (let [n (doto ^clojure.lang.Namespace (create-ns (symbol (mt/random-name)))
                     (.resetMeta {:instrument/always true}))]
             (is (true? (mu.fn/instrument-ns? n)))))))))
@@ -255,15 +356,15 @@
 (deftest ^:parallel instrumentation-can-be-omitted
   (testing "omission in macroexpansion"
     (testing "returns a simple fn*"
-      (mt/with-dynamic-redefs [mu.fn/instrument-ns? (constantly false)]
+      (mt/with-dynamic-fn-redefs [mu.fn/instrument-ns? (constantly false)]
         (let [expansion (macroexpand `(mu.fn/fn :- :int [] "foo"))]
-          (is (= expansion '(fn* ([] "foo")))))))
+          (is (= '(fn* ([] "foo"))
+                 expansion)))))
     (testing "returns an instrumented fn"
-      (mt/with-dynamic-redefs [mu.fn/instrument-ns? (constantly true)]
+      (mt/with-dynamic-fn-redefs [mu.fn/instrument-ns? (constantly true)]
         (let [expansion (macroexpand `(mu.fn/fn :- :int [] "foo"))]
-          (is (= (take 2 expansion)
-                 '(let* [&f (clojure.core/fn [] "foo")]
-                    ,,,)))))))
+          (is (= '(let* [&f (clojure.core/fn [] "foo")])
+                 (take 2 expansion)))))))
   (testing "by default, instrumented forms are emitted"
     (let [f (mu.fn/fn :- :int [] "schemas aren't checked if this is returned")]
       (try (f)
@@ -271,7 +372,7 @@
            (catch Exception e
              (is (=? {:type ::mu.fn/invalid-output} (ex-data e)))))))
   (testing "when instrument-ns? returns false, unvalidated form is emitted"
-    (mt/with-dynamic-redefs [mu.fn/instrument-ns? (constantly false)]
+    (mt/with-dynamic-fn-redefs [mu.fn/instrument-ns? (constantly false)]
       ;; we have to use eval here because `mu.fn/fn` is expanded at _read_ time and we want to change the
       ;; expansion via [[mu.fn/instrument-ns?]]. So that's why we call eval here. Could definitely use some
       ;; macroexpansion tests as well.

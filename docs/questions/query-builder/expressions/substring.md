@@ -4,14 +4,14 @@ title: Substring
 
 # Substring
 
-`substring` extracts part of some text. This function is useful for cleaning up text (or any value with a [string data type](https://www.metabase.com/learn/databases/data-types-overview#examples-of-data-types)) that has a consistent format.
+`substring` extracts part of some text. This function is useful for cleaning up text (or any value with a [string data type](https://www.metabase.com/learn/grow-your-data-skills/data-fundamentals/data-types-overview#examples-of-data-types)) that has a consistent format.
 
 For example, `substring` should work well on strings like SKU numbers, ISO codes, and standardized email addresses.
 
-| Syntax                                                                                           | Example                               |
-|--------------------------------------------------------------------------------------------------|---------------------------------------|
-| `substring(text, position, length)`                                                              | `substring("user_id@email.com", 1, 7)`|
-| Extracts part of the text given a starting point (position) and a length (number of characters). | "user_id"                             |
+| Syntax                                                                                           | Example                                |
+| ------------------------------------------------------------------------------------------------ | -------------------------------------- |
+| `substring(text, position, length)`                                                              | `substring("user_id@email.com", 1, 7)` |
+| Extracts part of the text given a starting point (position) and a length (number of characters). | "user_id"                              |
 
 ## Parameters
 
@@ -21,7 +21,7 @@ For example, `substring` should work well on strings like SKU numbers, ISO codes
 ## Getting a substring from the left
 
 | Mission ID  | Agent |
-|-------------|-------|
+| ----------- | ----- |
 | 19951113006 | 006   |
 | 20061114007 | 007   |
 | 19640917008 | 008   |
@@ -43,7 +43,7 @@ Instead of using a number for the position, you'll use the formula
 where `position_from_right` is the number of characters you want to count from right to left.
 
 | Mission ID  | Agent |
-|-------------|-------|
+| ----------- | ----- |
 | 19951113006 | 006   |
 | 20061114007 | 007   |
 | 19640917008 | 008   |
@@ -56,19 +56,19 @@ substring([Mission ID], (1 + length([Mission ID]) - 3), 3)
 
 ## Accepted data types
 
-| [Data type](https://www.metabase.com/learn/databases/data-types-overview#examples-of-data-types) | Works with `substring`  |
-| ----------------------- | -------------------- |
-| String                  | ✅                   |
-| Number                  | ❌                   |
-| Timestamp               | ❌                   |
-| Boolean                 | ❌                   |
-| JSON                    | ❌                   |
+| [Data type](https://www.metabase.com/learn/grow-your-data-skills/data-fundamentals/data-types-overview#examples-of-data-types) | Works with `substring` |
+| ------------------------------------------------------------------------------------------------------------------------------ | ---------------------- |
+| String                                                                                                                         | ✅                     |
+| Number                                                                                                                         | ❌                     |
+| Timestamp                                                                                                                      | ❌                     |
+| Boolean                                                                                                                        | ❌                     |
+| JSON                                                                                                                           | ❌                     |
 
 ## Limitations
 
-`substring` extracts text by counting a fixed number of characters. If you need to extract text based on some more complicated logic, try [`regexextract`](../expressions-list.md#regexextract).
+`substring` extracts text by counting a fixed number of characters. If you need to extract text based on some more complicated logic, try [`regexExtract`](../expressions-list.md#regexextract).
 
-And if you only need to clean up extra whitespace around your text, you can use the [`trim`](../expressions-list.md#trim), [`ltrim`](../expressions-list.md#ltrim), or [`rtrim`](../expressions-list.md#rtrim) expressions instead.
+And if you only need to clean up extra whitespace around your text, you can use the [`trim`](../expressions-list.md#trim), [`lTrim`](../expressions-list.md#ltrim), or [`rTrim`](../expressions-list.md#rtrim) expressions instead.
 
 ## Related functions
 
@@ -76,7 +76,7 @@ This section covers functions and formulas that work the same way as the Metabas
 
 **[Metabase expressions](../expressions-list.md)**
 
-- [regexextract](#regexextract)
+- [regexExtract](#regexextract)
 
 **Other tools**
 
@@ -84,12 +84,12 @@ This section covers functions and formulas that work the same way as the Metabas
 - [Spreadsheets](#spreadsheets)
 - [Python](#python)
 
-### Regexextract
+### RegexExtract
 
-Use [regexextract](./regexextract.md) if you need to extract text based on more specific rules. For example, you could get the agent ID with a regex pattern that finds the last occurrence of "00" (and everything after it):
+Use [regexExtract](./regexextract.md) if you need to extract text based on more specific rules. For example, you could get the agent ID with a regex pattern that finds the last occurrence of "00" (and everything after it):
 
 ```
-regexextract([Mission ID], ".+(00.+)$")
+regexExtract([Mission ID], ".+(00.+)$")
 ```
 
 should return the same result as
@@ -100,7 +100,7 @@ substring([Mission ID], 9, 3)
 
 ### SQL
 
-When you run a question using the [notebook editor](https://www.metabase.com/glossary/notebook_editor), Metabase will convert your graphical query settings (filters, summaries, etc.) into a query, and run that query against your database to get your results.
+When you run a question using the [notebook editor](https://www.metabase.com/glossary/notebook-editor), Metabase will convert your graphical query settings (filters, summaries, etc.) into a query, and run that query against your database to get your results.
 
 If our [sample data](#getting-a-substring-from-the-left) is stored in a PostgreSQL database:
 
@@ -149,4 +149,4 @@ substring([Mission ID], 9, 3)
 ## Further reading
 
 - [Custom expressions documentation](../expressions.md)
-- [Custom expressions tutorial](https://www.metabase.com/learn/questions/custom-expressions)
+- [Custom expressions tutorial](https://www.metabase.com/learn/metabase-basics/querying-and-dashboards/questions/custom-expressions)

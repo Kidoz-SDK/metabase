@@ -4,12 +4,11 @@
 //
 // The following cases are considered errors:
 //
-// 1. MetabaseSettings.learnUrl(string)
-// 2. MetabaseSettings.docsUrl(string)
-// 3. getDocsUrl selector from "metabase/selectors/settings"
-// 4. getLearnUrl selector from "metabase/selectors/settings"
-// 5. inline string "metabase.com/docs/"
-// 6. inline string "metabase.com/learn/"
+// 1. useDocsUrl hook
+// 2. getDocsUrl selector from "metabase/selectors/settings"
+// 3. getLearnUrl selector from "metabase/selectors/settings"
+// 4. inline string "metabase.com/docs/"
+// 5. inline string "metabase.com/learn/"
 //
 // If a link shouldn't be rendered conditionally e.g. it's only show for admins, or is rendered inside admin settings, you need to disable the rule with a reason.
 // e.g. "// eslint-disable-next-line no-unconditional-metabase-links-render -- This link only shows for admins."
@@ -18,11 +17,23 @@ function getImportNodeLocation(node) {
   return node.source.value;
 }
 
+function getParentDeclarationNode(node) {
+  if (node.parent.type === "VariableDeclarator" || !node.parent) {
+    return node.parent;
+  }
+  return getParentDeclarationNode(node.parent);
+}
+
 const ADD_COMMENT_MESSAGE =
   'add comment to indicate the reason why this rule needs to be disabled.\nExample: "// eslint-disable-next-line no-unconditional-metabase-links-render -- This links only shows for admins."';
 const ERROR_MESSAGE =
   "Metabase links must be rendered conditionally.\n\nPlease import `getShowMetabaseLinks` selector from `metabase/selectors/whitelabel` and use it to conditionally render Metabase links.\n\nOr " +
   ADD_COMMENT_MESSAGE;
+
+const HOOK_ERROR_MESSAGE =
+  "Metabase links must be rendered conditionally.\n\nPlease destructure `showMetabaseLinks` from this hook and use it to conditionally render Metabase links.\n\nOr " +
+  ADD_COMMENT_MESSAGE;
+
 const LITERAL_METABASE_URL_REGEX =
   /(metabase\.com\/docs|metabase\.com\/learn)($|\/)/;
 
@@ -38,7 +49,6 @@ module.exports = {
   },
 
   create(context) {
-    let metabaseSettings;
     let isGetDocsUrlSelectorImported = false;
     let isGetLearnUrlSelectorImported = false;
     let isGetShowMetabaseLinksSelectorImported = false;
@@ -60,13 +70,14 @@ module.exports = {
         const variables = context.getDeclaredVariables(node);
         if (isDefault) {
           return variables.find(
-            variable => variable.defs[0].node.type === "ImportDefaultSpecifier",
+            (variable) =>
+              variable.defs[0].node.type === "ImportDefaultSpecifier",
           );
         }
 
         // Named import
         return variables.find(
-          variable =>
+          (variable) =>
             variable.defs[0].node.type === "ImportSpecifier" &&
             variable.name === named,
         );
@@ -77,17 +88,6 @@ module.exports = {
 
     return {
       ImportDeclaration(node) {
-        if (
-          getImportedModuleNode(node, {
-            isDefault: true,
-            source: "metabase/lib/settings",
-          })
-        ) {
-          metabaseSettings = getImportedModuleNode(node, {
-            isDefault: true,
-            source: "metabase/lib/settings",
-          });
-        }
         if (
           getImportedModuleNode(node, {
             named: "getDocsUrl",
@@ -127,26 +127,32 @@ module.exports = {
           });
         }
 
+        // call `useDocsUrl` hook
+        if (
+          node?.callee?.type === "Identifier" &&
+          node?.callee?.name === "useDocsUrl"
+        ) {
+          const parentDeclarationNode = getParentDeclarationNode(node);
+
+          const hasShowMetabaseLinksDestructured =
+            parentDeclarationNode?.id?.properties?.some(
+              (prop) => prop.key.name === "showMetabaseLinks",
+            );
+
+          if (!hasShowMetabaseLinksDestructured) {
+            context.report({
+              node,
+              message: HOOK_ERROR_MESSAGE,
+            });
+          }
+        }
+
         // call `getLearnUrl` selector
         if (
           isGetLearnUrlSelectorImported &&
           !isGetShowMetabaseLinksSelectorImported &&
           node?.callee?.type === "Identifier" &&
           node?.callee?.name === "getLearnUrl"
-        ) {
-          context.report({
-            node,
-            message: ERROR_MESSAGE,
-          });
-        }
-
-        // call `MetabaseSettings.learnUrl` or `MetabaseSettings.docsUrl`
-        if (
-          metabaseSettings?.references.some(
-            reference => reference.identifier === node?.callee?.object,
-          ) &&
-          !isGetShowMetabaseLinksSelectorImported &&
-          ["learnUrl", "docsUrl"].includes(node?.callee?.property?.name)
         ) {
           context.report({
             node,
@@ -171,7 +177,7 @@ module.exports = {
       },
       TemplateLiteral(node) {
         const quasis = node.quasis;
-        quasis.forEach(quasi => {
+        quasis.forEach((quasi) => {
           if (
             LITERAL_METABASE_URL_REGEX.exec(quasi.value.raw) &&
             !isGetShowMetabaseLinksSelectorImported
@@ -192,7 +198,7 @@ module.exports = {
           /eslint-disable-next-line\s+no-unconditional-metabase-links-render/;
         const ALLOWED_ESLINT_DISABLE_LINE_REGEX =
           /eslint-disable-next-line\s+no-unconditional-metabase-links-render -- \w+/;
-        comments.forEach(comment => {
+        comments.forEach((comment) => {
           if (ESLINT_DISABLE_BLOCK_REGEX.exec(comment.value)) {
             const { start, end } = comment.loc;
             context.report({

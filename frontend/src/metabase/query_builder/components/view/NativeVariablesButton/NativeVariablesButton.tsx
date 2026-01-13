@@ -1,26 +1,42 @@
+import cx from "classnames";
 import { t } from "ttag";
 
-import Tooltip from "metabase/core/components/Tooltip";
-import { Icon } from "metabase/ui";
+import { useDispatch } from "metabase/lib/redux";
+import { toggleTemplateTagsEditor } from "metabase/query_builder/actions";
+import { Box, Icon, Tooltip } from "metabase/ui";
 
-import { ButtonRoot } from "./NativeVariablesButton.styled";
+import NativeVariablesButtonS from "./NativeVariablesButton.module.css";
 
 interface NativeVariablesButtonProps {
   className?: string;
   isShowingTemplateTagsEditor: boolean;
   size: number;
-  toggleTemplateTagsEditor: () => void;
 }
 
 export const NativeVariablesButton = ({
   className,
   isShowingTemplateTagsEditor,
   size,
-  toggleTemplateTagsEditor,
-}: NativeVariablesButtonProps) => (
-  <Tooltip tooltip={t`Variables`}>
-    <ButtonRoot className={className} isSelected={isShowingTemplateTagsEditor}>
-      <Icon name="variable" size={size} onClick={toggleTemplateTagsEditor} />
-    </ButtonRoot>
-  </Tooltip>
-);
+}: NativeVariablesButtonProps) => {
+  const dispatch = useDispatch();
+  return (
+    <Tooltip label={t`Variables`}>
+      <Box
+        component="a"
+        aria-label={t`Variables`}
+        h={size}
+        className={cx(className, NativeVariablesButtonS.ButtonRoot, {
+          [NativeVariablesButtonS.isSelected]: isShowingTemplateTagsEditor,
+        })}
+      >
+        <Icon
+          name="variable"
+          size={size}
+          onClick={() => {
+            dispatch(toggleTemplateTagsEditor());
+          }}
+        />
+      </Box>
+    </Tooltip>
+  );
+};

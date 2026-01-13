@@ -40,9 +40,11 @@
   file-size
   filename
   find-files
+  get-path-in-filesystem
   nio-path
   project-root-directory
   temporary-file
+  with-open-jar-file-system
   zip-directory->file]
 
  [input
@@ -53,6 +55,8 @@
 
  [misc
   parse-as-keyword
+  since-ms
+  start-timer
   varargs]
 
  [out

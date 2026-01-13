@@ -5,48 +5,41 @@ import { createMockMetadata } from "__support__/metadata";
 import { createMockEntitiesState } from "__support__/store";
 import { renderWithProviders, screen } from "__support__/ui";
 import * as Lib from "metabase-lib";
-import {
-  createQuery,
-  columnFinder,
-  findAggregationOperator,
-} from "metabase-lib/test-helpers";
+import { createQuery, createQueryWithClauses } from "metabase-lib/test-helpers";
 import type Metadata from "metabase-lib/v1/metadata/Metadata";
-import { COMMON_DATABASE_FEATURES } from "metabase-types/api/mocks";
 import {
-  createSampleDatabase,
+  COMMON_DATABASE_FEATURES,
+  createMockCard,
+} from "metabase-types/api/mocks";
+import {
+  ORDERS,
+  SAMPLE_DB_ID,
   createOrdersTable,
   createPeopleTable,
   createProductsTable,
   createReviewsTable,
-  ORDERS,
-  SAMPLE_DB_ID,
+  createSampleDatabase,
 } from "metabase-types/api/mocks/presets";
 import type { State } from "metabase-types/store";
-import { createMockState } from "metabase-types/store/mocks";
+import {
+  createMockQueryBuilderState,
+  createMockState,
+} from "metabase-types/store/mocks";
 
 import { AggregationPicker } from "./AggregationPicker";
 
-function createQueryWithCountAggregation({
-  metadata,
-}: { metadata?: Metadata } = {}) {
-  const initialQuery = createQuery({ metadata });
-  const count = findAggregationOperator(initialQuery, "count");
-  const clause = Lib.aggregationClause(count);
-  return Lib.aggregate(initialQuery, 0, clause);
+function createQueryWithCountAggregation() {
+  return createQueryWithClauses({
+    aggregations: [{ operatorName: "count" }],
+  });
 }
 
-function createQueryWithMaxAggregation({
-  metadata,
-}: { metadata?: Metadata } = {}) {
-  const initialQuery = createQuery({ metadata });
-  const max = findAggregationOperator(initialQuery, "max");
-  const findColumn = columnFinder(
-    initialQuery,
-    Lib.aggregationOperatorColumns(max),
-  );
-  const quantity = findColumn("ORDERS", "QUANTITY");
-  const clause = Lib.aggregationClause(max, quantity);
-  return Lib.aggregate(initialQuery, 0, clause);
+function createQueryWithMaxAggregation() {
+  return createQueryWithClauses({
+    aggregations: [
+      { operatorName: "max", tableName: "ORDERS", columnName: "QUANTITY" },
+    ],
+  });
 }
 
 function createQueryWithInlineExpression() {
@@ -86,8 +79,8 @@ function createQueryWithInlineExpressionWithOperator() {
 }
 
 function createMetadata({
-  hasExpressionSupport = true,
-}: { hasExpressionSupport?: boolean } = {}) {
+  allowCustomExpressions,
+}: { allowCustomExpressions?: boolean } = {}) {
   return createMockMetadata({
     databases: [
       createSampleDatabase({
@@ -97,7 +90,7 @@ function createMetadata({
           createProductsTable(),
           createReviewsTable(),
         ],
-        features: hasExpressionSupport
+        features: allowCustomExpressions
           ? COMMON_DATABASE_FEATURES
           : _.without(COMMON_DATABASE_FEATURES, "expression-aggregations"),
       }),
@@ -109,7 +102,7 @@ type SetupOpts = {
   state?: State;
   metadata?: Metadata;
   query?: Lib.Query;
-  hasExpressionInput?: boolean;
+  allowCustomExpressions?: boolean;
 };
 
 function setup({
@@ -117,10 +110,13 @@ function setup({
     entities: createMockEntitiesState({
       databases: [createSampleDatabase()],
     }),
+    qb: createMockQueryBuilderState({
+      card: createMockCard(),
+    }),
   }),
   metadata = createMetadata(),
   query = createQuery({ metadata }),
-  hasExpressionInput = true,
+  allowCustomExpressions,
 }: SetupOpts = {}) {
   const stageIndex = 0;
   const clause = Lib.aggregations(query, stageIndex)[0];
@@ -130,7 +126,7 @@ function setup({
     ? Lib.selectedAggregationOperators(baseOperators, clause)
     : baseOperators;
 
-  const onSelect = jest.fn();
+  const onQueryChange = jest.fn();
 
   renderWithProviders(
     <AggregationPicker
@@ -138,20 +134,24 @@ function setup({
       clause={clause}
       stageIndex={stageIndex}
       operators={operators}
-      hasExpressionInput={hasExpressionInput}
-      onSelect={onSelect}
+      allowCustomExpressions={allowCustomExpressions}
+      onQueryChange={onQueryChange}
     />,
     { storeInitialState: state },
   );
 
-  function getRecentClause(): Lib.Clause {
-    expect(onSelect).toHaveBeenCalledWith(expect.anything());
-    const [clause] = onSelect.mock.lastCall;
-    return clause;
+  function getRecentClause(index: number = -1): Lib.Clause | undefined {
+    expect(onQueryChange).toHaveBeenCalledWith(expect.anything());
+    const [query] = onQueryChange.mock.lastCall;
+    return Lib.aggregations(query, stageIndex).at(index);
   }
 
-  function getRecentClauseInfo() {
-    return Lib.displayInfo(query, stageIndex, getRecentClause());
+  function getRecentClauseInfo(index: number = -1) {
+    const clause = getRecentClause(index);
+    if (clause) {
+      return Lib.displayInfo(query, stageIndex, clause);
+    }
+    return null;
   }
 
   return {
@@ -159,7 +159,7 @@ function setup({
     query,
     stageIndex,
     getRecentClauseInfo,
-    onSelect,
+    onQueryChange,
   };
 }
 
@@ -168,7 +168,7 @@ describe("AggregationPicker", () => {
     it("should list basic operators", () => {
       setup();
 
-      expect(screen.getByText("Basic Metrics")).toBeInTheDocument();
+      expect(screen.getByText("Basic functions")).toBeInTheDocument();
 
       [
         "Count of rows",
@@ -180,8 +180,32 @@ describe("AggregationPicker", () => {
         "Standard deviation of ...",
         "Minimum of ...",
         "Maximum of ...",
-      ].forEach(name => {
+      ].forEach((name) => {
         expect(screen.getByRole("option", { name })).toBeInTheDocument();
+      });
+    });
+
+    it("should have a working global search", async () => {
+      setup();
+
+      expect(screen.getByPlaceholderText("Find...")).toBeInTheDocument();
+
+      await userEvent.type(screen.getByPlaceholderText("Find..."), "Count");
+
+      ["Count of rows", "Cumulative count of rows"].forEach((name) => {
+        expect(screen.getByRole("option", { name })).toBeInTheDocument();
+      });
+
+      [
+        "Sum of ...",
+        "Average of ...",
+        "Number of distinct values of ...",
+        "Cumulative sum of ...",
+        "Standard deviation of ...",
+        "Minimum of ...",
+        "Maximum of ...",
+      ].forEach((name) => {
+        expect(screen.queryByRole("option", { name })).not.toBeInTheDocument();
       });
     });
 
@@ -229,7 +253,7 @@ describe("AggregationPicker", () => {
       ).toHaveAttribute("aria-selected", "true");
       expect(
         screen.getByRole("option", { name: "Sum of ..." }),
-      ).not.toHaveAttribute("aria-selected");
+      ).toHaveAttribute("aria-selected", "false");
     });
 
     it("should highlight selected operator column", () => {
@@ -286,16 +310,22 @@ describe("AggregationPicker", () => {
 
   describe("custom expressions", () => {
     it("should allow to enter a custom expression containing an aggregation", async () => {
-      const { getRecentClauseInfo } = setup();
+      const { getRecentClauseInfo } = setup({ allowCustomExpressions: true });
 
-      const expression = "count + 1";
+      const expression = "count() + 1";
       const expressionName = "My expression";
 
       await userEvent.click(screen.getByText("Custom Expression"));
-      await userEvent.type(screen.getByLabelText("Expression"), expression);
-      await userEvent.type(screen.getByLabelText("Name"), expressionName);
+      await userEvent.type(
+        screen.getByTestId("custom-expression-query-editor"),
+        expression,
+      );
+      await userEvent.type(
+        screen.getByTestId("expression-name"),
+        expressionName,
+      );
       await userEvent.click(screen.getByRole("button", { name: "Done" }));
-      expect(getRecentClauseInfo().displayName).toBe(expressionName);
+      expect(getRecentClauseInfo()?.displayName).toBe(expressionName);
     });
 
     it("should open the editor when a named expression without operator is used", async () => {
@@ -326,21 +356,24 @@ describe("AggregationPicker", () => {
               },
             ],
           }),
+          qb: createMockQueryBuilderState({
+            card: createMockCard(),
+          }),
         }),
-        metadata: createMetadata({ hasExpressionSupport: false }),
+        metadata: createMetadata({ allowCustomExpressions: false }),
       });
       expect(screen.queryByText("Custom Expression")).not.toBeInTheDocument();
     });
 
-    it("shouldn't be shown if `hasExpressionInput` prop is false", () => {
-      setup({ hasExpressionInput: false });
+    it("shouldn't be shown if `allowCustomExpressions` prop is false", () => {
+      setup({ allowCustomExpressions: false });
       expect(screen.queryByText("Custom Expression")).not.toBeInTheDocument();
     });
 
-    it("should open the editor even if `hasExpressionInput` prop is false if expression is used", () => {
+    it("should open the editor even if `allowCustomExpressions` prop is false if expression is used", () => {
       setup({
         query: createQueryWithInlineExpression(),
-        hasExpressionInput: false,
+        allowCustomExpressions: false,
       });
 
       expect(screen.getByText("Custom Expression")).toBeInTheDocument();

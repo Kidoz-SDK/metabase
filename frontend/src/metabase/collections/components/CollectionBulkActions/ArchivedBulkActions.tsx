@@ -2,17 +2,14 @@ import { useMemo } from "react";
 import { msgid, ngettext, t } from "ttag";
 import _ from "underscore";
 
-import { BulkDeleteConfirmModal } from "metabase/archive/components/BulkDeleteConfirmModal";
+import { canMoveItem, isRootTrashCollection } from "metabase/collections/utils";
 import {
-  canDeleteItem,
-  canMoveItem,
-  isRootTrashCollection,
-} from "metabase/collections/utils";
-import { BulkActionButton } from "metabase/components/BulkActionBar";
-import { color } from "metabase/lib/colors";
+  BulkActionButton,
+  BulkActionDangerButton,
+} from "metabase/common/components/BulkActionBar";
+import { ConfirmModal } from "metabase/common/components/ConfirmModal";
 import { useDispatch } from "metabase/lib/redux";
 import { addUndo } from "metabase/redux/undo";
-import { Box } from "metabase/ui";
 import type { Collection, CollectionItem } from "metabase-types/api";
 
 type ArchivedBulkActionsProps = {
@@ -46,6 +43,11 @@ export const ArchivedBulkActions = ({
   const handleCloseModal = () => {
     setSelectedItems(null);
     setSelectedAction(null);
+  };
+
+  const unselect = () => {
+    setSelectedItems(null);
+    setSelectedAction(null);
     clearSelected();
   };
 
@@ -53,18 +55,18 @@ export const ArchivedBulkActions = ({
   const showRestore = isRootTrashCollection(collection);
 
   const canRestore = useMemo(() => {
-    return selected.every(item => item.can_restore);
+    return selected.every((item) => item.can_restore);
   }, [selected]);
 
   const handleBulkRestore = () => {
-    const actions = selected.map(item => item.setArchived(false));
-    Promise.all(actions).finally(() => clearSelected());
+    const actions = selected.map((item) => item.setArchived(false));
+    Promise.all(actions).finally(unselect);
   };
 
   // delete
   const canDelete = useMemo(() => {
-    return selected.every(item => canDeleteItem(item, collection));
-  }, [selected, collection]);
+    return selected.every((item) => item.can_delete);
+  }, [selected]);
 
   const handleBulkDeletePermanentlyStart = async () => {
     setSelectedItems(selected);
@@ -72,11 +74,10 @@ export const ArchivedBulkActions = ({
   };
 
   const handleBulkDeletePermanently = async () => {
-    const actions = selected.map(item => item.delete());
-    Promise.all(actions).finally(() => clearSelected());
+    const actions = selected.map((item) => item.delete());
+    Promise.all(actions).finally(unselect);
     dispatch(
       addUndo({
-        icon: "check",
         message: ngettext(
           msgid`${selected.length} item has been permanently deleted.`,
           `${selected.length} items have been permanently deleted.`,
@@ -90,7 +91,7 @@ export const ArchivedBulkActions = ({
 
   // move
   const canMove = useMemo(() => {
-    return selected.every(item => canMoveItem(item, collection));
+    return selected.every((item) => canMoveItem(item, collection));
   }, [selected, collection]);
 
   const handleBulkMoveStart = () => {
@@ -108,20 +109,28 @@ export const ArchivedBulkActions = ({
       <BulkActionButton onClick={handleBulkMoveStart} disabled={!canMove}>
         {t`Move`}
       </BulkActionButton>
-      <BulkActionButton
+      <BulkActionDangerButton
         onClick={handleBulkDeletePermanentlyStart}
         disabled={!canDelete}
       >
-        <Box c={color("danger")}>{t`Delete permanently`}</Box>
-      </BulkActionButton>
+        {t`Delete permanently`}
+      </BulkActionDangerButton>
 
-      {hasSelectedItems && selectedAction === "delete" && (
-        <BulkDeleteConfirmModal
-          selectedItemCount={selectedItemCount}
-          onCloseModal={handleCloseModal}
-          onBulkDeletePermanently={handleBulkDeletePermanently}
-        />
-      )}
+      {/* This should probably be external so that we can hide
+          the bar when any other modals are displayed */}
+      <ConfirmModal
+        opened={hasSelectedItems && selectedAction === "delete"}
+        confirmButtonText={t`Delete permanently`}
+        data-testid="leave-confirmation"
+        message={t`This can't be undone.`}
+        title={ngettext(
+          msgid`Delete item permanently?`,
+          `Delete ${selectedItemCount} items permanently?`,
+          selectedItemCount,
+        )}
+        onConfirm={handleBulkDeletePermanently}
+        onClose={handleCloseModal}
+      />
     </>
   );
 };

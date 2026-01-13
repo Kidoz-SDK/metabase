@@ -1,6 +1,10 @@
 (ns metabase.query-processor.middleware.catch-exceptions
   "Middleware for catching exceptions thrown by the query processor and returning them in a friendlier format."
+  (:refer-clojure :exclude [some get-in])
   (:require
+   [clojure.string :as str]
+   [metabase.analytics.core :as analytics]
+   [metabase.driver :as driver]
    [metabase.lib.schema.common :as lib.schema.common]
    [metabase.query-processor.error-type :as qp.error-type]
    [metabase.query-processor.middleware.permissions :as qp.perms]
@@ -9,7 +13,8 @@
    [metabase.util :as u]
    [metabase.util.i18n :refer [trs]]
    [metabase.util.log :as log]
-   [metabase.util.malli :as mu])
+   [metabase.util.malli :as mu]
+   [metabase.util.performance :refer [some get-in]])
   (:import
    (clojure.lang ExceptionInfo)
    (java.sql SQLException)))
@@ -34,11 +39,15 @@
 
 (defmethod format-exception ExceptionInfo
   [e]
-  (let [{error-type :type, :as data} (ex-data e)]
+  ;; `:is-curated` is a flag that signals whether the error message in `e` was approved by product
+  ;; to be shown to the user. It is used by FE.
+  (let [{error-type :type, is-curated :is-curated, :as data} (ex-data e)]
     (merge
      ((get-method format-exception Throwable) e)
      (when (qp.error-type/known-error-type? error-type)
        {:error_type error-type})
+     (when is-curated
+       {:error_is_curated is-curated})
      ;; TODO - we should probably change this key to `:data` so we're not mixing lisp-case and snake_case keys
      {:ex-data data})))
 
@@ -54,13 +63,15 @@
   [e]
   (reverse (u/full-exception-chain e)))
 
-(mu/defn ^:private best-top-level-error
+(mu/defn- best-top-level-error
   "In cases where the top-level Exception doesn't have the best error message, return a better one to use instead. We
   usually want to show SQLExceptions at the top level since they contain more useful information."
   [maps :- [:sequential {:min 1} :map]]
   (some (fn [m]
           (when (isa? (:class m) SQLException)
-            (select-keys m [:error])))
+            ;; Some JDBC drivers (e.g. Databricks) return a stacktrace in the
+            ;; error message that we don't want to show the user
+            {:error (first (str/split (get m :error "") #"\n\tat " 2))}))
         maps))
 
 (mu/defn exception-response :- [:map [:status :keyword]]
@@ -89,11 +100,11 @@
       :native       (when (qp.perms/current-user-has-adhoc-native-query-perms? query)
                       native)})))
 
-(mu/defn ^:private query-execution-info :- :map
+(mu/defn- query-execution-info :- :map
   [query-execution :- :map]
   (dissoc query-execution :result_rows :hash :executor_id :dashboard_id :pulse_id :native :start_time_millis))
 
-(mu/defn ^:private format-exception* :- [:map [:status :keyword]]
+(mu/defn- format-exception* :- [:map [:status :keyword]]
   "Format a `Throwable` into the usual userland error-response format."
   [query        :- :map
    ^Throwable e :- (lib.schema.common/instance-of-class Throwable)
@@ -115,7 +126,7 @@
   "Middleware for catching exceptions thrown by the query processor and returning them in a 'normal' format. Forwards
   exceptions to the `result-chan`."
   [qp :- ::qp.schema/qp]
-  (mu/fn [query :- ::qp.schema/query
+  (mu/fn [query :- ::qp.schema/any-query
           rff   :- ::qp.schema/rff]
     (if-not (get-in query [:middleware :userland-query?])
       (qp query rff)
@@ -127,11 +138,15 @@
         (try
           (qp query rff)
           (catch Throwable e
+            (analytics/inc! :metabase-query-processor/query {:driver driver/*driver* :status "failure"})
             ;; format the Exception and return it
-            (let [formatted-exception (format-exception* query e @extra-info)]
-              (log/errorf "Error processing query: %s\n%s"
-                          (or (:error formatted-exception) "Error running query")
-                          (u/pprint-to-str formatted-exception))
+            (let [formatted-exception (format-exception* query e @extra-info)
+                  query-canceled?     (some (comp :query/query-canceled? ex-data)
+                                            (u/full-exception-chain e))]
+              (when-not query-canceled?
+                (log/errorf "Error processing query: %s\n%s"
+                            (or (:error formatted-exception) "Error running query")
+                            (u/pprint-to-str formatted-exception)))
               ;; ensure always a message on the error otherwise FE thinks query was successful. (#23258, #23281)
               (let [result (update formatted-exception
                                    :error (fnil identity (trs "Error running query")))]

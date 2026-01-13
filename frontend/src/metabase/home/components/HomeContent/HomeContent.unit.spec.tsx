@@ -11,6 +11,7 @@ import {
 } from "__support__/ui";
 import type {
   Database,
+  DatabaseXray,
   PopularItem,
   RecentItem,
   Settings,
@@ -18,8 +19,11 @@ import type {
 } from "metabase-types/api";
 import {
   createMockDatabase,
+  createMockDatabaseCandidate,
   createMockPopularTableItem,
   createMockRecentTableItem,
+  createMockTable,
+  createMockTableCandidate,
   createMockUser,
 } from "metabase-types/api/mocks";
 import {
@@ -36,6 +40,7 @@ interface SetupOpts {
   popularItems?: PopularItem[];
   isXrayEnabled?: boolean;
   settings?: Partial<Settings>;
+  candidates?: Record<number, DatabaseXray[]>;
 }
 
 const setup = async ({
@@ -45,6 +50,7 @@ const setup = async ({
   popularItems = [],
   isXrayEnabled = true,
   settings = {},
+  candidates = {},
 }: SetupOpts) => {
   const state = createMockState({
     currentUser: user,
@@ -57,7 +63,9 @@ const setup = async ({
   setupDatabasesEndpoints(databases);
   setupRecentViewsEndpoints(recentItems);
   setupPopularItemsEndpoints(popularItems);
-  databases.forEach(({ id }) => setupDatabaseCandidatesEndpoint(id, []));
+  databases.forEach(({ id }) =>
+    setupDatabaseCandidatesEndpoint(id, candidates[id] || []),
+  );
 
   renderWithProviders(<HomeContent />, { storeInitialState: state });
 
@@ -126,26 +134,44 @@ describe("HomeContent", () => {
   });
 
   it("should render x-rays for an installer after the setup", async () => {
+    const database = createMockDatabase({ tables: [createMockTable()] });
+
     await setup({
       user: createMockUser({
         is_installer: true,
         has_question_and_dashboard: false,
         first_login: "2020-01-10T00:00:00Z",
       }),
-      databases: [createMockDatabase()],
+      databases: [database],
+      candidates: {
+        [database.id]: [
+          createMockDatabaseCandidate({
+            tables: [createMockTableCandidate()],
+          }),
+        ],
+      },
     });
 
     expect(screen.getByText(/Here are some explorations/)).toBeInTheDocument();
   });
 
   it("should render x-rays for the installer when there is no question and dashboard", async () => {
+    const database = createMockDatabase({ tables: [createMockTable()] });
+
     await setup({
       user: createMockUser({
         is_installer: true,
         has_question_and_dashboard: false,
         first_login: "2020-01-10T00:00:00Z",
       }),
-      databases: [createMockDatabase()],
+      databases: [database],
+      candidates: {
+        [database.id]: [
+          createMockDatabaseCandidate({
+            tables: [createMockTableCandidate()],
+          }),
+        ],
+      },
       recentItems: [createMockRecentTableItem()],
     });
 
@@ -191,7 +217,6 @@ describe("HomeContent", () => {
       });
 
       expect(screen.getByText("Embedding Metabase")).toBeInTheDocument();
-      expect(screen.getByText("The TL;DR:")).toBeInTheDocument();
     });
 
     it("should not show it for non-admins even if 'embedding-homepage' is visible", async () => {
@@ -201,7 +226,6 @@ describe("HomeContent", () => {
       });
 
       expect(screen.queryByText("Embedding Metabase")).not.toBeInTheDocument();
-      expect(screen.queryByText("The TL;DR:")).not.toBeInTheDocument();
     });
 
     it("should not show it if 'embedding-homepage' is not 'visible'", async () => {
@@ -211,7 +235,6 @@ describe("HomeContent", () => {
       });
 
       expect(screen.queryByText("Embedding Metabase")).not.toBeInTheDocument();
-      expect(screen.queryByText("The TL;DR:")).not.toBeInTheDocument();
     });
   });
 });

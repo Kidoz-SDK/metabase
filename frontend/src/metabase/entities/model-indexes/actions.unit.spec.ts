@@ -1,9 +1,10 @@
-import type { MockCall } from "fetch-mock";
 import fetchMock from "fetch-mock";
 
+import { getStore } from "__support__/entities-store";
 import { setupModelIndexEndpoints } from "__support__/server-mocks";
+import { Api } from "metabase/api";
 import Question from "metabase-lib/v1/Question";
-import type { FieldReference, ModelIndex, Field } from "metabase-types/api";
+import type { Field, FieldReference, ModelIndex } from "metabase-types/api";
 import {
   createMockField as createBaseMockField,
   createMockCard,
@@ -11,7 +12,7 @@ import {
 } from "metabase-types/api/mocks";
 
 import type { FieldWithMaybeIndex } from "./actions";
-import { updateModelIndexes, cleanIndexFlags } from "./actions";
+import { cleanIndexFlags, updateModelIndexes } from "./actions";
 
 const createMockField = (options?: Partial<FieldWithMaybeIndex>): Field => {
   return createBaseMockField(options as Partial<Field>);
@@ -21,6 +22,16 @@ const createModelWithResultMetadata = (fields: Field[]) => {
   return new Question(
     createMockCard({ result_metadata: fields, type: "model" }),
   );
+};
+
+const setup = () => {
+  const store = getStore({ [Api.reducerPath]: Api.reducer }, {}, [
+    Api.middleware,
+  ]);
+
+  return {
+    dispatch: store.dispatch,
+  };
 };
 
 describe("Entities > model-indexes > actions", () => {
@@ -52,6 +63,7 @@ describe("Entities > model-indexes > actions", () => {
       });
     });
   });
+
   describe("updateModelIndexes", () => {
     it("should not do anything if there are no fields with should_index flag", async () => {
       const model = createModelWithResultMetadata([
@@ -59,12 +71,13 @@ describe("Entities > model-indexes > actions", () => {
         createMockField(),
       ]);
 
-      const mockDispatch = jest.fn();
-      const mockGetState = jest.fn();
-      await updateModelIndexes(model)(mockDispatch, mockGetState);
+      const { dispatch } = setup();
+      await updateModelIndexes(model)(dispatch);
 
-      expect(mockDispatch).not.toHaveBeenCalled();
-      expect(mockGetState).not.toHaveBeenCalled();
+      const calls = fetchMock.callHistory.calls();
+
+      // No API calls to fetch model indexes
+      expect(calls).toHaveLength(0);
     });
 
     it("should make a POST call for a newly-added index field", async () => {
@@ -79,20 +92,20 @@ describe("Entities > model-indexes > actions", () => {
 
       setupModelIndexEndpoints(model.id(), []);
 
-      const mockDispatch = jest.fn();
-      const mockGetState = jest.fn(() => ({
-        entities: { modelIndexes: {}, modelIndexes_list: {} },
-      }));
-      await updateModelIndexes(model)(mockDispatch, mockGetState);
+      const { dispatch } = setup();
 
-      expect(mockDispatch).toHaveBeenCalled();
-      expect(mockGetState).toHaveBeenCalled();
+      await updateModelIndexes(model)(dispatch);
 
-      const [, options] = (await fetchMock.lastCall()) as MockCall;
+      const createCalls = fetchMock.callHistory.calls("createModelIndex");
+
+      expect(createCalls).toHaveLength(1);
+
+      const call = createCalls[0];
+      const options = call.options;
 
       expect(options?.method).toBe("POST");
       // @ts-expect-error ???
-      const body = JSON.parse(await options?.body) as Partial<ModelIndex>;
+      const body = JSON.parse(options?.body) as Partial<ModelIndex>;
       expect(body.model_id).toBe(model.id());
       expect(body.pk_ref).toEqual(pkFieldRef);
       expect(body.value_ref).toEqual(indexFieldRef);
@@ -116,24 +129,17 @@ describe("Entities > model-indexes > actions", () => {
 
       setupModelIndexEndpoints(1, [existingModelIndex]);
 
-      const mockDispatch = jest.fn();
-      const mockGetState = jest.fn(() => ({
-        entities: {
-          modelIndexes: { 99: existingModelIndex },
-          modelIndexes_list: {
-            '{"model_id":1}': {
-              list: [99],
-              metadata: {},
-            },
-          },
-        },
-      }));
-      await updateModelIndexes(model)(mockDispatch, mockGetState);
+      const { dispatch } = setup();
 
-      expect(mockDispatch).toHaveBeenCalled();
-      expect(mockGetState).toHaveBeenCalled();
+      await updateModelIndexes(model)(dispatch);
 
-      const [url, options] = (await fetchMock.lastCall()) as MockCall;
+      const deleteCalls = fetchMock.callHistory.calls("deleteModelIndex");
+
+      expect(deleteCalls).toHaveLength(1);
+
+      const deleteCall = deleteCalls[0];
+      const url = deleteCall.url;
+      const options = deleteCall.options;
 
       expect(url).toContain("/api/model-index/99");
       expect(options?.method).toBe("DELETE");
@@ -154,29 +160,21 @@ describe("Entities > model-indexes > actions", () => {
         value_ref: indexFieldRef,
       });
 
-      setupModelIndexEndpoints(1, [existingModelIndex]);
+      setupModelIndexEndpoints(model.id(), [existingModelIndex]);
 
-      const mockDispatch = jest.fn();
-      const mockGetState = jest.fn(() => ({
-        entities: {
-          modelIndexes: { 99: existingModelIndex },
-          modelIndexes_list: {
-            '{"model_id":1}': {
-              list: [99],
-              metadata: {},
-            },
-          },
-        },
-      }));
-      await updateModelIndexes(model)(mockDispatch, mockGetState);
+      const { dispatch } = setup();
 
-      expect(mockDispatch).toHaveBeenCalled();
-      expect(mockGetState).toHaveBeenCalled();
+      await updateModelIndexes(model)(dispatch);
 
-      const response = await fetchMock.lastCall();
+      const fetchCalls = fetchMock.callHistory.calls(
+        `getModelIndexes-${model.id()}`,
+      );
+      const createCalls = fetchMock.callHistory.calls("createModelIndex");
 
-      // no calls to fetch
-      expect(response).toBeUndefined();
+      // no calls to Create
+      expect(createCalls).toHaveLength(0);
+      // Made a call to fetch
+      expect(fetchCalls).toHaveLength(1);
     });
 
     it("should not delete an index if there is no index for the field", async () => {
@@ -191,19 +189,20 @@ describe("Entities > model-indexes > actions", () => {
 
       setupModelIndexEndpoints(model.id(), []);
 
-      const mockDispatch = jest.fn();
-      const mockGetState = jest.fn(() => ({
-        entities: { modelIndexes: {}, modelIndexes_list: {} },
-      }));
-      await updateModelIndexes(model)(mockDispatch, mockGetState);
+      const { dispatch } = setup();
 
-      expect(mockDispatch).toHaveBeenCalled();
-      expect(mockGetState).toHaveBeenCalled();
+      await updateModelIndexes(model)(dispatch);
 
-      const response = await fetchMock.lastCall();
+      const fetchCalls = fetchMock.callHistory.calls(
+        `getModelIndexes-${model.id()}`,
+      );
+      const deleteCalls = fetchMock.callHistory.calls("deleteModelIndex");
 
-      // no calls to fetch
-      expect(response).toBeUndefined();
+      // Expect 1 fetch for model indexes
+      expect(fetchCalls).toHaveLength(1);
+
+      //Expect no calls to delete
+      expect(deleteCalls).toHaveLength(0);
     });
   });
 });

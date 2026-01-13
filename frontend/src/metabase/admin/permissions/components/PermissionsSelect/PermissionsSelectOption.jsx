@@ -1,13 +1,12 @@
 import PropTypes from "prop-types";
 import { useState } from "react";
 
-import Tooltip from "metabase/core/components/Tooltip";
-import { Icon } from "metabase/ui";
+import { Icon, Tooltip } from "metabase/ui";
 
 import {
   IconContainer,
-  PermissionsSelectOptionRoot,
   PermissionsSelectLabel,
+  PermissionsSelectOptionRoot,
 } from "./PermissionsSelectOption.styled";
 
 export const optionShape = {
@@ -37,7 +36,7 @@ export function PermissionsSelectOption({
       onMouseEnter={() => setShouldShowTooltip(true)}
       onMouseLeave={() => setShouldShowTooltip(false)}
     >
-      <Tooltip tooltip={hint} isOpen={shouldShowTooltip}>
+      <Tooltip label={hint} disabled={!hint} opened={shouldShowTooltip}>
         <IconContainer color={iconColor}>
           <Icon name={icon} />
         </IconContainer>

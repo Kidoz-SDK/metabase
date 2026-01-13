@@ -1,6 +1,7 @@
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
 
-import { color } from "metabase/lib/colors";
+import { APP_BAR_HEIGHT } from "metabase/nav/constants";
 
 export const AppContainer = styled.div`
   display: flex;
@@ -12,11 +13,13 @@ export const AppContentContainer = styled.div<{
 }>`
   flex-grow: 1;
   display: flex;
-  flex-direction: ${props => (props.isAdminApp ? "column" : "row")};
+  flex-direction: ${(props) => (props.isAdminApp ? "column" : "row")};
   position: relative;
   overflow: hidden;
-  background-color: ${props =>
-    color(props.isAdminApp ? "bg-white" : "content")};
+  background-color: ${(props) =>
+    props.isAdminApp
+      ? "var(--mb-color-bg-white)"
+      : "var(--mb-color-bg-primary)"};
 
   @media print {
     height: 100%;
@@ -28,6 +31,7 @@ export const AppContent = styled.main`
   width: 100%;
   height: 100%;
   overflow: auto;
+  scroll-margin-top: ${APP_BAR_HEIGHT};
 
   @media print {
     overflow: visible !important;

@@ -1,47 +1,23 @@
 import { compose } from "@reduxjs/toolkit";
 import { getIn } from "icepick";
-import moment from "moment-timezone"; // eslint-disable-line no-restricted-imports -- deprecated usage
 import { normalize } from "normalizr";
 import _ from "underscore";
 
-import * as MetabaseAnalytics from "metabase/lib/analytics";
 import { delay } from "metabase/lib/promise";
 import {
-  setRequestLoading,
-  setRequestLoaded,
   setRequestError,
-  setRequestUnloaded,
+  setRequestLoaded,
+  setRequestLoading,
   setRequestPromise,
+  setRequestUnloaded,
 } from "metabase/redux/requests";
 
 // convenience
 export { combineReducers, compose } from "@reduxjs/toolkit";
 export { handleActions, createAction } from "redux-actions";
 
-// turns string timestamps into moment objects
-export function momentifyTimestamps(
-  object,
-  keys = ["created_at", "updated_at"],
-) {
-  object = { ...object };
-  for (const timestamp of keys) {
-    if (object[timestamp]) {
-      object[timestamp] = moment(object[timestamp]);
-    }
-  }
-  return object;
-}
-
-export function momentifyObjectsTimestamps(objects, keys) {
-  return _.mapObject(objects, o => momentifyTimestamps(o, keys));
-}
-
-export function momentifyArraysTimestamps(array, keys) {
-  return _.map(array, o => momentifyTimestamps(o, keys));
-}
-
 // turns into id indexed map
-export const resourceListToMap = resources =>
+export const resourceListToMap = (resources) =>
   resources.reduce(
     (map, resource) => ({ ...map, [resource.id]: resource }),
     {},
@@ -65,7 +41,7 @@ export const fetchData = async ({
     !reload &&
     existingData &&
     properties &&
-    _.all(properties, p => existingData[p] !== undefined)
+    _.all(properties, (p) => existingData[p] !== undefined)
   ) {
     return existingData;
   }
@@ -121,7 +97,7 @@ export const updateData = async ({
     const data = await queryPromise;
     dispatch(setRequestLoaded(statePath, queryKey));
 
-    (dependentRequestStatePaths || []).forEach(statePath =>
+    (dependentRequestStatePaths || []).forEach((statePath) =>
       dispatch(setRequestUnloaded(statePath)),
     );
 
@@ -192,7 +168,7 @@ export const formDomOnlyProps = ({
  * Decorator for turning a payload creator or thunk (including one returning a promise) into a flux standard action
  */
 export function withAction(actionType) {
-  return payloadOrThunkCreator => {
+  return (payloadOrThunkCreator) => {
     function newCreator(...args) {
       const payloadOrThunk = payloadOrThunkCreator(...args);
       if (typeof payloadOrThunk === "function") {
@@ -224,7 +200,7 @@ export function withAction(actionType) {
  */
 export function withRequestState(getRequestStatePath, getQueryKey) {
   // thunk decorator:
-  return thunkCreator =>
+  return (thunkCreator) =>
     // thunk creator:
     (...args) =>
     // thunk:
@@ -275,7 +251,7 @@ function withCachedData(
   getQueryKey,
 ) {
   // thunk decorator:
-  return thunkCreator =>
+  return (thunkCreator) =>
     // thunk creator:
     (...args) =>
       // thunk:
@@ -298,7 +274,7 @@ function withCachedData(
         const hasRequestedProperties =
           properties &&
           existingData &&
-          _.all(properties, p => existingData[p] !== undefined);
+          _.all(properties, (p) => existingData[p] !== undefined);
 
         // return existing data if
         if (
@@ -336,33 +312,8 @@ function withCachedData(
       };
 }
 
-export function withAnalytics(categoryOrFn, actionOrFn, labelOrFn, valueOrFn) {
-  // thunk decorator:
-  return thunkCreator =>
-    // thunk creator:
-    (...args) =>
-    // thunk:
-    (dispatch, getState) => {
-      function get(valueOrFn, extra = {}) {
-        if (typeof valueOrFn === "function") {
-          return valueOrFn(args, { ...extra }, getState);
-        }
-      }
-      try {
-        const category = get(categoryOrFn);
-        const action = get(actionOrFn, { category });
-        const label = get(labelOrFn, { category, action });
-        const value = get(valueOrFn, { category, action, label });
-        MetabaseAnalytics.trackStructEvent(category, action, label, value);
-      } catch (error) {
-        console.warn("withAnalytics threw an error:", error);
-      }
-      return thunkCreator(...args)(dispatch, getState);
-    };
-}
-
 export function withNormalize(schema) {
-  return thunkCreator =>
+  return (thunkCreator) =>
     (...args) =>
     async (dispatch, getState) =>
       normalize(await thunkCreator(...args)(dispatch, getState), schema);

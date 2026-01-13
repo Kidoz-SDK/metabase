@@ -2,8 +2,8 @@
   "Logic for inferring the semantic types of *Text* fields based on their TextFingerprints.
    These tests only run against Fields that *don't* have existing semantic types."
   (:require
-   [metabase.analyze.fingerprint.schema :as fingerprint.schema]
    [metabase.analyze.schema :as analyze.schema]
+   [metabase.lib.schema.metadata.fingerprint :as lib.schema.metadata.fingerprint]
    [metabase.sync.util :as sync-util]
    [metabase.util.log :as log]
    [metabase.util.malli :as mu]
@@ -19,10 +19,10 @@
   given the corresponding semantic type (such as `:type/State`)"
   0.7)
 
-(mu/defn ^:private percent-key-above-threshold?
+(mu/defn- percent-key-above-threshold?
   "Is the value of `percent-key` inside `text-fingerprint` above the `percent-valid-threshold`?"
   [threshold        :- :double
-   text-fingerprint :- fingerprint.schema/TextFingerprint
+   text-fingerprint :- ::lib.schema.metadata.fingerprint/fingerprint.text
    percent-key      :- :keyword]
   (when-let [percent (get text-fingerprint percent-key)]
     (>= percent threshold)))
@@ -35,10 +35,10 @@
    :percent-email [:type/Email          percent-valid-threshold]
    :percent-state [:type/State          lower-percent-valid-threshold]})
 
-(mu/defn ^:private infer-semantic-type-for-text-fingerprint :- [:maybe ms/FieldType]
+(mu/defn- infer-semantic-type-for-text-fingerprint :- [:maybe ms/FieldType]
   "Check various percentages inside the `text-fingerprint` and return the corresponding semantic type to mark the Field
   as if the percent passes the threshold."
-  [text-fingerprint :- fingerprint.schema/TextFingerprint]
+  [text-fingerprint :- ::lib.schema.metadata.fingerprint/fingerprint.text]
   (some (fn [[percent-key [semantic-type threshold]]]
           (when (percent-key-above-threshold? threshold text-fingerprint percent-key)
             semantic-type))
@@ -59,7 +59,7 @@
   "Do classification for `:type/Text` Fields with a valid `TextFingerprint`.
    Currently this only checks the various recorded percentages, but this is subject to change in the future."
   [field       :- analyze.schema/Field
-   fingerprint :- [:maybe fingerprint.schema/Fingerprint]]
+   fingerprint :- [:maybe ::lib.schema.metadata.fingerprint/fingerprint]]
   (when (and (isa? (:base_type field) :type/Text)
              (can-edit-semantic-type? field))
     (when-let [text-fingerprint (get-in fingerprint [:type :type/Text])]

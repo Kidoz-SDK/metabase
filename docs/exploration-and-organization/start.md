@@ -1,10 +1,12 @@
 ---
 title: "Organization overview"
+redirect_from:
+  - /docs/latest/exploration-and-organization
 ---
 
 # Organization overview
 
-Tools for finding things and keeping your Metabase organized. 
+Tools for finding things and keeping your Metabase organized.
 
 ## [Basic exploration](./exploration.md)
 
@@ -14,9 +16,17 @@ Find data, explore questions and dashboards, and bookmark your favorites.
 
 Organize questions, dashboards, and models with collections.
 
+## [Keyboard shortcuts](./keyboard-shortcuts.md)
+
+A handy list of keyboard shortcuts to help you zip around Metabase.
+
 ## [History](./history.md)
 
-View changes to a question, dashboard or model, revert to previous versions, and archive outdated items.
+View changes to a question, dashboard or model and revert to previous versions.
+
+## [Delete and restore items](./delete-and-restore.md)
+
+Move outdated questions, models, and dashboards to trash, or delete them permanently.
 
 ## [Data reference](./data-model-reference.md)
 
@@ -29,3 +39,7 @@ Add events to timelines to annotate charts.
 ## [X-ray your data](./x-rays.md)
 
 X-rays are a fast and easy way to get automatic insights and explorations of your data.
+
+## [Content verification](./content-verification.md)
+
+Admins can verify items to let people know the data is accurate and up to date.

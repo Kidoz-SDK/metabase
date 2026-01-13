@@ -1,7 +1,11 @@
 import userEvent from "@testing-library/user-event";
-import type { MockCall } from "fetch-mock";
 import fetchMock from "fetch-mock";
+import { setupJestCanvasMock } from "jest-canvas-mock";
 
+import {
+  setupLastDownloadFormatEndpoints,
+  setupSettingsEndpoints,
+} from "__support__/server-mocks";
 import {
   screen,
   waitFor,
@@ -26,8 +30,13 @@ import {
 registerVisualizations();
 
 describe("QueryBuilder", () => {
+  beforeEach(() => {
+    setupLastDownloadFormatEndpoints();
+  });
+
   afterEach(() => {
     jest.resetAllMocks();
+    setupJestCanvasMock();
   });
 
   describe("rendering", () => {
@@ -51,9 +60,8 @@ describe("QueryBuilder", () => {
         await setup({
           card: TEST_TIME_SERIES_WITH_DATE_BREAKOUT_CARD,
         });
-        const timeSeriesModeFooter = await screen.findByTestId(
-          "timeseries-chrome",
-        );
+        const timeSeriesModeFooter =
+          await screen.findByTestId("timeseries-chrome");
         expect(timeSeriesModeFooter).toBeInTheDocument();
         expect(
           within(timeSeriesModeFooter).getByText("by"),
@@ -63,23 +71,20 @@ describe("QueryBuilder", () => {
         ).toBeInTheDocument();
       });
 
-      it("doesn't render time series grouping widget for custom date field breakout (metabase#33504)", async () => {
+      it("renders time series grouping widget for custom date field breakout", async () => {
         await setup({
           card: TEST_TIME_SERIES_WITH_CUSTOM_DATE_BREAKOUT_CARD,
         });
 
-        const timeSeriesModeFooter = await screen.findByTestId(
-          "timeseries-chrome",
-        );
+        const timeSeriesModeFooter =
+          await screen.findByTestId("timeseries-chrome");
         expect(timeSeriesModeFooter).toBeInTheDocument();
         expect(
-          within(timeSeriesModeFooter).queryByText("by"),
-        ).not.toBeInTheDocument();
+          within(timeSeriesModeFooter).getByText("by"),
+        ).toBeInTheDocument();
         expect(
-          within(timeSeriesModeFooter).queryByTestId(
-            "timeseries-bucket-button",
-          ),
-        ).not.toBeInTheDocument();
+          within(timeSeriesModeFooter).getByTestId("timeseries-bucket-button"),
+        ).toBeInTheDocument();
       });
     });
 
@@ -90,9 +95,14 @@ describe("QueryBuilder", () => {
         createMockCard({ ...TEST_CARD_VISUALIZATION, display: "line" }),
       ];
 
+      beforeEach(() => {
+        fetchMock.put("path:/api/setting/non-table-chart-generated", 200);
+        setupSettingsEndpoints([]);
+      });
+
       it.each(cards)(
         `renders the row count in "$display" visualization`,
-        async card => {
+        async (card) => {
           await setup({
             card,
             dataset,
@@ -124,7 +134,7 @@ describe("QueryBuilder", () => {
 
         const executionTime = await screen.findByTestId("execution-time");
         expect(executionTime).toBeInTheDocument();
-        expect(executionTime).toHaveTextContent("123 ms");
+        expect(executionTime).toHaveTextContent("123ms");
       });
 
       it("renders query execution time for native questions", async () => {
@@ -137,7 +147,7 @@ describe("QueryBuilder", () => {
 
         const executionTime = await screen.findByTestId("execution-time");
         expect(executionTime).toBeInTheDocument();
-        expect(executionTime).toHaveTextContent("123 ms");
+        expect(executionTime).toHaveTextContent("123ms");
       });
     });
   });
@@ -150,14 +160,12 @@ describe("QueryBuilder", () => {
     // So I test that case in Cypress in `28834-modified-native-question.cy.spec.js` instead.
 
     it("should allow downloading results for a native query", async () => {
-      const mockDownloadEndpoint = fetchMock.post(
-        `path:/api/card/${TEST_NATIVE_CARD.id}/query/csv`,
-        {},
-      );
-      const { container } = await setup({
+      fetchMock.post(`path:/api/card/${TEST_NATIVE_CARD.id}/query/csv`, {});
+      await setup({
         card: TEST_NATIVE_CARD,
         dataset: TEST_NATIVE_CARD_DATASET,
       });
+      const container = screen.getByTestId("test-container");
 
       await waitForFaviconReady(container);
 
@@ -167,20 +175,29 @@ describe("QueryBuilder", () => {
 
       expect(inputArea).toHaveValue("SELECT 1");
 
-      await userEvent.click(screen.getByTestId("download-button"));
       await userEvent.click(
-        await screen.findByRole("button", { name: ".csv" }),
+        screen.getByTestId("question-results-download-button"),
+      );
+      await userEvent.click(await screen.findByLabelText(".csv"));
+      await userEvent.click(
+        await screen.findByTestId("download-results-button"),
       );
 
-      expect(mockDownloadEndpoint.called()).toBe(true);
+      expect(
+        fetchMock.callHistory.calls(
+          `path:/api/card/${TEST_NATIVE_CARD.id}/query/csv`,
+        ),
+      ).toHaveLength(1);
     });
 
     it("should allow downloading results for a native query using the current result even the query has changed but not rerun (metabase#28834)", async () => {
-      const mockDownloadEndpoint = fetchMock.post("path:/api/dataset/csv", {});
-      const { container } = await setup({
+      fetchMock.post("path:/api/dataset/csv", {});
+      await setup({
         card: TEST_NATIVE_CARD,
         dataset: TEST_NATIVE_CARD_DATASET,
       });
+
+      const container = screen.getByTestId("test-container");
 
       await waitForFaviconReady(container);
 
@@ -195,15 +212,19 @@ describe("QueryBuilder", () => {
 
       expect(inputArea).toHaveValue("SELECT 1 union SELECT 2");
 
-      await userEvent.click(screen.getByTestId("download-button"));
       await userEvent.click(
-        await screen.findByRole("button", { name: ".csv" }),
+        screen.getByTestId("question-results-download-button"),
+      );
+      await userEvent.click(await screen.findByLabelText(".csv"));
+      await userEvent.click(
+        await screen.findByTestId("download-results-button"),
       );
 
-      const [url, options] = mockDownloadEndpoint.lastCall() as MockCall;
-      const body = await Promise.resolve(options?.body);
+      const calls = fetchMock.callHistory.calls("path:/api/dataset/csv");
+      const lastCall = calls[calls.length - 1];
+      const body = await Promise.resolve(lastCall.options?.body);
       const urlSearchParams = new URLSearchParams(body as string);
-      expect(url).toEqual(expect.stringContaining("/api/dataset/csv"));
+      expect(lastCall.url).toEqual(expect.stringContaining("/api/dataset/csv"));
       const query =
         urlSearchParams instanceof URLSearchParams
           ? JSON.parse(urlSearchParams.get("query") ?? "{}")

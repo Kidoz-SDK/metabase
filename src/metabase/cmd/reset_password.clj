@@ -1,7 +1,7 @@
 (ns metabase.cmd.reset-password
   (:require
-   [metabase.db :as mdb]
-   [metabase.models.user :as user :refer [User]]
+   [metabase.app-db.core :as mdb]
+   [metabase.auth-identity.core :as auth-identity]
    [metabase.util :as u]
    [metabase.util.i18n :refer [deferred-trs trs]]
    [toucan2.core :as t2]))
@@ -11,10 +11,10 @@
 (defn- set-reset-token!
   "Set and return a new `reset_token` for the user with EMAIL-ADDRESS."
   [email-address]
-  (let [user-id (or (t2/select-one-pk User, :%lower.email (u/lower-case-en email-address))
+  (let [user-id (or (t2/select-one-pk :model/User, :%lower.email (u/lower-case-en email-address))
                     (throw (Exception. (str (deferred-trs "No user found with email address ''{0}''. " email-address)
                                             (deferred-trs "Please check the spelling and try again.")))))]
-    (user/set-password-reset-token! user-id)))
+    (auth-identity/create-password-reset! user-id)))
 
 (defn reset-password!
   "Reset the password for EMAIL-ADDRESS, and return the reset token in a format that can be understood by the Mac App."

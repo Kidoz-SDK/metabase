@@ -1,5 +1,6 @@
 (ns metabase.util.malli.humanize-test
   (:require
+   #?@(:cljs ([metabase.test-runner.assert-exprs.approximately-equal]))
    [clojure.test :refer [deftest are]]
    [malli.core :as mc]
    [malli.error :as me]
@@ -7,8 +8,7 @@
    [metabase.lib.schema :as lib.schema]
    [metabase.lib.schema.join :as lib.schema.join]
    [metabase.util.malli.humanize :as mu.humanize]
-   [metabase.util.malli.registry :as mr]
-   #?@(:cljs ([metabase.test-runner.assert-exprs.approximately-equal]))))
+   [metabase.util.malli.registry :as mr]))
 
 #?(:cljs (comment metabase.test-runner.assert-exprs.approximately-equal/keep-me))
 
@@ -51,10 +51,10 @@
     "a"))
 
 (deftest ^:parallel basic-test
-  (let [error (mc/explain
+  (let [error (mr/explain
                [:or
                 :int
-                mbql.s/value]
+                ::mbql.s/value]
                [:value "192.168.1.1" {:base_type :type/FK}])]
     (are [f expected] (= expected
                          (f error))
@@ -67,11 +67,11 @@
        [nil nil {:base_type "Not a valid base type: :type/FK"}]])))
 
 (deftest ^:parallel basic-test-2
-  (let [error (mc/explain
+  (let [error (mr/explain
                [:map
                 [:x [:or
                      :int
-                     mbql.s/value]]]
+                     ::mbql.s/value]]]
                {:x [:value "192.168.1.1" {:base_type :type/FK}]})]
     (are [f expected] (= expected
                          (f error))
@@ -84,7 +84,7 @@
            [nil nil {:base_type "Not a valid base type: :type/FK"}]]})))
 
 (deftest ^:parallel or-test
-  (let [error (mc/explain
+  (let [error (mr/explain
                [:or
                 :string
                 [:tuple {:error/message ":value clause"}
@@ -113,7 +113,7 @@
 
 (deftest ^:parallel ref-test
   (are [f expected] (= expected
-                       (f (mc/explain [:or
+                       (f (mr/explain [:or
                                        [:ref ::absolute-datetime]]
                                       [:value "192.168.1.1" {:base_type :type/FK}])))
     me/humanize
@@ -124,7 +124,7 @@
 
 (deftest ^:parallel ref-test-2
   (are [f expected] (= expected
-                       (f (mc/explain [:or mbql.s/value] [:value "192.168.1.1" {:base_type :type/FK}])))
+                       (f (mr/explain [:or ::mbql.s/value] [:value "192.168.1.1" {:base_type :type/FK}])))
     me/humanize
     [nil nil {:base_type ["Not a valid base type: :type/FK"]}]
 
@@ -132,7 +132,7 @@
     [nil nil {:base_type "Not a valid base type: :type/FK"}]))
 
 (deftest ^:parallel map-test
-  (let [error (mc/explain
+  (let [error (mr/explain
                [:map
                 {:error/message "map with :a"}
                 [:a
@@ -152,7 +152,7 @@
       {:a {:b {:c "should be a string"}}})))
 
 (deftest ^:parallel map-test-2
-  (let [error (mc/explain ::lib.schema.join/join {:stages 1})]
+  (let [error (mr/explain ::lib.schema.join/join {:stages 1})]
     (are [f expected] (=? expected
                           (f error))
       me/humanize
@@ -162,7 +162,7 @@
       {:lib/type "missing required key"})))
 
 (deftest ^:parallel map-test-3
-  (let [error (mc/explain ::lib.schema/query {:lib/type :mbql/query
+  (let [error (mr/explain ::lib.schema/query {:lib/type :mbql/query
                                               :database 1
                                               :stages   [{:lib/type     :mbql.stage/mbql
                                                           :source-table 1

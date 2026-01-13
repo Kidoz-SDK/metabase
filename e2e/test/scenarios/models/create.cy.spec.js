@@ -1,99 +1,104 @@
-import { THIRD_COLLECTION_ID } from "e2e/support/cypress_sample_instance_data";
-import {
-  entityPickerModal,
-  entityPickerModalTab,
-  modal,
-  restore,
-  visitCollection,
-} from "e2e/support/helpers";
-
-const modelName = "A name";
+const { H } = cy;
+import { USERS } from "e2e/support/cypress_data";
 
 describe("scenarios > models > create", () => {
   beforeEach(() => {
-    restore();
+    H.restore();
     cy.signInAsAdmin();
     cy.intercept("POST", "/api/dataset").as("dataset");
   });
 
-  it("creates a native query model via the New button", () => {
-    cy.visit("/");
+  it("creates a native query model", () => {
+    const modelName = "m42";
 
     navigateToNewModelPage();
 
     // Cancel creation with confirmation modal
     cy.findByTestId("dataset-edit-bar").button("Cancel").click();
-    modal().button("Discard changes").click();
+    H.modal().button("Discard changes").click();
 
     // Now we will create a model
     navigateToNewModelPage();
 
     // Clicking on metadata should not work until we run a query
-    cy.findByTestId("editor-tabs-metadata").should("be.disabled");
+    cy.findByTestId("editor-tabs-columns").should("be.disabled");
 
-    cy.get(".ace_editor").should("be.visible").type("select * from ORDERS");
-
+    H.NativeEditor.focus().type("select 42");
     cy.findByTestId("native-query-editor-container").icon("play").click();
     cy.wait("@dataset");
 
     cy.findByTestId("dataset-edit-bar").button("Save").click();
-    cy.findByPlaceholderText("What is the name of your model?").type(modelName);
-
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-    cy.findByText("Save").click();
+    cy.findByTestId("save-question-modal").within(() => {
+      cy.findByLabelText("Name").type(modelName);
+      cy.button("Save").click();
+    });
 
     // After saving, we land on view mode for the model
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-    cy.findByText("Summarize");
+    cy.location("pathname").should("match", /^\/model\/\d+-.*$/);
+    cy.findByTestId("question-row-count").should("have.text", "Showing 1 row");
 
-    checkIfPinned();
+    checkIfPinned(modelName);
   });
 
-  it("suggest the currently viewed collection when saving a new native query", () => {
-    visitCollection(THIRD_COLLECTION_ID);
+  // This covers creating a GUI model from the browse page + nocollection permissions (2 in 1)
+  it("user without a collection access should still be able to create and save a model in his own personal collection", () => {
+    cy.intercept("POST", "/api/card").as("createModel");
 
-    navigateToNewModelPage();
-    cy.get(".ace_editor").should("be.visible").type("select * from ORDERS");
-    cy.findByTestId("native-query-editor-container").icon("play").click();
-    cy.wait("@dataset");
+    cy.signIn("nocollection");
+    cy.visit("/browse/models");
 
-    cy.findByTestId("dataset-edit-bar").within(() => {
-      cy.contains("button", "Save").click();
-    });
-    cy.findByTestId("save-question-modal").within(() => {
-      cy.findByLabelText(/Which collection should this go in/).should(
-        "have.text",
-        "Third collection",
-      );
-    });
+    cy.findByLabelText("Create a new model").click();
+    cy.findByTestId("new-model-options")
+      .findByText("Use the notebook editor")
+      .click();
+    H.miniPicker().findByText("Sample Database").click();
+    H.miniPicker().findByText("People").click();
+    cy.findByTestId("dataset-edit-bar").button("Save").click();
+    cy.findByTestId("save-question-modal")
+      .should("contain", "Save model")
+      .and("contain", H.getPersonalCollectionName(USERS["nocollection"]))
+      .button("Save")
+      .click();
+    cy.wait("@createModel");
+    cy.location("pathname").should("match", /^\/model\/\d+-.*$/);
   });
 
-  it("suggest the currently viewed collection when saving a new structured query", () => {
-    visitCollection(THIRD_COLLECTION_ID);
+  it("should be able to create a new native model from the browse page", () => {
+    cy.intercept("POST", "/api/dataset").as("previewModel");
+    cy.intercept("POST", "/api/card").as("createModel");
 
-    navigateToNewModelPage("structured");
-
-    entityPickerModal().within(() => {
-      entityPickerModalTab("Tables").click();
-      cy.findByText("Orders").click();
-    });
-
-    cy.findByTestId("dataset-edit-bar").within(() => {
-      cy.contains("button", "Save").click();
-    });
-
+    cy.visit("/browse/models");
+    cy.findByLabelText("Create a new model").click();
+    cy.findByTestId("new-model-options")
+      .findByText("Use a native query")
+      .click();
+    H.NativeEditor.focus().type("select 42");
+    cy.findByTestId("native-query-editor-container")
+      .findByLabelText("Get Answer")
+      .click();
+    cy.wait("@previewModel");
+    cy.findByTestId("visualization-root").should("contain", "42");
+    cy.findByTestId("dataset-edit-bar").button("Save").click();
     cy.findByTestId("save-question-modal").within(() => {
-      cy.findByLabelText(/Which collection should this go in/).should(
-        "have.text",
-        "Third collection",
-      );
+      cy.findByLabelText("Name").type("m42");
+      cy.button("Save").click();
+    });
+    cy.wait("@createModel");
+    cy.location("pathname").should("match", /^\/model\/\d+-.*$/);
+  });
+
+  it("should not be possible to initiate a new model creation without native permissions", () => {
+    cy.signIn("nosql");
+    cy.visit("/browse/models");
+    cy.findByTestId("browse-models-header").within(() => {
+      cy.findByRole("heading").should("contain", "Models").and("be.visible");
+      cy.findByLabelText("Create a new model").should("not.exist");
     });
   });
 });
 
 function navigateToNewModelPage(queryType = "native") {
-  cy.findByText("New").click();
-  cy.findByText("Model").click();
+  cy.visit("/model/new");
   if (queryType === "structured") {
     cy.findByText("Use the notebook editor").click();
   } else {
@@ -101,13 +106,14 @@ function navigateToNewModelPage(queryType = "native") {
   }
 }
 
-function checkIfPinned() {
-  visitCollection("root");
+function checkIfPinned(modelName) {
+  cy.findByTestId("app-bar").findByText("Our analytics").click();
+  cy.location("pathname").should("eq", "/collection/root");
 
   cy.findByText(modelName)
     .closest("a")
     .find(".Icon-ellipsis")
     .click({ force: true });
 
-  cy.findByText("Unpin").should("be.visible");
+  H.popover().findByText("Unpin").should("be.visible");
 }

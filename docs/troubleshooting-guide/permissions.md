@@ -21,19 +21,18 @@ If you have a different issue, see [related problems](#do-you-have-a-different-p
 
 ### Row and column permissions
 
-- [Troubleshooting data sandboxing][troubleshooting-data-sandboxing].
+- [Troubleshooting data row and column security](./row-and-column-security.md)
 
 ### Native query (SQL) permissions
 
 - [A user group can't access the SQL editor][sql-access].
-- [A user group with SQL permissions isn't being restricted by their data sandbox][sql-sandboxing].
+- [A user group with SQL permissions isn't being restricted by their row and column security](./row-and-column-security.md)
 
 ### Table or schema permissions
 
 - [A user group has the wrong access to a table or schema][table-schema-access].
 - [Getting a "permission denied" error message][permission-denied].
 - [Checking someone's access to a table or schema](./data-permissions.md#checking-someones-access-to-a-table-or-schema)
-
 
 ## Do you have a different problem?
 
@@ -47,26 +46,21 @@ If you can’t solve your problem using the troubleshooting guides:
 - Search or ask the [Metabase community][discourse].
 - Search for [known bugs or limitations][known-issues].
 
-
 [admin-permissions]: ../permissions/start.md
 [collection-permissions]: ../permissions/collections.md
 [collections-restricted-data]: ./data-permissions.md#a-user-group-can-view-collections-that-contain-restricted-data
 [connecting-database]: ../databases/connecting.md
-[data-browser]: https://www.metabase.com/learn/getting-started/data-browser
+[data-browser]: https://www.metabase.com/learn/metabase-basics/querying-and-dashboards/data-browser
 [data-model]: ../data-modeling/metadata-editing.md
 [data-permissions]: ../permissions/data.md
 [discourse]: https://discourse.metabase.com/
-[granular]: ../permissions/data.md#granular-access
 [group-permissions]: ../permissions/introduction.md#key-points-regarding-permissions
 [known-issues]: ./known-issues.md
-[learn-permissions]: https://www.metabase.com/learn/permissions
+[learn-permissions]: https://www.metabase.com/learn/metabase-basics/administration/permissions
 [permission-denied]: ./data-permissions.md#getting-a-permission-denied-error-message
 [proxies]: ./proxies.md
-[sandboxing]: ./sandboxing.md
 [setting-collection-permissions]: ../permissions/collections.md#setting-permissions-for-collections
 [sql-access]: ./data-permissions.md#a-user-group-cant-access-the-sql-editor
-[sql-sandboxing]: ./sandboxing.md#is-the-question-written-in-sql
 [table-schema-access]: ./data-permissions.md#a-user-group-has-the-wrong-access-to-a-table-or-schema
 [troubleshooting-data-permissions]: ./data-permissions.md
-[troubleshooting-data-sandboxing]: ./sandboxing.md
 [troubleshooting-viewing-editing]: ./cant-view-or-edit.md

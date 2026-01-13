@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { render, screen } from "__support__/ui";
 import type { CardDisplayType } from "metabase-types/api";
 
 import type { ChartSkeletonProps } from "./ChartSkeleton";
@@ -27,13 +27,17 @@ const chartSkeletonDisplayTypes: CardDisplayType[] = [
   "waterfall",
 ];
 
-const displayTestData = [
+const displayTestData: {
+  name: string;
+  display: CardDisplayType | undefined;
+}[] = [
   {
     name: "Empty",
     display: undefined,
   },
   {
     name: "Random display type",
+    // @ts-expect-error - specifically testing displays that don't match the CardDisplayType
     display: "a display type",
   },
   ...chartSkeletonDisplayTypes.map((display: CardDisplayType) => ({
@@ -57,9 +61,10 @@ const setup = ({
     />,
   );
 };
+
 describe("ChartSkeleton", () => {
   beforeAll(() => {
-    jest.unmock("metabase/components/Popover");
+    jest.unmock("metabase/common/components/Popover");
   });
 
   displayTestData.forEach(({ name, display }) => {
@@ -74,8 +79,8 @@ describe("ChartSkeleton", () => {
     it(`should render ${name} visualization with description`, async () => {
       setup({ name, description: displayDescription, display });
       await userEvent.hover(screen.getByLabelText("info icon"));
-      expect(screen.getByText(name)).toBeInTheDocument();
-      expect(screen.getByText(displayDescription)).toBeInTheDocument();
+      expect(await screen.findByText(name)).toBeInTheDocument();
+      expect(await screen.findByText(displayDescription)).toBeInTheDocument();
     });
 
     it(`should render ${name} visualization with description and action menu`, async () => {
@@ -85,9 +90,9 @@ describe("ChartSkeleton", () => {
         actionMenu: MockActionMenu,
         display,
       });
-      await userEvent.hover(screen.getByLabelText("info icon"));
+      userEvent.hover(screen.getByLabelText("info icon"));
       expect(screen.getByText(name)).toBeInTheDocument();
-      expect(screen.getByText(displayDescription)).toBeInTheDocument();
+      expect(await screen.findByText(displayDescription)).toBeInTheDocument();
       expect(screen.getByText("Action Menu")).toBeInTheDocument();
     });
   });

@@ -3,11 +3,13 @@ import cx from "classnames";
 import { Component } from "react";
 import { t } from "ttag";
 
+import Button from "metabase/common/components/Button";
+import { Ellipsified } from "metabase/common/components/Ellipsified";
 import CS from "metabase/css/core/index.css";
-import Snippets from "metabase/entities/snippets";
-import { Icon } from "metabase/ui";
+import { Snippets } from "metabase/entities/snippets";
+import { Flex, Icon } from "metabase/ui";
 
-import { SnippetButton, SnippetContent } from "./SnippetRow.styled";
+import SnippetRowS from "./SnippetRow.module.css";
 
 class SnippetRowInner extends Component {
   constructor(props) {
@@ -41,31 +43,41 @@ class SnippetRowInner extends Component {
             CS.hoverParent,
             CS.hoverDisplay,
           )}
+          style={{ minWidth: 0 }}
           onClick={() => this.setState({ isOpen: !isOpen })}
         >
-          <SnippetContent
+          <Flex
+            className={SnippetRowS.SnippetContent}
             onClick={
               snippet.archived
                 ? () => this.setState({ isOpen: true })
-                : e => {
+                : (e) => {
                     e.stopPropagation();
                     insertSnippet(snippet);
                   }
             }
+            miw={0}
           >
             <Icon
               name="snippet"
-              className={cx(CS.hoverChildHidden, CS.textLight)}
+              className={cx(
+                CS.hoverChildHidden,
+                CS.textLight,
+                SnippetRowS.SnippetIcon,
+              )}
             />
             <Icon
               name={insertSnippet ? "arrow_left_to_line" : "snippet"}
-              className={CS.hoverChild}
+              className={cx(CS.hoverChild, SnippetRowS.SnippetIcon)}
             />
-            <span className={cx(CS.flexFull, CS.ml1)}>{snippet.name}</span>
-          </SnippetContent>
+            <Ellipsified className={cx(CS.ml1)}>{snippet.name}</Ellipsified>
+          </Flex>
           <Icon
             name={isOpen ? "chevronup" : "chevrondown"}
-            className={cx({ [CS.hoverChild]: !isOpen })}
+            className={cx(
+              { [CS.hoverChild]: !isOpen },
+              SnippetRowS.SnippetIcon,
+            )}
           />
         </div>
         {isOpen && (
@@ -89,7 +101,8 @@ class SnippetRowInner extends Component {
               {content}
             </pre>
             {canWrite && (
-              <SnippetButton
+              <Button
+                className={SnippetRowS.SnippetButton}
                 onClick={
                   snippet.archived
                     ? () => snippet.update({ archived: false })
@@ -100,7 +113,7 @@ class SnippetRowInner extends Component {
                 icon={snippet.archived ? "unarchive" : "pencil"}
               >
                 {snippet.archived ? t`Unarchive` : t`Edit`}
-              </SnippetButton>
+              </Button>
             )}
           </div>
         )}

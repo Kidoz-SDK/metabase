@@ -7,7 +7,7 @@ import {
   screen,
   waitForLoaderToBeRemoved,
 } from "__support__/ui";
-import type { Database, DatabaseCandidate } from "metabase-types/api";
+import type { Database, DatabaseXray } from "metabase-types/api";
 import {
   createMockDatabase,
   createMockDatabaseCandidate,
@@ -18,7 +18,7 @@ import { HomeXraySection } from "./HomeXraySection";
 
 interface SetupOpts {
   database: Database;
-  candidates: DatabaseCandidate[];
+  candidates: DatabaseXray[];
 }
 
 const setup = async ({ database, candidates }: SetupOpts) => {
@@ -73,5 +73,39 @@ describe("HomeXraySection", () => {
     expect(screen.getByText("H2")).toBeInTheDocument();
     expect(screen.getByText("Orders")).toBeInTheDocument();
     expect(screen.queryByText("People")).not.toBeInTheDocument();
+  });
+
+  it("should default to 'public' schema when it's present", async () => {
+    await setup({
+      database: createMockDatabase({
+        name: "H2",
+        is_sample: false,
+      }),
+      candidates: [
+        createMockDatabaseCandidate({
+          id: "1/auth",
+          schema: "auth",
+          tables: [createMockTableCandidate({ title: "People" })],
+        }),
+        createMockDatabaseCandidate({
+          id: "1/public",
+          schema: "public",
+          tables: [createMockTableCandidate({ title: "Orders" })],
+        }),
+      ],
+    });
+
+    expect(screen.getByTestId("xray-schema-name")).toHaveTextContent("public");
+  });
+
+  it("should not render a caption when there are no x-rays", async () => {
+    await setup({
+      database: createMockDatabase(),
+      candidates: [],
+    });
+
+    expect(
+      screen.queryByText(/Here are some explorations/),
+    ).not.toBeInTheDocument();
   });
 });

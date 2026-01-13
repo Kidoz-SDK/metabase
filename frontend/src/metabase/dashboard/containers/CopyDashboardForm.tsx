@@ -1,35 +1,43 @@
 import { useCallback, useMemo } from "react";
 import { withRouter } from "react-router";
 import { t } from "ttag";
-import _ from "underscore";
 import * as Yup from "yup";
 
+import { useGetDashboardQuery } from "metabase/api";
 import FormCollectionPicker from "metabase/collections/containers/FormCollectionPicker/FormCollectionPicker";
+import Button from "metabase/common/components/Button";
 import type { FilterItemsInPersonalCollection } from "metabase/common/components/EntityPicker";
-import Button from "metabase/core/components/Button";
-import FormFooter from "metabase/core/components/FormFooter";
-import Dashboards from "metabase/entities/dashboards";
+import { FormFooter } from "metabase/common/components/FormFooter";
+import { Dashboards } from "metabase/entities/dashboards";
 import {
+  Form,
+  FormCheckbox,
+  FormErrorMessage,
+  FormObserver,
+  FormProvider,
+  FormSubmitButton,
   FormTextInput,
   FormTextarea,
-  FormSubmitButton,
-  FormErrorMessage,
-  FormCheckbox,
-  Form,
-  FormProvider,
-  FormObserver,
 } from "metabase/forms";
 import * as Errors from "metabase/lib/errors";
-import type { CollectionId, Dashboard } from "metabase-types/api";
+import { Group, Icon, Tooltip } from "metabase/ui";
+import type { CollectionId, Dashboard, DashboardId } from "metabase-types/api";
 
-import { DashboardCopyModalShallowCheckboxLabel } from "../components/DashboardCopyModal/DashboardCopyModalShallowCheckboxLabel/DashboardCopyModalShallowCheckboxLabel";
+import {
+  DASHBOARD_DESCRIPTION_MAX_LENGTH,
+  DASHBOARD_NAME_MAX_LENGTH,
+} from "../constants";
+import { isVirtualDashCard } from "../utils";
 
 const DASHBOARD_SCHEMA = Yup.object({
   name: Yup.string()
     .required(Errors.required)
-    .max(100, Errors.maxLength)
+    .max(DASHBOARD_NAME_MAX_LENGTH, Errors.maxLength)
     .default(""),
-  description: Yup.string().nullable().max(255, Errors.maxLength).default(null),
+  description: Yup.string()
+    .nullable()
+    .max(DASHBOARD_DESCRIPTION_MAX_LENGTH, Errors.maxLength)
+    .default(null),
   collection_id: Yup.number().nullable().default(null),
   is_shallow_copy: Yup.boolean().default(false),
 });
@@ -41,12 +49,13 @@ export interface CopyDashboardFormProperties {
 }
 
 export interface CopyDashboardFormProps {
-  onSubmit?: (values: CopyDashboardFormProperties) => Dashboard;
+  onSubmit: (values: CopyDashboardFormProperties) => Promise<Dashboard>;
   onSaved?: (dashboard?: Dashboard) => void;
   onClose?: () => void;
   initialValues?: CopyDashboardFormProperties | null;
   filterPersonalCollections?: FilterItemsInPersonalCollection;
   onValuesChange?: (vals: CopyDashboardFormProperties) => void;
+  originalDashboardId: DashboardId;
 }
 
 function CopyDashboardForm({
@@ -56,7 +65,14 @@ function CopyDashboardForm({
   initialValues,
   filterPersonalCollections,
   onValuesChange,
+  originalDashboardId,
 }: CopyDashboardFormProps) {
+  const {
+    currentData: originalDashboard,
+    isLoading,
+    error,
+  } = useGetDashboardQuery({ id: originalDashboardId });
+
   const computedInitialValues = useMemo(
     () => ({
       ...DASHBOARD_SCHEMA.getDefault(),
@@ -80,6 +96,14 @@ function CopyDashboardForm({
     },
     [onValuesChange],
   );
+
+  const hasDashboardQuestions = useMemo(() => {
+    return !!originalDashboard?.dashcards.some(
+      (dc) => !isVirtualDashCard(dc) && dc.card.dashboard_id !== null,
+    );
+  }, [originalDashboard]);
+
+  const hideShallowCopy = Boolean(isLoading || error || hasDashboardQuestions);
 
   return (
     <FormProvider
@@ -109,11 +133,26 @@ function CopyDashboardForm({
           name="collection_id"
           title={t`Which collection should this go in?`}
           filterPersonalCollections={filterPersonalCollections}
+          entityType="dashboard"
         />
-        <FormCheckbox
-          name="is_shallow_copy"
-          label={<DashboardCopyModalShallowCheckboxLabel />}
-        />
+
+        {!hideShallowCopy && (
+          <FormCheckbox
+            name="is_shallow_copy"
+            label={
+              <Group align="center" gap="xs">
+                {t`Only duplicate the dashboard`}
+
+                <Tooltip
+                  label={t`If you check this, the cards in the duplicated dashboard will reference the original questions.`}
+                >
+                  <Icon name="info" size={18} />
+                </Tooltip>
+              </Group>
+            }
+          />
+        )}
+
         <FormFooter>
           <FormErrorMessage inline />
           {!!onClose && (
@@ -126,5 +165,4 @@ function CopyDashboardForm({
   );
 }
 
-export const CopyDashboardFormConnected =
-  _.compose(withRouter)(CopyDashboardForm);
+export const CopyDashboardFormConnected = withRouter(CopyDashboardForm);

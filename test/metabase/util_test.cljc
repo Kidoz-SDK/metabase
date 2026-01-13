@@ -1,16 +1,17 @@
-(ns ^:mb/once metabase.util-test
+(ns metabase.util-test
   "Tests for functions in `metabase.util`."
   (:require
-   #?@(:clj [[metabase.test :as mt]])
+   #?@(:clj [[metabase.test :as mt]
+             [malli.generator :as mg]])
+   [clojure.string :as str]
    [clojure.test :refer [are deftest is testing]]
    [clojure.test.check.clojure-test :refer [defspec]]
    [clojure.test.check.generators :as gen]
    [clojure.test.check.properties :as prop]
    [flatland.ordered.map :refer [ordered-map]]
-   #_:clj-kondo/ignore
-   [malli.generator :as mg]
-   [metabase.util :as u])
-  #?(:clj (:import [java.time Month DayOfWeek])))
+   [metabase.util :as u]
+   [metabase.util.number :as u.number])
+  #?(:clj (:import [java.time DayOfWeek Month])))
 
 #?(:clj (set! *warn-on-reflection* true))
 
@@ -25,6 +26,7 @@
          (u/add-period "   "))))
 
 (deftest ^:parallel url?-test
+  #_{:clj-kondo/ignore [:equals-true]}
   (are [s expected] (= expected
                        (u/url? s))
     "http://google.com"                                                                      true
@@ -59,7 +61,18 @@
     ;; nil .getAuthority needs to be handled or NullPointerException
     "http:/"                                                                                 false))
 
+#?(:clj
+   (deftest ^:parallel domain?-test
+     #_{:clj-kondo/ignore [:equals-true]}
+     (are [s expected] (= expected (u/domain? s))
+       "metabase.com"         true
+       "metabase.co.uk"       true
+       "sub.metabase.com"     true
+       "https://metabase.com" false
+       "email@metabase.com"   false)))
+
 (deftest ^:parallel state?-test
+  #_{:clj-kondo/ignore [:equals-true]}
   (are [x expected] (= expected
                        (u/state? x))
     "louisiana"            true
@@ -120,7 +133,9 @@
       (doseq [[s expected] s->expected]
         (testing (list 'u/slugify s)
           (is (= expected
-                 (u/slugify s))))))))
+                 (u/slugify s)))))))
+  (testing "non-ASCII characters are not truncated in the middle"
+    (is (= "%E5%8B%87" (u/slugify "勇士" {:max-length 10})))))
 
 (deftest ^:parallel slugify-unicode-test
   (doseq [[group s->expected]
@@ -158,6 +173,7 @@
     {}                                         [:c]              {}))
 
 (deftest ^:parallel base64-string?-test
+  #_{:clj-kondo/ignore [:equals-true]}
   (are [s expected]    (= expected
                           (u/base64-string? s))
     "ABc="         true
@@ -184,8 +200,8 @@
   (testing "select-keys-when"
     (is (= {:a 100, :b nil, :d 200}
            (u/select-keys-when {:a 100, :b nil, :d 200, :e nil}
-             :present #{:a :b :c}
-             :non-nil #{:d :e :f})))))
+                               :present #{:a :b :c}
+                               :non-nil #{:d :e :f})))))
 
 (deftest ^:parallel order-of-magnitude-test
   (are [n expected] (= expected
@@ -218,7 +234,73 @@
 
 (deftest ^:parallel snake-key-test
   (is (= {:num_cans 2, :lisp_case? {:nested_maps? true}}
-         (u/snake-keys {:num-cans 2, :lisp-case? {:nested-maps? true}}))))
+         (u/deep-snake-keys {:num-cans 2, :lisp-case? {:nested-maps? true}}))))
+
+(deftest ^:parallel kebab->snake-test
+  (testing "kebab->snake converts kebab-case to snake_case"
+    (are [input expected] (= expected (u/kebab->snake input))
+      ;; Keywords
+      :kebab-case          :kebab_case
+      :multi-word-example  :multi_word_example
+      :already_snake       :already_snake
+
+      ;; Namespaced keywords
+      :namespace/kebab-key :namespace/kebab_key
+
+      ;; Strings
+      "kebab-case"         "kebab_case"
+      "multi-word-example" "multi_word_example"
+
+      ;; Preserves camelCase and mixed case
+      :camelCase           :camelCase
+      :PascalCase          :PascalCase
+      :mixedCase-with-kebab :mixedCase_with_kebab
+
+      ;; Edge cases
+      :simple              :simple
+      ""                   ""
+      nil                  nil
+      123                  123)))
+
+(deftest ^:parallel kebab->snake-keys-test
+  (testing "kebab->snake-keys converts top-level keys only"
+    (is (= {:user_id 1
+            :profile_id "abc"
+            :nested {:still-kebab-case true}}
+           (u/kebab->snake-keys {:user-id 1
+                                 :profile-id "abc"
+                                 :nested {:still-kebab-case true}})))
+
+    (testing "preserves camelCase keys"
+      (is (= {:userId 1
+              :profileId "abc"
+              :conversation_id "def"}
+             (u/kebab->snake-keys {:userId 1
+                                   :profileId "abc"
+                                   :conversation-id "def"}))))))
+
+(deftest ^:parallel deep-kebab->snake-keys-test
+  (testing "deep-kebab->snake-keys recursively converts all keys"
+    (is (= {:user_id 1
+            :profile_id "abc"
+            :nested {:inner_key {:deeply_nested true}}}
+           (u/deep-kebab->snake-keys {:user-id 1
+                                      :profile-id "abc"
+                                      :nested {:inner-key {:deeply-nested true}}}))))
+
+  (testing "preserves camelCase throughout the structure"
+    (is (= {:userId 1
+            :nested {:innerKey {:deeplyNested true
+                                :kebab_converted "yes"}}}
+           (u/deep-kebab->snake-keys {:userId 1
+                                      :nested {:innerKey {:deeplyNested true
+                                                          :kebab-converted "yes"}}}))))
+
+  (testing "works with vectors and other collections"
+    (is (= [{:user_id 1} {:user_id 2}]
+           (u/deep-kebab->snake-keys [{:user-id 1} {:user-id 2}])))
+    (is (= {:items [{:item_id 1 :item_name "test"}]}
+           (u/deep-kebab->snake-keys {:items [{:item-id 1 :item-name "test"}]})))))
 
 (deftest ^:parallel one-or-many-test
   (are [input expected] (= expected
@@ -248,7 +330,7 @@
 #?(:clj
    (deftest lower-case-en-turkish-test
      ;; TODO Can we achieve something like with-locale in CLJS?
-     (mt/with-locale "tr"
+     (mt/with-locale! "tr"
        (is (= "id"
               (u/lower-case-en "ID"))))))
 
@@ -258,7 +340,7 @@
 
 #?(:clj
    (deftest upper-case-en-turkish-test
-     (mt/with-locale "tr"
+     (mt/with-locale! "tr"
        (is (= "ID"
               (u/upper-case-en "id"))))))
 
@@ -271,34 +353,20 @@
     "IBIS" "Ibis"
     "Ibis" "Ibis"))
 
+(deftest ^:parallel truncate-test
+  (are [s n expected] (= expected
+                         (u/truncate s n))
+    "string" 10 "string"
+    "string" 3  "str"
+    "string" 0  ""))
+
 #?(:clj
    (deftest capitalize-en-turkish-test
-     (mt/with-locale "tr"
+     (mt/with-locale! "tr"
        (is (= "Ibis"
               (u/capitalize-en "ibis")
               (u/capitalize-en "IBIS")
               (u/capitalize-en "Ibis"))))))
-
-(deftest ^:parallel parse-currency-test
-  (are [s expected] (= expected
-                       (u/parse-currency s))
-    nil             nil
-    ""              nil
-    "   "           nil
-    "$1,000"        1000.0M
-    "$1,000,000"    1000000.0M
-    "$1,000.00"     1000.0M
-    "€1.000"        1000.0M
-    "€1.000,00"     1000.0M
-    "€1.000.000,00" 1000000.0M
-    "-£127.54"      -127.54M
-    "-127,54 €"     -127.54M
-    "kr-127,54"     -127.54M
-    "€ 127,54-"     -127.54M
-    "¥200"          200.0M
-    "¥200."         200.0M
-    "$.05"          0.05M
-    "0.05"          0.05M))
 
 (deftest ^:parallel email->domain-test
   (are [domain email] (= domain
@@ -309,6 +377,7 @@
     "metabase.com"   "cam.saul+1@metabase.com"))
 
 (deftest ^:parallel email-in-domain-test
+  #_{:clj-kondo/ignore [:equals-true]}
   (are [in-domain? email domain] (= in-domain?
                                     (u/email-in-domain? email domain))
     true  "cam@metabase.com"          "metabase.com"
@@ -318,16 +387,16 @@
 #_{:clj-kondo/ignore [:clojure-lsp/unused-public-var]}
 (defspec pick-first-test 100
   (prop/for-all [coll (gen/list gen/small-integer)]
-                (let [result (u/pick-first pos? coll)]
-                  (or (and (nil? result)
-                           (every? (complement pos?) coll))
-                      (let [[x ys] result
-                            [non-pos [m & rest]] (split-with (complement pos?) coll)]
-                        (and (vector? result)
-                             (= (count result) 2)
-                             (pos? x)
-                             (= x m)
-                             (= ys (concat non-pos rest))))))))
+    (let [result (u/pick-first pos? coll)]
+      (or (and (nil? result)
+               (every? (complement pos?) coll))
+          (let [[x ys] result
+                [non-pos [m & rest]] (split-with (complement pos?) coll)]
+            (and (vector? result)
+                 (= (count result) 2)
+                 (pos? x)
+                 (= x m)
+                 (= ys (concat non-pos rest))))))))
 
 (deftest ^:parallel normalize-map-test
   (testing "nil and empty maps return empty maps"
@@ -347,7 +416,7 @@
 
 #?(:clj
    (deftest normalize-map-turkish-test
-     (mt/with-locale "tr"
+     (mt/with-locale! "tr"
        (is (= {:bird "Toucan"}
               (u/normalize-map {:BIRD "Toucan"}))))))
 
@@ -361,8 +430,8 @@
                    (expensive-fn 1)
                    (expensive-fn 2)
                    (expensive-fn 3))]
-      (is (= [result @counter]
-             [2 [1 2]]))))
+      (is (= [2 [1 2]]
+             [result @counter]))))
   (testing "failure"
     (is (nil? (u/or-with even? 1 3 5)))))
 
@@ -373,6 +442,7 @@
     "x"                                   :dispatch-type/string
     :x                                    :dispatch-type/keyword
     1                                     :dispatch-type/integer
+    (u.number/bigint "10")                :dispatch-type/integer
     1.1                                   :dispatch-type/number
     {:a 1}                                :dispatch-type/map
     [1]                                   :dispatch-type/sequential
@@ -433,11 +503,11 @@
   (testing "classify correctly"
     (is (= {:to-update [{:id 2 :name "c3"}]
             :to-delete [{:id 1 :name "c1"} {:id 3 :name "c3"}]
-            :to-create [{:id -1 :name "-c1"}]
+            :to-create [{:name "c5"} {:id -1 :name "-c1"}]
             :to-skip   [{:id 4 :name "c4"}]}
            (u/row-diff
             [{:id 1 :name "c1"}   {:id 2 :name "c2"} {:id 3 :name "c3"} {:id 4 :name "c4"}]
-            [{:id -1 :name "-c1"} {:id 2 :name "c3"} {:id 4 :name "c4"}])))
+            [{:id -1 :name "-c1"} {:id 2 :name "c3"} {:id 4 :name "c4"} {:name "c5"}])))
     (is (= {:to-skip   [{:god_id 10, :name "Zeus", :job "God of Thunder"}]
             :to-delete [{:id 2, :god_id 20, :name "Odin", :job "God of Thunder"}]
             :to-update [{:god_id 30, :name "Osiris", :job "God of Afterlife"}]
@@ -452,6 +522,7 @@
                         :to-compare #(dissoc % :id :god_id)})))))
 
 (deftest ^:parallel empty-or-distinct?-test
+  #_{:clj-kondo/ignore [:equals-true]}
   (are [xs expected] (= expected
                         (u/empty-or-distinct? xs))
     nil     true
@@ -465,6 +536,20 @@
     #{1}    true
     [1 2]   true
     [1 2 1] false))
+
+(deftest ^:parallel traverse-test
+  (testing "u/traverse tracks deps correctly"
+    (let [graph {:a [:b :d]
+                 :b [:c :d]
+                 :c nil
+                 :d [:e]
+                 :e nil}]
+      (is (= {:a nil
+              :b #{:a}
+              :c #{:b}
+              :d #{:a :b}
+              :e #{:d}}
+             (u/traverse [:a] #(zipmap (get graph %) (repeat #{%}))))))))
 
 (deftest ^:parallel round-to-decimals-test
   (are [decimal-place expected] (= expected
@@ -515,6 +600,7 @@
 #?(:clj
    (deftest ^:parallel case-enum-test
      (testing "case does not work"
+       #_{:clj-kondo/ignore [:case-symbol-test]}
        (is (= 3 (case Month/MAY
                   Month/APRIL 1
                   Month/MAY   2
@@ -529,3 +615,109 @@
                     (u/case-enum Month/JANUARY
                       Month/JANUARY    1
                       DayOfWeek/SUNDAY 2))))))
+
+(deftest ^:parallel truncate-string-to-byte-count-test
+  (letfn [(truncate-string-to-byte-count [s byte-length]
+            (let [truncated (#'u/truncate-string-to-byte-count s byte-length)]
+              (is (<= (#'u/string-byte-count truncated) byte-length))
+              (is (str/starts-with? s truncated))
+              truncated))]
+    (doseq [[s max-length->expected] {"12345"
+                                      {1  "1"
+                                       2  "12"
+                                       3  "123"
+                                       4  "1234"
+                                       5  "12345"
+                                       6  "12345"
+                                       10 "12345"}
+
+                                      "가나다라"
+                                      {1  ""
+                                       2  ""
+                                       3  "가"
+                                       4  "가"
+                                       5  "가"
+                                       6  "가나"
+                                       7  "가나"
+                                       8  "가나"
+                                       9  "가나다"
+                                       10 "가나다"
+                                       11 "가나다"
+                                       12 "가나다라"
+                                       13 "가나다라"
+                                       15 "가나다라"
+                                       20 "가나다라"}}
+            [max-length expected] max-length->expected]
+      (testing (pr-str (list `lib.util/truncate-string-to-byte-count s max-length))
+        (is (= expected
+               (truncate-string-to-byte-count s max-length)))))))
+
+(deftest ^:parallel index-by-test
+  (is (= {:a :a, :b :b, :c :c}
+         (into {}
+               (u/index-by identity)
+               [:a :b :c])
+         (u/index-by identity [:a :b :c])))
+  (is (= {1 {:id 1, :name "A"}
+          2 {:id 2, :name "B"}}
+         (into {}
+               (u/index-by :id)
+               [{:id 1, :name "A"}, {:id 2, :name "B"}])
+         (u/index-by :id [{:id 1, :name "A"}, {:id 2, :name "B"}])))
+  (is (= {1 4, 2 5}
+         (u/index-by first second [[1 3] [1 4] [2 5]]))))
+
+(deftest ^:parallel rconcat-test
+  (is (= [2 4 6 18 16 14 12 10 8 6 4 2 0 50]
+         (transduce
+          (map (partial * 2))
+          conj
+          []
+          (u/rconcat
+           (u/rconcat
+            (eduction (map inc) (range 3))
+            (eduction (map dec) (range 10 0 -1)))
+           [25])))))
+
+(deftest ^:parallel run-count!-test
+  (testing "counts the things"
+    (is (zero? (u/run-count! inc nil)))
+    (is (zero? (u/run-count! inc [])))
+    (is (= 3 (u/run-count! inc (range 3))))
+    (is (= 3 (u/run-count! inc (eduction (map inc) (range 3))))))
+  (testing "does the stuff"
+    (let [acc (volatile! [])]
+      (u/run-count! #(vswap! acc conj %) (eduction (map inc) (range 3)))
+      (is (= [1 2 3] @acc)))))
+
+(deftest ^:parallel safe-min-test
+  (testing "safe min behaves like clojure.core/min"
+    (is (= nil (u/safe-min nil)))
+    (is (= 2 (u/safe-min nil 2 nil 3)))))
+
+(deftest ^:parallel find-first-map-indexed-test
+  (testing "find-first-map-indexed"
+    (let [test-maps [{:a {:b 1}} {:a {:b 2}} {:a {:b 3}}]]
+      (is (nil? (u/find-first-map-indexed nil [:a :b] 1)))
+      (is (= [1 {:a {:b 2}}]
+             (u/find-first-map-indexed test-maps [:a :b] 2)))
+      (is (nil? (u/find-first-map-indexed test-maps [:a :b] 5))))))
+
+(deftest ^:parallel find-first-map-test
+  (testing "find-first-map"
+    (let [test-maps [{:a {:b 1}} {:a {:b 2}} {:a {:b 2}} {:a {:b 3}}]]
+      (is (nil? (u/find-first-map nil [:a :b] 1)))
+      (is (nil? (u/find-first-map test-maps [:a :b] 5)))
+      (is (= {:a {:b 2}}
+             (u/find-first-map test-maps [:a :b] 2))))))
+
+(deftest ^:parallel last-test
+  (testing "u/last works"
+    (are [res src] (= res (u/last src))
+      9      (range 10)
+      3      '(1 2 3)
+      nil    '()
+      3      [1 2 3]
+      nil    []
+      \c     "abc"
+      [:b 2] {:a 1 :b 2})))

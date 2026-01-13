@@ -1,12 +1,28 @@
-import type { ScheduleSettings } from "metabase-types/api";
+import type {
+  AdaptiveStrategy,
+  InheritStrategy,
+  ScheduleSettings,
+} from "metabase-types/api";
 
 import {
   cronToScheduleSettings,
+  getShortStrategyLabel,
+  hourTo24HourFormat,
   hourToTwelveHourFormat,
   scheduleSettingsToCron,
 } from "./utils";
 
 describe("scheduleSettingsToCron", () => {
+  it("converts every_n_minutes schedule to cron", () => {
+    const settings: ScheduleSettings = {
+      schedule_type: "every_n_minutes",
+      schedule_minute: 10,
+      schedule_hour: null,
+    };
+    const cron = scheduleSettingsToCron(settings);
+    expect(cron).toEqual("0 0/10 * * * ? *");
+  });
+
   it("converts hourly schedule to cron", () => {
     const settings: ScheduleSettings = {
       schedule_type: "hourly",
@@ -14,7 +30,7 @@ describe("scheduleSettingsToCron", () => {
       schedule_hour: 1,
     };
     const cron = scheduleSettingsToCron(settings);
-    expect(cron).toEqual("0 1 1 * * ?");
+    expect(cron).toEqual("0 1 1 * * ? *");
   });
 
   it("converts daily schedule to cron", () => {
@@ -24,7 +40,7 @@ describe("scheduleSettingsToCron", () => {
       schedule_hour: 14,
     };
     const cron = scheduleSettingsToCron(settings);
-    expect(cron).toEqual("0 30 14 * * ?");
+    expect(cron).toEqual("0 30 14 * * ? *");
   });
 
   it("converts weekly schedule to cron", () => {
@@ -35,7 +51,7 @@ describe("scheduleSettingsToCron", () => {
       schedule_hour: 12,
     };
     const cron = scheduleSettingsToCron(settings);
-    expect(cron).toEqual("0 0 12 ? * 2");
+    expect(cron).toEqual("0 0 12 ? * 2 *");
   });
 
   it("converts 'first Wednesday of the month at 9:15am' to cron", () => {
@@ -47,7 +63,7 @@ describe("scheduleSettingsToCron", () => {
       schedule_hour: 9,
     };
     const cron = scheduleSettingsToCron(settings);
-    expect(cron).toEqual("0 15 9 ? * 4#1");
+    expect(cron).toEqual("0 15 9 ? * 4#1 *");
   });
 
   it("converts 'last calendar day of the month' to cron", () => {
@@ -58,7 +74,7 @@ describe("scheduleSettingsToCron", () => {
       schedule_hour: 16,
     };
     const cron = scheduleSettingsToCron(settings);
-    expect(cron).toEqual("0 45 16 L * ?");
+    expect(cron).toEqual("0 45 16 L * ? *");
   });
 
   it("converts 'monthly on the 15th' to cron", () => {
@@ -69,7 +85,7 @@ describe("scheduleSettingsToCron", () => {
       schedule_hour: 23,
     };
     const cron = scheduleSettingsToCron(settings);
-    expect(cron).toEqual("0 5 23 15 * ?");
+    expect(cron).toEqual("0 5 23 15 * ? *");
   });
 
   it("missing minute and hour should default to wildcard", () => {
@@ -77,7 +93,7 @@ describe("scheduleSettingsToCron", () => {
       schedule_type: "daily",
     };
     const cron = scheduleSettingsToCron(settings);
-    expect(cron).toEqual("0 * * * * ?");
+    expect(cron).toEqual("0 * * * * ? *");
   });
 });
 
@@ -97,6 +113,13 @@ describe("cronToScheduleSettings", () => {
   });
 
   describe("schedule type determination", () => {
+    it('sets schedule type to "every_n_minutes" when minute is "0/15"', () => {
+      const cron = `0 0/15 * * * ?`;
+      expect(cronToScheduleSettings(cron)?.schedule_type).toBe(
+        "every_n_minutes",
+      );
+    });
+
     it('sets schedule type to "hourly" when hour is "*" and both dayOfMonth and dayOfWeek are "*"', () => {
       const cron = "0 30 * * * *";
       expect(cronToScheduleSettings(cron)?.schedule_type).toBe("hourly");
@@ -115,6 +138,11 @@ describe("cronToScheduleSettings", () => {
     it('sets schedule type to "monthly" when dayOfMonth is specific', () => {
       const cron = "0 30 8 15 * ?";
       expect(cronToScheduleSettings(cron)?.schedule_type).toBe("monthly");
+    });
+
+    it('sets schedule type to "cron" when isCustomSchedule is true', () => {
+      const cron = "0 30 8 15 * ?";
+      expect(cronToScheduleSettings(cron, true)?.schedule_type).toBe("cron");
     });
   });
 
@@ -170,6 +198,7 @@ describe("cronToScheduleSettings", () => {
       const cron = "0 30 8 ? * 7";
       expect(cronToScheduleSettings(cron)?.schedule_day).toBe("sat");
     });
+
     it('sets schedule_day to undefined if dayOfWeek is "?"', () => {
       const cron = "0 30 8 ? * ?";
       expect(cronToScheduleSettings(cron)?.schedule_day).toBeUndefined();
@@ -189,6 +218,19 @@ describe("cronToScheduleSettings", () => {
     });
   });
 
+  describe("every n minutes schedule determination", () => {
+    it('sets schedule type to "every_n_minutes" when minute is "0/15"', () => {
+      const cron = `0 0/15 * * * ?`;
+      expect(cronToScheduleSettings(cron)).toEqual(
+        expect.objectContaining({
+          schedule_type: "every_n_minutes",
+          schedule_minute: 15,
+          schedule_hour: null,
+        }),
+      );
+    });
+  });
+
   describe("specific cron strings", () => {
     it("converts 0 0 22 ? * 2L correctly", () => {
       const cron = "0 0 22 ? * 2L";
@@ -200,6 +242,7 @@ describe("cronToScheduleSettings", () => {
         schedule_frame: "last",
       });
     });
+
     it("converts 0 0 6 ? * 6#1 correctly", () => {
       const cron = "0 0 6 ? * 6#1";
       expect(cronToScheduleSettings(cron)).toEqual({
@@ -220,9 +263,84 @@ describe("hourToTwelveHourFormat", () => {
     expect(hourToTwelveHourFormat(23)).toBe(11);
     expect(hourToTwelveHourFormat(12)).toBe(12);
   });
+
   it("does not change hours that are already in 12-hour format", () => {
     expect(hourToTwelveHourFormat(11)).toBe(11);
     expect(hourToTwelveHourFormat(10)).toBe(10);
     expect(hourToTwelveHourFormat(1)).toBe(1);
+  });
+});
+
+describe("hourTo24HourFormat", () => {
+  // Test AM cases
+  it("converts 12 AM to 0", () => {
+    expect(hourTo24HourFormat(12, 0)).toBe(0);
+  });
+
+  it("converts 1 AM to 1", () => {
+    expect(hourTo24HourFormat(1, 0)).toBe(1);
+  });
+
+  it("converts 11 AM to 11", () => {
+    expect(hourTo24HourFormat(11, 0)).toBe(11);
+  });
+
+  // Test PM cases
+  it("converts 12 PM to 12", () => {
+    expect(hourTo24HourFormat(12, 1)).toBe(12);
+  });
+
+  it("converts 1 PM to 13", () => {
+    expect(hourTo24HourFormat(1, 1)).toBe(13);
+  });
+
+  it("converts 11 PM to 23", () => {
+    expect(hourTo24HourFormat(11, 1)).toBe(23);
+  });
+
+  // Edge cases
+  it("converts 0 AM to 0", () => {
+    expect(hourTo24HourFormat(0, 0)).toBe(0);
+  });
+
+  it("converts 0 PM to 12", () => {
+    expect(hourTo24HourFormat(0, 1)).toBe(12);
+  });
+
+  it("converts NaN PM to NaN", () => {
+    expect(hourTo24HourFormat(NaN, 1)).toBeNaN();
+  });
+
+  it("converts 11 NaN to 11 (that is, fall back to AM if the AM/PM is NaN)", () => {
+    expect(hourTo24HourFormat(11, NaN)).toBe(11);
+  });
+
+  it("converts NaN NaN to NaN", () => {
+    expect(hourTo24HourFormat(NaN, NaN)).toBeNaN();
+  });
+});
+
+describe("getShortStrategyLabel", () => {
+  it("should return null if no strategy is provided", () => {
+    const result = getShortStrategyLabel();
+    expect(result).toBeNull();
+  });
+
+  it("can abbreviate an 'Adaptive' strategy", () => {
+    const strategy: AdaptiveStrategy = {
+      type: "ttl",
+      multiplier: 2,
+      min_duration_ms: 1000,
+    };
+    const result = getShortStrategyLabel(strategy);
+    expect(result).toBe("Adaptive");
+  });
+
+  it("can abbreviate a 'Use default' aka inherit strategy", () => {
+    const strategy: InheritStrategy = {
+      type: "inherit",
+    };
+    const result = getShortStrategyLabel(strategy);
+    expect(result).toBe("Use default");
   });
 });

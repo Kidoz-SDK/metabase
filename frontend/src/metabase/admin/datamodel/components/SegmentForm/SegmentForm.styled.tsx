@@ -1,7 +1,7 @@
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
 
-import Button from "metabase/core/components/Button";
-import { color } from "metabase/lib/colors";
+import Button from "metabase/common/components/Button";
 import {
   breakpointMinMedium,
   breakpointMinSmall,
@@ -9,6 +9,9 @@ import {
 
 export const FormRoot = styled.form`
   width: 100%;
+  height: 100%;
+  overflow: auto;
+  background-color: var(--mb-color-bg-white);
 `;
 
 export const FormSection = styled.div`
@@ -38,7 +41,7 @@ export const FormBodyContent = styled.div`
 export const FormFooter = styled.div`
   padding-top: 2rem;
   padding-bottom: 2rem;
-  border-top: 1px solid ${color("border")};
+  border-top: 1px solid var(--mb-color-border);
 `;
 
 export const FormFooterContent = styled.div`

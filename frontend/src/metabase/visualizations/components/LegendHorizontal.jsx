@@ -1,20 +1,47 @@
 /* eslint-disable react/prop-types */
-/* eslint-disable react/no-string-refs */
 import cx from "classnames";
 import { Component } from "react";
-import ReactDOM from "react-dom";
 
 import LegendS from "./Legend.module.css";
 import LegendItem from "./LegendItem";
 
 export default class LegendHorizontal extends Component {
+  constructor(props) {
+    super(props);
+
+    /** @type {Record<number, LegendItem | null>} */
+    this.legendItemRefs = {};
+  }
+
   render() {
-    const { className, titles, colors, hovered, onHoverChange } = this.props;
+    const {
+      className,
+      titles,
+      colors,
+      dotSize,
+      hiddenIndices = [],
+      hovered,
+      onHoverChange,
+      onToggleSeriesVisibility,
+    } = this.props;
     return (
       <ol className={cx(className, LegendS.Legend, LegendS.horizontal)}>
         {titles.map((title, index) => {
           const isMuted =
             hovered && hovered.index != null && index !== hovered.index;
+          const isVisible = !hiddenIndices.includes(index);
+
+          const handleMouseEnter = () => {
+            onHoverChange?.({
+              index,
+              element: this.legendItemRefs[index]?.getRootElement(),
+            });
+          };
+
+          const handleMouseLeave = () => {
+            onHoverChange?.(null);
+          };
+
           return (
             <li
               key={index}
@@ -22,21 +49,29 @@ export default class LegendHorizontal extends Component {
               {...(hovered && { "aria-current": !isMuted })}
             >
               <LegendItem
-                ref={this["legendItem" + index]}
+                ref={(legendItem) => {
+                  this.legendItemRefs[index] = legendItem;
+                }}
                 title={title}
                 color={colors[index % colors.length]}
+                dotSize={dotSize}
                 isMuted={isMuted}
+                isVisible={isVisible}
                 showTooltip={false}
-                onMouseEnter={() =>
-                  onHoverChange &&
-                  onHoverChange({
-                    index,
-                    element: ReactDOM.findDOMNode(
-                      this.refs["legendItem" + index],
-                    ),
-                  })
-                }
-                onMouseLeave={() => onHoverChange && onHoverChange(null)}
+                onMouseEnter={() => {
+                  if (isVisible) {
+                    handleMouseEnter();
+                  }
+                }}
+                onMouseLeave={handleMouseLeave}
+                onToggleSeriesVisibility={(event) => {
+                  if (isVisible) {
+                    handleMouseLeave();
+                  } else {
+                    handleMouseEnter();
+                  }
+                  onToggleSeriesVisibility(event, index);
+                }}
               />
             </li>
           );

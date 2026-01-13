@@ -3,91 +3,103 @@ import _ from "underscore";
 import { isActionDashCard } from "metabase/actions/utils";
 import { getExistingDashCards } from "metabase/dashboard/actions/utils";
 import {
+  findDashCardForInlineParameter,
   isQuestionDashCard,
   isVirtualDashCard,
 } from "metabase/dashboard/utils";
-import { getParameterMappingOptions } from "metabase/parameters/utils/mapping-options";
+import {
+  type ParameterMappingOption,
+  getMappingOptionByTarget,
+  getParameterMappingOptions,
+} from "metabase/parameters/utils/mapping-options";
 import type Question from "metabase-lib/v1/Question";
-import type Metadata from "metabase-lib/v1/metadata/Metadata";
-import { compareMappingOptionTargets } from "metabase-lib/v1/parameters/utils/targets";
 import type {
   CardId,
-  QuestionDashboardCard,
-  DashboardId,
   DashCardId,
+  DashboardCard,
+  DashboardId,
+  DashboardTabId,
+  Parameter,
   ParameterId,
   ParameterTarget,
+  QuestionDashboardCard,
 } from "metabase-types/api";
 import type { DashboardState } from "metabase-types/store";
 
 import type { SetMultipleDashCardAttributesOpts } from "../core";
 
 export function getAllDashboardCardsWithUnmappedParameters({
-  dashboardState,
+  dashboards,
+  dashcards,
   dashboardId,
   parameterId,
+  selectedTabId,
   excludeDashcardIds = [],
 }: {
-  dashboardState: DashboardState;
+  dashboards: DashboardState["dashboards"];
+  dashcards: DashboardState["dashcards"];
   dashboardId: DashboardId;
   parameterId: ParameterId;
+  selectedTabId: DashboardTabId;
   excludeDashcardIds?: DashCardId[];
 }): QuestionDashboardCard[] {
-  const dashCards = getExistingDashCards(
-    dashboardState.dashboards,
-    dashboardState.dashcards,
+  const existingDashcards = getExistingDashCards(
+    dashboards,
+    dashcards,
     dashboardId,
+    selectedTabId,
   );
-  return dashCards.filter(
+
+  return existingDashcards.filter(
     (dashcard): dashcard is QuestionDashboardCard =>
       isQuestionDashCard(dashcard) &&
       !excludeDashcardIds.includes(dashcard.id) &&
       !dashcard.parameter_mappings?.some(
-        mapping => mapping.parameter_id === parameterId,
+        (mapping) => mapping.parameter_id === parameterId,
       ),
   );
 }
 
 export function getMatchingParameterOption(
+  parameter: Parameter,
   targetDashcard: QuestionDashboardCard,
   targetDimension: ParameterTarget,
-  sourceDashcard: QuestionDashboardCard,
-  metadata: Metadata,
   questions: Record<CardId, Question>,
-): {
-  target: ParameterTarget;
-} | null {
+  dashcards: DashboardCard[],
+): ParameterMappingOption | null | undefined {
   if (!targetDashcard) {
     return null;
   }
 
-  const sourceQuestion = questions[sourceDashcard.card.id];
   const targetQuestion = questions[targetDashcard.card.id];
-
-  return (
-    getParameterMappingOptions(
-      targetQuestion,
-      null,
-      targetDashcard.card,
-      targetDashcard,
-    ).find((param: { target: ParameterTarget }) =>
-      compareMappingOptionTargets(
-        targetDimension,
-        param.target,
-        sourceQuestion,
-        targetQuestion,
-      ),
-    ) ?? null
+  const parameterDashcard = findDashCardForInlineParameter(
+    parameter.id,
+    dashcards,
   );
+
+  const mappingOptions = getParameterMappingOptions(
+    targetQuestion,
+    parameter,
+    targetDashcard.card,
+    targetDashcard,
+    parameterDashcard,
+  );
+
+  const matchedOption = getMappingOptionByTarget(
+    mappingOptions,
+    targetDimension,
+    targetQuestion,
+    parameter,
+  );
+  return matchedOption ?? null;
 }
 
 export function getAutoWiredMappingsForDashcards(
-  sourceDashcard: QuestionDashboardCard,
+  parameter: Parameter,
   targetDashcards: QuestionDashboardCard[],
-  parameter_id: ParameterId,
   target: ParameterTarget,
-  metadata: Metadata,
   questions: Record<CardId, Question>,
+  dashcards: DashboardCard[],
 ): SetMultipleDashCardAttributesOpts {
   if (targetDashcards.length === 0) {
     return [];
@@ -96,14 +108,12 @@ export function getAutoWiredMappingsForDashcards(
   const targetDashcardMappings: SetMultipleDashCardAttributesOpts = [];
 
   for (const targetDashcard of targetDashcards) {
-    const selectedMappingOption: {
-      target: ParameterTarget;
-    } | null = getMatchingParameterOption(
+    const selectedMappingOption = getMatchingParameterOption(
+      parameter,
       targetDashcard,
       target,
-      sourceDashcard,
-      metadata,
       questions,
+      dashcards,
     );
 
     if (selectedMappingOption && targetDashcard.card_id) {
@@ -112,7 +122,7 @@ export function getAutoWiredMappingsForDashcards(
         attributes: {
           parameter_mappings: getParameterMappings(
             targetDashcard,
-            parameter_id,
+            parameter.id,
             targetDashcard.card_id,
             selectedMappingOption.target,
           ),
@@ -122,22 +132,24 @@ export function getAutoWiredMappingsForDashcards(
   }
   return targetDashcardMappings;
 }
-
-export function getParameterMappings(
-  dashcard: QuestionDashboardCard,
+export function getParameterMappings<DC extends DashboardCard>(
+  dashcard: DC,
   parameter_id: ParameterId,
-  card_id: CardId,
+  card_id: CardId | null,
   target: ParameterTarget | null,
-) {
+): NonNullable<DC["parameter_mappings"]> {
   const isVirtual = isVirtualDashCard(dashcard);
   const isAction = isActionDashCard(dashcard);
 
-  let parameter_mappings = dashcard.parameter_mappings || [];
+  let parameter_mappings: NonNullable<DC["parameter_mappings"]> =
+    dashcard.parameter_mappings ?? [];
 
   // allow mapping the same parameter to multiple action targets
   if (!isAction) {
     parameter_mappings = parameter_mappings.filter(
-      m => m.card_id !== card_id || m.parameter_id !== parameter_id,
+      (m) =>
+        ("card_id" in m && m.card_id !== card_id) ||
+        m.parameter_id !== parameter_id,
     );
   }
 
@@ -146,14 +158,18 @@ export function getParameterMappings(
       // If this is a virtual (text) card, remove any existing mappings for the target, since text card variables
       // can only be mapped to a single parameter.
       parameter_mappings = parameter_mappings.filter(
-        m => !_.isEqual(m.target, target),
+        (m) => !_.isEqual(m.target, target),
       );
     }
-    parameter_mappings = parameter_mappings.concat({
-      parameter_id,
-      card_id,
-      target,
-    });
+
+    return [
+      ...parameter_mappings,
+      {
+        parameter_id,
+        card_id,
+        target,
+      },
+    ];
   }
 
   return parameter_mappings;

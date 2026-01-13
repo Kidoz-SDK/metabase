@@ -20,9 +20,9 @@ export function expectSearchResultContent({
 }) {
   const searchResultItemSelector = "[data-testid=search-result-item]";
 
-  const searchResultItems = cy.get(searchResultItemSelector);
+  const searchResultItems = () => cy.get(searchResultItemSelector);
 
-  searchResultItems.then($results => {
+  searchResultItems().then(($results) => {
     if (strict) {
       // Check if the length of the search results is the same as the expected length
       expect($results).to.have.length(expectedSearchResults.length);
@@ -48,7 +48,7 @@ export function expectSearchResultContent({
           });
         }
         if (expectedSearchResult.timestamp) {
-          cy.findByTestId("revision-history-button").findByText(
+          cy.findByTestId("revision-history-text").findByText(
             expectedSearchResult.timestamp,
           );
         }

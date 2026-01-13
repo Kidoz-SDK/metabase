@@ -1,13 +1,17 @@
-(ns metabase.test.data.oracle
+(ns ^:mb/driver-tests metabase.test.data.oracle
   (:require
    [clojure.java.jdbc :as jdbc]
    [clojure.string :as str]
    [clojure.test :refer :all]
+   [environ.core :as env]
    [honey.sql :as sql]
-   [medley.core :as m]
    [metabase.driver :as driver]
+   [metabase.driver.oracle]
    [metabase.driver.sql-jdbc.connection :as sql-jdbc.conn]
+   [metabase.driver.sql-jdbc.execute :as sql-jdbc.execute]
    [metabase.driver.sql.query-processor :as sql.qp]
+   [metabase.test :as mt]
+   [metabase.test.data.impl :as data.impl]
    [metabase.test.data.interface :as tx]
    [metabase.test.data.sql :as sql.tx]
    [metabase.test.data.sql-jdbc :as sql-jdbc.tx]
@@ -16,9 +20,12 @@
    [metabase.test.data.sql.ddl :as ddl]
    [metabase.util :as u]
    [metabase.util.honey-sql-2 :as h2x]
-   [metabase.util.log :as log]))
+   [metabase.util.log :as log]
+   [metabase.util.malli :as mu]))
 
 (set! *warn-on-reflection* true)
+
+(comment metabase.driver.oracle/keep-me)
 
 (sql-jdbc.tx/add-test-extensions! :oracle)
 
@@ -35,23 +42,36 @@
 (defonce ^:private session-password "password")
 ;; Session password is only used when creating session user, not anywhere else
 
-(defn- connection-details []
+(defn- truststore-details []
+  (when (some-> (tx/db-test-env-var :oracle :ssl-use-truststore) Boolean/parseBoolean)
+    (into {:ssl-use-truststore true}
+          (keep (fn [k]
+                  (when-let [v (tx/db-test-env-var :oracle k)]
+                    [k v])))
+          [:ssl-truststore-options :ssl-truststore-path :ssl-truststore-value :ssl-truststore-password-value])))
+
+(defn- keystore-details []
+  (when (some-> (tx/db-test-env-var :oracle :ssl-use-keystore) Boolean/parseBoolean)
+    (into {:ssl-use-keystore true}
+          (keep (fn [k]
+                  (when-let [v (tx/db-test-env-var :oracle k)]
+                    [k v])))
+          [:ssl-keystore-options :ssl-keystore-path :ssl-keystore-value :ssl-keystore-password-value])))
+
+(mu/defn- connection-details :- :metabase.driver.oracle/details
+  []
   (let [details* {:host                    (tx/db-test-env-var-or-throw :oracle :host "localhost")
-                  :port                    (Integer/parseInt (tx/db-test-env-var-or-throw :oracle :port "1521"))
+                  :port                    (parse-long (tx/db-test-env-var-or-throw :oracle :port "1521"))
                   :user                    (tx/db-test-env-var :oracle :user)
                   :password                (tx/db-test-env-var :oracle :password)
                   :sid                     (tx/db-test-env-var :oracle :sid)
-                  :service-name            (tx/db-test-env-var :oracle :service-name (when-not (tx/db-test-env-var :oracle :sid) "XEPDB1"))
-                  :ssl                     (tx/db-test-env-var :oracle :ssl false)
+                  :service-name            (tx/db-test-env-var :oracle :service-name (tx/db-test-env-var :oracle :sid "FREEPDB1"))
+                  :ssl                     (Boolean/parseBoolean (tx/db-test-env-var :oracle :ssl "false"))
                   :schema-filters-type     "inclusion"
                   :schema-filters-patterns session-schema}
-        ssl-keys [:ssl-use-truststore :ssl-truststore-options :ssl-truststore-path :ssl-truststore-value
-                  :ssl-truststore-password-value
-                  :ssl-use-keystore :ssl-keystore-options :ssl-keystore-path :ssl-keystore-value
-                  :ssl-keystore-password-value]
         details* (merge details*
-                        (m/filter-vals some?
-                                       (zipmap ssl-keys (map #(tx/db-test-env-var :oracle % nil) ssl-keys))))]
+                        (truststore-details)
+                        (keystore-details))]
     ;; if user or password are not set and we cannot possibly be using SSL auth, set the defaults
     (cond-> details*
       (and (nil? (:user details*)) (not (:ssl-use-keystore details*)))
@@ -59,6 +79,18 @@
 
       (and (nil? (:password details*)) (not (:ssl-use-keystore details*)))
       (assoc :password "password"))))
+
+(deftest connection-details-test
+  (testing "Make sure connection details handle things like MB_ORACLE_TEST_SSL_USE_TRUSTSTORE=false correctly"
+    (with-redefs [env/env (assoc env/env
+                                 :mb-oracle-test-user ""
+                                 :mb-oracle-test-ssl "FALSE"
+                                 :mb-oracle-test-ssl-use-truststore "true"
+                                 :mb-oracle-test-ssl-use-keystore "false")]
+      (is (=? {:user               "system"
+               :ssl                false
+               :ssl-use-truststore true}
+              (connection-details))))))
 
 (defn- dbspec [& _]
   (let [conn-details (connection-details)]
@@ -69,7 +101,9 @@
 
 (defmethod tx/sorts-nil-first? :oracle [_ _] false)
 
-(defmethod tx/supports-time-type? :oracle [_driver] false)
+(defmethod driver/database-supports? [:oracle :test/time-type]
+  [_driver _feature _database]
+  false)
 
 (doseq [[base-type sql-type] {:type/BigInteger             "NUMBER(*,0)"
                               :type/Boolean                "NUMBER(1)"
@@ -120,9 +154,9 @@
 
 (defmethod tx/id-field-type :oracle [_] :type/Decimal)
 
-(defmethod load-data/load-data! :oracle
-  [driver dbdef tabledef]
-  (load-data/load-data-maybe-add-ids-chunked! driver dbdef tabledef))
+(defmethod load-data/row-xform :oracle
+  [_driver _dbdef tabledef]
+  (load-data/maybe-add-ids-xform tabledef))
 
 ;; Oracle has weird syntax for inserting multiple rows, it looks like
 ;;
@@ -205,7 +239,6 @@
                (update 0 (partial driver/prettify-native-form :oracle))
                (update 0 str/split-lines))))))
 
-
 ;;; Clear out the session schema before and after tests run
 ;; TL;DR Oracle schema == Oracle user. Create new user for session-schema
 (defn- execute! [format-string & args]
@@ -225,7 +258,7 @@
 
 (defn drop-user! [username]
   (u/ignore-exceptions
-   (execute! "DROP USER %s CASCADE" username)))
+    (execute! "DROP USER \"%s\" CASCADE" username)))
 
 (defmethod tx/before-run :oracle
   [_]
@@ -244,3 +277,69 @@
     ((get-method tx/aggregate-column-info ::tx/test-extensions) driver ag-type field)
     (when (#{:count :cum-count} ag-type)
       {:base_type :type/Decimal}))))
+
+(defmethod tx/dataset-already-loaded? :oracle
+  [driver dbdef]
+  ;; check and make sure the first table in the dbdef has been created.
+  (let [tabledef       (first (:table-definitions dbdef))
+        ;; table-name should be something like test_data_venues
+        table-name     (tx/db-qualified-table-name (:database-name dbdef) (:table-name tabledef))]
+    (sql-jdbc.execute/do-with-connection-with-options
+     driver
+     (sql-jdbc.conn/connection-details->spec driver (connection-details))
+     {:write? false}
+     (fn [^java.sql.Connection conn]
+       (with-open [rset (.getTables (.getMetaData conn)
+                                    #_catalog        nil
+                                    #_schema-pattern session-schema
+                                    #_table-pattern  table-name
+                                    #_types          (into-array String ["TABLE"]))]
+         ;; if the ResultSet returns anything we know the table is already loaded.
+         (.next rset))))))
+
+(def ^:dynamic *override-describe-database-to-filter-by-db-name?*
+  "Whether to override the production implementation for `describe-database` with a special one that only syncs
+  the tables qualified by the database name. This is `true` by default during tests to fake database isolation.
+  See (metabase#40310)"
+  true)
+
+(defonce ^:private ^{:arglists '([driver database])}
+  original-describe-database
+  (get-method driver/describe-database* :oracle))
+
+;; For test databases, only sync the tables that are qualified by the db name
+(defmethod driver/describe-database* :oracle
+  [driver database]
+  (if *override-describe-database-to-filter-by-db-name?*
+    (let [r                (original-describe-database driver database)
+          physical-db-name (data.impl/database-source-dataset-name database)]
+      (update r :tables (fn [tables]
+                          (into #{}
+                                (filter #(tx/qualified-by-db-name? physical-db-name (:name %)))
+                                tables))))
+    (original-describe-database driver database)))
+
+(deftest ^:parallel describe-database-sanity-check-test
+  (testing "Make sure even tho tables from different datasets are all stuffed in one DB we still sync them separately"
+    (mt/test-driver :oracle
+      (mt/dataset airports
+        (is (= #{"airports_airport"
+                 "airports_continent"
+                 "airports_country"
+                 "airports_municipality"
+                 "airports_region"}
+               (into #{}
+                     (map :name)
+                     (:tables (driver/describe-database :oracle (mt/db))))))))))
+
+(defmethod tx/drop-view! :oracle
+  [driver database view-name {:keys [materialized?]}]
+  (let [database-name (get-in database [:settings :database-source-dataset-name])
+        qualified-view (sql.tx/qualify-and-quote driver database-name (name view-name))]
+    (u/ignore-exceptions
+      ;; If exists does not exist in oracle
+      (jdbc/execute! (sql-jdbc.conn/db->pooled-connection-spec database)
+                     (sql/format
+                      {(if materialized? :drop-materialized-view :drop-view) [[[:raw qualified-view]]]}
+                      :dialect (sql.qp/quote-style driver))
+                     {:transaction? false}))))

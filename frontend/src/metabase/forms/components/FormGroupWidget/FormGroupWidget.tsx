@@ -5,7 +5,7 @@ import { t } from "ttag";
 
 import { useGroupListQuery } from "metabase/common/hooks";
 import type { SelectProps } from "metabase/ui";
-import { Select, Loader } from "metabase/ui";
+import { Loader, Select } from "metabase/ui";
 import type { GroupId } from "metabase-types/api";
 
 interface FormGroupWidgetProps
@@ -55,8 +55,8 @@ export const FormGroupWidget = forwardRef(function FormGroupWidget(
       {...props}
       ref={ref}
       name={name}
-      value={value == null ? value : String(value)}
-      error={touched ? error : null}
+      value={value == null ? undefined : String(value)}
+      error={touched && error ? <div role="alert">{error}</div> : null}
       data={groupOptions}
       onChange={handleChange}
       onBlur={handleBlur}

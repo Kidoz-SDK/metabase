@@ -71,19 +71,18 @@
 import { createSelector } from "@reduxjs/toolkit";
 import { getIn, merge } from "icepick";
 import inflection from "inflection"; // NOTE: need to use inflection directly here due to circular dependency
-import { normalize, denormalize, schema } from "normalizr";
+import { denormalize, normalize, schema } from "normalizr";
 import createCachedSelector from "re-reselect";
 import _ from "underscore";
 
-import { GET, PUT, POST, DELETE } from "metabase/lib/api";
+import { DELETE, GET, POST, PUT } from "metabase/lib/api";
 import {
   combineReducers,
-  handleEntities,
   compose,
+  handleEntities,
   withAction,
-  withAnalytics,
-  withRequestState,
   withCachedDataAndRequestState,
+  withRequestState,
 } from "metabase/lib/redux";
 import requestsReducer, { setRequestUnloaded } from "metabase/redux/requests";
 import { addUndo } from "metabase/redux/undo";
@@ -131,16 +130,16 @@ export function createEntity(def) {
     };
   }
 
-  const getQueryKey = entityQuery => JSON.stringify(entityQuery || null);
-  const getObjectStatePath = entityId => ["entities", entity.name, entityId];
-  const getListStatePath = entityQuery =>
+  const getQueryKey = (entityQuery) => JSON.stringify(entityQuery || null);
+  const getObjectStatePath = (entityId) => ["entities", entity.name, entityId];
+  const getListStatePath = (entityQuery) =>
     ["entities", entity.name + "_list"].concat(getQueryKey(entityQuery));
 
   entity.getQueryKey = getQueryKey;
   entity.getObjectStatePath = getObjectStatePath;
   entity.getListStatePath = getListStatePath;
 
-  const getWritableProperties = object =>
+  const getWritableProperties = (object) =>
     entity.writableProperties != null
       ? _.pick(object, "id", ...entity.writableProperties)
       : object;
@@ -195,18 +194,8 @@ export function createEntity(def) {
     ]);
   }
 
-  // same as withRequestState, but with category/label
-  function withEntityAnalytics(action) {
-    return withAnalytics(
-      "entities",
-      entity.name,
-      action,
-      entity.getAnalyticsMetadata,
-    );
-  }
-
   function withEntityActionDecorators(action) {
-    return entity.actionDecorators[action] || (_ => _);
+    return entity.actionDecorators[action] || ((_) => _);
   }
 
   // `objectActions` are for actions that accept an entity as their first argument,
@@ -217,7 +206,7 @@ export function createEntity(def) {
       withCachedDataAndRequestState(
         ({ id }) => [...getObjectStatePath(id)],
         ({ id }) => [...getObjectStatePath(id), "fetch"],
-        entityQuery => getQueryKey(entityQuery),
+        (entityQuery) => getQueryKey(entityQuery),
       ),
       withEntityActionDecorators("fetch"),
     )(
@@ -230,10 +219,9 @@ export function createEntity(def) {
 
     create: compose(
       withAction(CREATE_ACTION),
-      withEntityAnalytics("create"),
       withEntityRequestState(() => ["create"]),
       withEntityActionDecorators("create"),
-    )(entityObject => async (dispatch, getState) => {
+    )((entityObject) => async (dispatch, getState) => {
       return entity.normalize(
         await entity.api.create(
           getWritableProperties(entityObject),
@@ -245,8 +233,7 @@ export function createEntity(def) {
 
     update: compose(
       withAction(UPDATE_ACTION),
-      withEntityAnalytics("update"),
-      withEntityRequestState(object => [object.id, "update"]),
+      withEntityRequestState((object) => [object.id, "update"]),
       withEntityActionDecorators("update"),
     )(
       (entityObject, updatedObject = null, { notify } = {}) =>
@@ -301,10 +288,9 @@ export function createEntity(def) {
 
     delete: compose(
       withAction(DELETE_ACTION),
-      withEntityAnalytics("delete"),
-      withEntityRequestState(object => [object.id, "delete"]),
+      withEntityRequestState((object) => [object.id, "delete"]),
       withEntityActionDecorators("delete"),
-    )(entityObject => async (dispatch, getState) => {
+    )((entityObject) => async (dispatch, getState) => {
       await entity.api.delete(entityObject, dispatch, getState);
       return {
         entities: { [entity.name]: { [entityObject.id]: null } },
@@ -321,8 +307,9 @@ export function createEntity(def) {
     fetchList: compose(
       withAction(FETCH_LIST_ACTION),
       withCachedDataAndRequestState(
-        entityQuery => [...getListStatePath(entityQuery)],
-        entityQuery => [...getListStatePath(entityQuery), "fetch"],
+        (entityQuery) => [...getListStatePath(entityQuery)],
+        (entityQuery) => [...getListStatePath(entityQuery), "fetch"],
+        (entityQuery) => entity.getQueryKey(entityQuery),
       ),
     )((entityQuery = null) => async (dispatch, getState) => {
       const fetched = await entity.api.list(
@@ -387,7 +374,7 @@ export function createEntity(def) {
   entity.HACK_getObjectFromAction = ({ payload }) => {
     if (payload && "entities" in payload && "result" in payload) {
       if (Array.isArray(payload.result)) {
-        return payload.result.map(id => payload.entities[entity.name][id]);
+        return payload.result.map((id) => payload.entities[entity.name][id]);
       } else {
         return payload.entities[entity.name][payload.result];
       }
@@ -398,8 +385,8 @@ export function createEntity(def) {
 
   // SELECTORS
 
-  const getEntities = state => state.entities;
-  const getSettings = state => state.settings;
+  const getEntities = (state) => state.entities;
+  const getSettings = (state) => state.settings;
 
   // OBJECT SELECTORS
 
@@ -413,8 +400,8 @@ export function createEntity(def) {
     typeof entityId === "object"
       ? JSON.stringify(entityId)
       : entityId
-      ? entityId
-      : "",
+        ? entityId
+        : "",
   ); // must stringify objects
 
   // LIST SELECTORS
@@ -424,7 +411,7 @@ export function createEntity(def) {
 
   const getEntityLists = createSelector(
     [getEntities],
-    entities => entities[`${entity.name}_list`],
+    (entities) => entities[`${entity.name}_list`],
   );
 
   const getEntityList = createSelector(
@@ -434,12 +421,12 @@ export function createEntity(def) {
 
   const getEntityIds = createSelector(
     [getEntityList],
-    entities => entities && entities.list,
+    (entities) => entities && entities.list,
   );
 
   const getListMetadata = createSelector(
     [getEntityList],
-    entities => entities && entities.metadata,
+    (entities) => entities && entities.metadata,
   );
 
   const getList = createCachedSelector(
@@ -448,10 +435,10 @@ export function createEntity(def) {
     (entities, entityIds, settings) =>
       entityIds &&
       entityIds
-        .map(entityId =>
+        .map((entityId) =>
           entity.selectors.getObject({ entities, settings }, { entityId }),
         )
-        .filter(e => e != null), // deleted entities might remain in lists,
+        .filter((e) => e != null), // deleted entities might remain in lists,
   )((state, { entityQuery } = {}) =>
     entityQuery ? JSON.stringify(entityQuery) : "",
   );
@@ -473,24 +460,25 @@ export function createEntity(def) {
     requestType,
   ];
 
+  const defaultRequestState = {};
   const getRequestState = (state, props) =>
-    getIn(state, getRequestStatePath(props)) || {};
+    getIn(state, getRequestStatePath(props)) || defaultRequestState;
 
   const getLoading = createSelector(
     [getRequestState],
-    requestState => requestState.loading,
+    (requestState) => requestState.loading,
   );
   const getLoaded = createSelector(
     [getRequestState],
-    requestState => requestState.loaded,
+    (requestState) => requestState.loaded,
   );
   const getFetched = createSelector(
     [getRequestState],
-    requestState => requestState.fetched,
+    (requestState) => requestState.fetched,
   );
   const getError = createSelector(
     [getRequestState],
-    requestState => requestState.error,
+    (requestState) => requestState.error,
   );
 
   const defaultSelectors = {
@@ -560,7 +548,7 @@ export function createEntity(def) {
     } else if (type === DELETE_ACTION && state[""]) {
       return {
         ...state,
-        "": state[""].filter(id => id !== payload.result),
+        "": state[""].filter((id) => id !== payload.result),
       };
     }
     return state;
@@ -573,7 +561,7 @@ export function createEntity(def) {
   // above. This will be difficult with pagination
 
   if (!entity.actionShouldInvalidateLists) {
-    entity.actionShouldInvalidateLists = action =>
+    entity.actionShouldInvalidateLists = (action) =>
       action.type === CREATE_ACTION ||
       action.type === DELETE_ACTION ||
       action.type === UPDATE_ACTION ||
@@ -681,12 +669,18 @@ export const notify = (opts = {}, subject, verb) =>
 export const undo = (opts = {}, subject, verb) =>
   merge({ notify: { subject, verb, undo: true } }, opts || {});
 
-export async function entityCompatibleQuery(entityQuery, dispatch, endpoint) {
+export async function entityCompatibleQuery(
+  entityQuery,
+  dispatch,
+  endpoint,
+  { forceRefetch = true } = {},
+) {
   const request = entityQuery === EMPTY_ENTITY_QUERY ? undefined : entityQuery;
-  const action = dispatch(endpoint.initiate(request, { forceRefetch: true }));
+  const action = dispatch(endpoint.initiate(request, { forceRefetch }));
+
   try {
     return await action.unwrap();
   } finally {
-    action.unsubscribe();
+    action.unsubscribe?.();
   }
 }

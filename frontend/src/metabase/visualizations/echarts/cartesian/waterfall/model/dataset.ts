@@ -1,17 +1,21 @@
 import { t } from "ttag";
 
 import { NULL_DISPLAY_VALUE } from "metabase/lib/constants";
-import { X_AXIS_DATA_KEY } from "metabase/visualizations/echarts/cartesian/constants/dataset";
+import {
+  INDEX_KEY,
+  IS_WATERFALL_TOTAL_DATA_KEY,
+  X_AXIS_DATA_KEY,
+} from "metabase/visualizations/echarts/cartesian/constants/dataset";
 import {
   replaceValues,
   replaceZeroesForLogScale,
 } from "metabase/visualizations/echarts/cartesian/model/dataset";
 import type {
-  DataKey,
   ChartDataset,
+  DataKey,
   Datum,
-  WaterfallXAxisModel,
   NumericAxisScaleTransforms,
+  WaterfallXAxisModel,
 } from "metabase/visualizations/echarts/cartesian/model/types";
 import {
   WATERFALL_DATA_KEYS,
@@ -61,6 +65,7 @@ export const getWaterfallDataset = (
       [WATERFALL_VALUE_KEY]: value,
       [WATERFALL_START_KEY]: start,
       [WATERFALL_END_KEY]: end,
+      [INDEX_KEY]: index,
     };
 
     transformedDataset.push(waterfallDatum);
@@ -77,6 +82,7 @@ export const getWaterfallDataset = (
       [WATERFALL_VALUE_KEY]: lastDatum[WATERFALL_END_KEY],
       [WATERFALL_START_KEY]: 0,
       [WATERFALL_TOTAL_KEY]: lastDatum[WATERFALL_END_KEY],
+      [INDEX_KEY]: dataset.length,
     });
   }
 
@@ -84,6 +90,16 @@ export const getWaterfallDataset = (
     transformedDataset = replaceZeroesForLogScale(
       transformedDataset,
       WATERFALL_DATA_KEYS,
+    );
+  }
+
+  if (isTimeSeriesAxis(xAxisModel)) {
+    transformedDataset = replaceValues(
+      transformedDataset,
+      (dataKey: DataKey, value: RowValue) =>
+        dataKey === X_AXIS_DATA_KEY
+          ? xAxisModel.toEChartsAxisValue(value)
+          : value,
     );
   }
 
@@ -109,6 +125,7 @@ export const extendOriginalDatasetWithTotalDatum = (
   const totalDatum: Datum = {
     [seriesDataKey]: waterfallDatasetTotalDatum[WATERFALL_TOTAL_KEY],
     [X_AXIS_DATA_KEY]: t`Total`,
+    [IS_WATERFALL_TOTAL_DATA_KEY]: true,
   };
 
   return [...dataset, totalDatum];

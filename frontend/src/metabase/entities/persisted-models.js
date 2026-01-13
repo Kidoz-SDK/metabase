@@ -1,25 +1,39 @@
 import { createSelector } from "@reduxjs/toolkit";
 
-import { cardApi, persistApi } from "metabase/api";
+import {
+  cardApi,
+  persistApi,
+  skipToken,
+  useGetPersistedInfoByCardQuery,
+  useGetPersistedInfoQuery,
+  useListPersistedInfoQuery,
+} from "metabase/api";
 import { createEntity, entityCompatibleQuery } from "metabase/lib/entities";
 import { PersistedModelSchema } from "metabase/schema";
 
 const REFRESH_CACHE = "metabase/entities/persistedModels/REFRESH_CACHE";
 
 const getPersistedModelInfoByModelId = createSelector(
-  [state => state.entities.persistedModels, (state, props) => props.entityId],
+  [(state) => state.entities.persistedModels, (state, props) => props.entityId],
   (persistedModels, modelId) =>
-    Object.values(persistedModels).find(info => info.card_id === modelId),
+    Object.values(persistedModels).find((info) => info.card_id === modelId),
 );
 
 /**
  * @deprecated use "metabase/api" instead
  */
-const PersistedModels = createEntity({
+export const PersistedModels = createEntity({
   name: "persistedModels",
   nameOne: "persistedModel",
   path: "/api/persist",
   schema: PersistedModelSchema,
+
+  rtk: {
+    getUseGetQuery: () => ({
+      useGetQuery,
+    }),
+    useListQuery: useListPersistedInfoQuery,
+  },
 
   api: {
     get: ({ id, type }, options, dispatch) => {
@@ -53,7 +67,7 @@ const PersistedModels = createEntity({
   },
 
   objectActions: {
-    refreshCache: job => async dispatch => {
+    refreshCache: (job) => async (dispatch) => {
       await entityCompatibleQuery(
         job.card_id,
         dispatch,
@@ -84,4 +98,16 @@ const PersistedModels = createEntity({
   },
 });
 
-export default PersistedModels;
+const useGetQuery = ({ id, type }, options) => {
+  const persistedInfoByCard = useGetPersistedInfoByCardQuery(
+    type === "byModelId" ? id : skipToken,
+    options,
+  );
+
+  const persistedInfo = useGetPersistedInfoQuery(
+    type === "byModelId" ? skipToken : id,
+    options,
+  );
+
+  return type === "byModelId" ? persistedInfoByCard : persistedInfo;
+};

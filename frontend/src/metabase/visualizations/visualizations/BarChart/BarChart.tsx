@@ -5,19 +5,11 @@ import {
   getMinSize,
 } from "metabase/visualizations/shared/utils/sizes";
 import { CartesianChart } from "metabase/visualizations/visualizations/CartesianChart";
-import { getCartesianChartDefinition } from "metabase/visualizations/visualizations/CartesianChart/chart-definition";
-
-import { GRAPH_GOAL_SETTINGS } from "../../lib/settings/goal";
 import {
-  GRAPH_DATA_SETTINGS,
-  GRAPH_TREND_SETTINGS,
-  GRAPH_COLORS_SETTINGS,
-  GRAPH_AXIS_SETTINGS,
-  GRAPH_DISPLAY_VALUES_SETTINGS,
-  STACKABLE_SETTINGS,
-  TOOLTIP_SETTINGS,
-  LEGEND_SETTINGS,
-} from "../../lib/settings/graph";
+  COMBO_CHARTS_SETTINGS_DEFINITIONS,
+  getCartesianChartDefinition,
+} from "metabase/visualizations/visualizations/CartesianChart/chart-definition";
+
 import type {
   VisualizationProps,
   VisualizationSettingsDefinitions,
@@ -26,22 +18,15 @@ import type {
 Object.assign(
   BarChart,
   getCartesianChartDefinition({
-    uiName: t`Bar`,
+    getUiName: () => t`Bar`,
     identifier: "bar",
     iconName: "bar",
+    // eslint-disable-next-line ttag/no-module-declaration -- see metabase#55045
     noun: t`bar chart`,
     minSize: getMinSize("bar"),
     defaultSize: getDefaultSize("bar"),
     settings: {
-      ...STACKABLE_SETTINGS,
-      ...GRAPH_GOAL_SETTINGS,
-      ...GRAPH_TREND_SETTINGS,
-      ...GRAPH_COLORS_SETTINGS,
-      ...GRAPH_AXIS_SETTINGS,
-      ...GRAPH_DISPLAY_VALUES_SETTINGS,
-      ...GRAPH_DATA_SETTINGS,
-      ...TOOLTIP_SETTINGS,
-      ...LEGEND_SETTINGS,
+      ...COMBO_CHARTS_SETTINGS_DEFINITIONS,
     } as any as VisualizationSettingsDefinitions,
   }),
 );

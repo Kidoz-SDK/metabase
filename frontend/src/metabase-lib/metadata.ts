@@ -1,10 +1,11 @@
 import * as ML from "cljs/metabase.lib.js";
-import * as ML_MetadataCalculation from "cljs/metabase.lib.metadata.calculation";
 import type {
+  Field as ApiField,
   CardId,
   CardType,
   DatabaseId,
   DatasetColumn,
+  FieldId,
   TableId,
 } from "metabase-types/api";
 
@@ -32,21 +33,21 @@ import type {
   DrillThruDisplayInfo,
   FilterOperator,
   FilterOperatorDisplayInfo,
-  JoinConditionOperator,
-  JoinConditionOperatorDisplayInfo,
   JoinStrategy,
   JoinStrategyDisplayInfo,
+  MeasureDisplayInfo,
+  MeasureMetadata,
+  MetadataProvider,
   MetricDisplayInfo,
   MetricMetadata,
-  MetadataProvider,
   OrderByClause,
   OrderByClauseDisplayInfo,
   Query,
-  SegmentMetadata,
+  QueryDisplayInfo,
   SegmentDisplayInfo,
+  SegmentMetadata,
   TableDisplayInfo,
   TableMetadata,
-  QueryDisplayInfo,
 } from "./types";
 import type Field from "./v1/metadata/Field";
 import type Metadata from "./v1/metadata/Metadata";
@@ -56,13 +57,6 @@ export function metadataProvider(
   metadata: Metadata,
 ): MetadataProvider {
   return ML.metadataProvider(databaseId, metadata);
-}
-
-/**
- * @deprecated use displayInfo instead
- */
-export function displayName(query: Query, clause: Clause): string {
-  return ML_MetadataCalculation.display_name(query, clause);
 }
 
 declare function DisplayInfoFn(
@@ -128,13 +122,13 @@ declare function DisplayInfoFn(
 declare function DisplayInfoFn(
   query: Query,
   stageIndex: number,
-  joinStrategy: JoinStrategy,
-): JoinStrategyDisplayInfo;
+  measure: MeasureMetadata,
+): MeasureDisplayInfo;
 declare function DisplayInfoFn(
   query: Query,
   stageIndex: number,
-  joinConditionOperator: JoinConditionOperator,
-): JoinConditionOperatorDisplayInfo;
+  joinStrategy: JoinStrategy,
+): JoinStrategyDisplayInfo;
 declare function DisplayInfoFn(
   query: Query,
   stageIndex: number,
@@ -180,8 +174,15 @@ export function describeTemporalUnit(
 export function tableOrCardMetadata(
   queryOrMetadataProvider: Query | MetadataProvider,
   tableID: TableId,
-): CardMetadata | TableMetadata {
+): CardMetadata | TableMetadata | null {
   return ML.table_or_card_metadata(queryOrMetadataProvider, tableID);
+}
+
+export function fieldMetadata(
+  queryOrMetadataProvider: Query | MetadataProvider,
+  fieldID: FieldId,
+): ColumnMetadata | null {
+  return ML.field_metadata(queryOrMetadataProvider, fieldID);
 }
 
 export function visibleColumns(
@@ -201,7 +202,7 @@ export function returnedColumns(
 export function fromLegacyColumn(
   query: Query,
   stageIndex: number,
-  columnOrField: DatasetColumn | Field,
+  columnOrField: DatasetColumn | Field | ApiField,
 ): ColumnMetadata {
   return ML.legacy_column__GT_metadata(query, stageIndex, columnOrField);
 }
@@ -230,4 +231,24 @@ export function tableOrCardDependentMetadata(
   tableId: TableId,
 ): DependentItem[] {
   return ML.table_or_card_dependent_metadata(metadataProvider, tableId);
+}
+
+export function columnKey(column: ColumnMetadata): string {
+  return ML.column_key(column);
+}
+
+export function columnUniqueKey(column: ColumnMetadata): string {
+  return ML.column_unique_key(column);
+}
+
+export function isColumnMetadata(arg: unknown): arg is ColumnMetadata {
+  return ML.column_metadata_QMARK_(arg);
+}
+
+export function isMetricMetadata(arg: unknown): arg is MetricMetadata {
+  return ML.metric_metadata_QMARK_(arg);
+}
+
+export function isSegmentMetadata(arg: unknown): arg is SegmentMetadata {
+  return ML.segment_metadata_QMARK_(arg);
 }

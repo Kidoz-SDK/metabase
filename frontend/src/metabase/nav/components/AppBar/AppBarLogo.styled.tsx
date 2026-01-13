@@ -1,9 +1,18 @@
+// eslint-disable-next-line no-restricted-imports
 import { css } from "@emotion/react";
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
 
-import Link from "metabase/core/components/Link";
+import Link from "metabase/common/components/Link";
+import { doNotForwardProps } from "metabase/common/utils/doNotForwardProps";
 
-export const LogoLink = styled(Link)<{ isSmallAppBar: boolean }>`
+export const LogoLink = styled(
+  Link,
+  doNotForwardProps("isSmallAppBar", "isGitSyncVisible"),
+)<{
+  isSmallAppBar: boolean;
+  isGitSyncVisible: boolean;
+}>`
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -14,9 +23,9 @@ export const LogoLink = styled(Link)<{ isSmallAppBar: boolean }>`
   max-width: 14rem;
   line-height: 0;
   opacity: 1;
-  ${props =>
+  ${(props) =>
     !props.isSmallAppBar &&
     css`
-      margin-inline-end: 2rem;
+      margin-inline-end: ${props.isGitSyncVisible ? "1rem" : "2rem"};
     `}
 `;

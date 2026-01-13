@@ -7,6 +7,7 @@ import {
   setupUsersEndpoints,
 } from "__support__/server-mocks";
 import { getIcon, renderWithProviders, screen } from "__support__/ui";
+import { modelToUrl } from "metabase/lib/urls";
 import { SearchResult } from "metabase/search/components/SearchResult/SearchResult";
 import { createWrappedSearchResult } from "metabase/search/components/SearchResult/tests/util";
 import type { WrappedResult } from "metabase/search/types";
@@ -22,7 +23,6 @@ const TEST_RESULT_QUESTION = createWrappedSearchResult({
   name: "My Item",
   model: "card",
   description: "My Item Description",
-  getIcon: () => ({ name: "table" }),
 });
 
 const TEST_RESULT_COLLECTION = createWrappedSearchResult({
@@ -47,7 +47,10 @@ const setup = ({ result }: { result: WrappedResult }) => {
   setupUserRecipientsEndpoint({ users: [USER] });
 
   const { history } = renderWithProviders(
-    <Route path="*" component={() => <SearchResult result={result} />} />,
+    <Route
+      path="*"
+      component={() => <SearchResult result={result} index={0} />}
+    />,
     {
       withRouter: true,
       initialRoute: "/",
@@ -65,7 +68,7 @@ describe("SearchResult", () => {
     expect(
       screen.getByText(TEST_RESULT_QUESTION.description as string),
     ).toBeInTheDocument();
-    expect(getIcon("table")).toBeInTheDocument();
+    expect(getIcon("table2")).toBeInTheDocument();
   });
 
   it("renders a search result collection item", () => {
@@ -84,7 +87,7 @@ describe("SearchResult", () => {
 
     await userEvent.click(screen.getByText(TEST_RESULT_QUESTION.name));
 
-    const expectedPath = TEST_RESULT_QUESTION.getUrl();
+    const expectedPath = modelToUrl(TEST_RESULT_QUESTION);
 
     expect(history?.getCurrentLocation().pathname).toEqual(expectedPath);
   });

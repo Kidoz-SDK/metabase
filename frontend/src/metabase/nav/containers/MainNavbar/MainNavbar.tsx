@@ -1,26 +1,32 @@
 import type { LocationDescriptor } from "history";
 import { useEffect, useMemo } from "react";
-import { connect } from "react-redux";
 import { push } from "react-router-redux";
 import _ from "underscore";
 
-import { useQuestionQuery } from "metabase/common/hooks";
+import {
+  skipToken,
+  useGetCardQuery,
+  useGetCollectionQuery,
+} from "metabase/api";
 import { getDashboard } from "metabase/dashboard/selectors";
+import { connect } from "metabase/lib/redux";
 import * as Urls from "metabase/lib/urls";
 import { closeNavbar, openNavbar } from "metabase/redux/app";
-import type Question from "metabase-lib/v1/Question";
-import type { Dashboard } from "metabase-types/api";
+import Question from "metabase-lib/v1/Question";
+import type { CollectionId, Dashboard } from "metabase-types/api";
 import type { State } from "metabase-types/store";
 
 import { NavRoot, Sidebar } from "./MainNavbar.styled";
 import MainNavbarContainer from "./MainNavbarContainer";
 import getSelectedItems, {
+  isCollectionPath,
+  isMetricPath,
   isModelPath,
   isQuestionPath,
 } from "./getSelectedItems";
 import type {
-  MainNavbarOwnProps,
   MainNavbarDispatchProps,
+  MainNavbarOwnProps,
   SelectedItem,
 } from "./types";
 
@@ -31,6 +37,7 @@ interface EntityLoaderProps {
 interface StateProps {
   dashboard?: Dashboard;
   questionId?: number;
+  collectionId?: CollectionId;
 }
 
 interface DispatchProps extends MainNavbarDispatchProps {
@@ -50,6 +57,7 @@ function mapStateToProps(state: State, props: MainNavbarOwnProps) {
     dashboard: getDashboard(state),
 
     questionId: maybeGetQuestionId(state, props),
+    collectionId: maybeGetCollectionId(state, props),
   };
 }
 
@@ -64,15 +72,24 @@ function MainNavbar({
   location,
   params,
   questionId,
+  collectionId,
   dashboard,
   openNavbar,
   closeNavbar,
   onChangeLocation,
   ...props
 }: Props) {
-  const { data: question } = useQuestionQuery({
-    id: questionId,
-  });
+  const { currentData: card } = useGetCardQuery(
+    questionId
+      ? {
+          id: questionId,
+        }
+      : skipToken,
+  );
+
+  const { currentData: collection } = useGetCollectionQuery(
+    collectionId ? { id: collectionId } : skipToken,
+  );
 
   useEffect(() => {
     function handleSidebarKeyboardShortcut(e: KeyboardEvent) {
@@ -91,20 +108,22 @@ function MainNavbar({
     };
   }, [isOpen, openNavbar, closeNavbar]);
 
-  const selectedItems = useMemo<SelectedItem[]>(
-    () =>
-      getSelectedItems({
-        pathname: location.pathname,
-        params,
-        question,
-        dashboard,
-      }),
-    [location, params, question, dashboard],
-  );
+  const selectedItems = useMemo<SelectedItem[]>(() => {
+    const question = card && new Question(card);
+
+    return getSelectedItems({
+      pathname: location.pathname,
+      params,
+      question,
+      collection,
+      dashboard,
+    });
+  }, [location, params, card, dashboard, collection]);
 
   return (
     <Sidebar
       isOpen={isOpen}
+      side="left"
       aria-hidden={!isOpen}
       data-testid="main-navbar-root"
       data-element-id="navbar-root"
@@ -130,11 +149,29 @@ function maybeGetQuestionId(
   { location, params }: MainNavbarOwnProps,
 ) {
   const { pathname } = location;
-  const canFetchQuestion = isQuestionPath(pathname) || isModelPath(pathname);
+  const canFetchQuestion =
+    isQuestionPath(pathname) || isModelPath(pathname) || isMetricPath(pathname);
+  return canFetchQuestion ? Urls.extractEntityId(params.slug) : null;
+}
+
+function maybeGetCollectionId(
+  state: State,
+  { location, params }: MainNavbarOwnProps,
+) {
+  const { pathname } = location;
+  const canFetchQuestion = isCollectionPath(pathname);
   return canFetchQuestion ? Urls.extractEntityId(params.slug) : null;
 }
 
 // eslint-disable-next-line import/no-default-export -- deprecated usage
 export default _.compose(connect(mapStateToProps, mapDispatchToProps))(
-  MainNavbar,
+  /**
+   * Previously the `_.compose` type was broken, so it wasn't checking for type compatibility, and would
+   * return the composed function type as `any`. Now that it works better, legit errors are surfacing.
+   * But I don't have time, or enough context to fix this one.
+   *
+   * It seems the error came from the mismatch of the `dashboard` type, where the component expects
+   * a dashboard response, but the injected prop is from the redux store which has a different type.
+   */
+  MainNavbar as any,
 );

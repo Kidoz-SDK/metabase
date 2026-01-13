@@ -1,3 +1,4 @@
+#_{:clj-kondo/ignore [:metabase/namespace-name]}
 (ns metabase.test-runner
   "The only purpose of this namespace is to make sure all of the other stuff below gets loaded."
   (:require
@@ -7,12 +8,16 @@
    [clojure.string :as str]
    [humane-are.core :as humane-are]
    [mb.hawk.core :as hawk]
-   [metabase.bootstrap]
-   [metabase.config :as config]
+   [metabase.config.core :as config]
+   [metabase.core.bootstrap]
    [metabase.test-runner.assert-exprs]
    [metabase.test.data.env :as tx.env]
+   [metabase.test.fixtures :as fixtures]
+   [metabase.test.initialize :as initialize]
+   [metabase.util :as u]
    [metabase.util.date-2]
    [metabase.util.i18n.impl]
+   [metabase.util.log :as log]
    [pjstadig.humane-test-output :as humane-test-output]))
 
 (set! *warn-on-reflection* true)
@@ -20,7 +25,7 @@
 ;;; TODO -- consider whether we should just mode all of this stuff to [[user]] instead of doing it here
 
 (comment
-  metabase.bootstrap/keep-me
+  metabase.core.bootstrap/keep-me
   ;; make sure stuff like `=?` and what not are loaded
   metabase.test-runner.assert-exprs/keep-me
 
@@ -70,7 +75,8 @@
     (hawk/find-tests directories options)))
 
 (def ^:private excluded-directories
-  ["classes"
+  [".clj-kondo/src"
+   "classes"
    "dev"
    "enterprise/backend/src"
    "local"
@@ -82,22 +88,32 @@
    "test_resources"])
 
 (defn- default-options []
-  {:namespace-pattern   #"^metabase.*"
+  {:namespace-pattern   #"^(?:(?:metabase.*)|(?:hooks\..*))" ; anything starting with `metabase*` (including `metabase-enterprise`) or `hooks.*`
    :exclude-directories excluded-directories
    :test-warn-time      3000})
 
 (defn find-tests
   "Find all tests, in case you wish to run them yourself."
-  ([] (find-tests {}))
+  ([]
+   (find-tests {}))
   ([options]
-   (hawk/find-tests nil (merge (default-options) options))))
+   (hawk/find-tests-with-options (merge (default-options) options))))
+
+(defn- initialize-all-fixtures []
+  (let [steps (initialize/all-components)]
+    (u/with-timer-ms [duration-ms]
+      (doseq [init-step steps]
+        (fixtures/initialize init-step))
+      (log/info (str "Initialized " (count steps) " fixtures in " (duration-ms) "ms")))))
 
 (defn find-and-run-tests-repl
   "Find and run tests from the REPL."
   [options]
+  (initialize-all-fixtures)
   (hawk/find-and-run-tests-repl (merge (default-options) options)))
 
 (defn find-and-run-tests-cli
   "Entrypoint for `clojure -X:test`."
   [options]
+  (initialize-all-fixtures)
   (hawk/find-and-run-tests-cli (merge (default-options) options)))

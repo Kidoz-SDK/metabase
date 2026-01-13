@@ -7,11 +7,11 @@ import { TooltipRow, TooltipTotalRow } from "../TooltipRow";
 
 import {
   DataPointHeader,
-  DataPointTableHeader,
   DataPointRoot,
-  DataPointTableBody,
   DataPointTable,
+  DataPointTableBody,
   DataPointTableFooter,
+  DataPointTableHeader,
 } from "./StackedDataTooltip.styled";
 import {
   getPercent,
@@ -47,7 +47,7 @@ const StackedDataTooltip = ({
     sortedHeaderRows.length + sortedBodyRows.length > 1;
   const hasColorIndicators = useMemo(
     () =>
-      [...sortedBodyRows, ...sortedHeaderRows].some(row => row.color != null),
+      [...sortedBodyRows, ...sortedHeaderRows].some((row) => row.color != null),
     [sortedHeaderRows, sortedBodyRows],
   );
 

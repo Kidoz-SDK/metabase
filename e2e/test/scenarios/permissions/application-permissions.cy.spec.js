@@ -1,21 +1,9 @@
+const { H } = cy;
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import {
-  ORDERS_QUESTION_ID,
   ORDERS_DASHBOARD_ID,
+  ORDERS_QUESTION_ID,
 } from "e2e/support/cypress_sample_instance_data";
-import {
-  restore,
-  modal,
-  describeEE,
-  modifyPermission,
-  visitQuestion,
-  visitDashboard,
-  setTokenFeatures,
-  setupSMTP,
-  sidebar,
-  popover,
-  undoToast,
-} from "e2e/support/helpers";
 
 const { ORDERS_ID } = SAMPLE_DATABASE;
 
@@ -25,11 +13,11 @@ const SUBSCRIPTIONS_INDEX = 2;
 
 const NORMAL_USER_ID = 2;
 
-describeEE("scenarios > admin > permissions > application", () => {
+describe("scenarios > admin > permissions > application", () => {
   beforeEach(() => {
-    restore();
+    H.restore();
     cy.signInAsAdmin();
-    setTokenFeatures("all");
+    H.activateToken("pro-self-hosted");
   });
 
   it("shows permissions help", () => {
@@ -54,11 +42,11 @@ describeEE("scenarios > admin > permissions > application", () => {
       beforeEach(() => {
         cy.visit("/admin/permissions/application");
 
-        modifyPermission("All Users", SUBSCRIPTIONS_INDEX, "No");
+        H.modifyPermission("All Users", SUBSCRIPTIONS_INDEX, "No");
 
         cy.button("Save changes").click();
 
-        modal().within(() => {
+        H.modal().within(() => {
           cy.findByText("Save permissions?");
           cy.findByText("Are you sure you want to do this?");
           cy.button("Yes").click();
@@ -70,11 +58,16 @@ describeEE("scenarios > admin > permissions > application", () => {
       });
 
       it("revokes ability to create subscriptions and alerts and manage them", () => {
-        visitDashboard(ORDERS_DASHBOARD_ID);
-        cy.icon("subscription").should("not.exist");
+        H.visitDashboard(ORDERS_DASHBOARD_ID);
 
-        visitQuestion(ORDERS_QUESTION_ID);
-        cy.icon("bell").should("not.exist");
+        H.openSharingMenu();
+        H.sharingMenu()
+          .findByText(/subscri/i)
+          .should("not.exist");
+
+        H.visitQuestion(ORDERS_QUESTION_ID);
+        H.tableInteractive().should("be.visible");
+        H.sharingMenuButton().should("be.disabled");
 
         cy.visit("/account/notifications");
         cy.findByTestId("notifications-list").within(() => {
@@ -84,23 +77,20 @@ describeEE("scenarios > admin > permissions > application", () => {
     });
 
     describe("granted", () => {
-      it("gives ability to create dashboard subscriptions", () => {
-        setupSMTP();
+      it("gives ability to create dashboard subscriptions and question alerts", () => {
+        H.setupSMTP();
         cy.signInAsNormalUser();
-        visitDashboard(ORDERS_DASHBOARD_ID);
-        cy.findByLabelText("subscriptions").click();
 
-        sidebar().findByText("Email this dashboard").should("exist");
-      });
+        cy.log("Set up a dashboard subscription");
+        H.visitDashboard(ORDERS_DASHBOARD_ID);
+        H.openSharingMenu(/subscriptions/i);
+        H.sidebar().findByText("Email this dashboard").should("exist");
 
-      it("gives ability to create question alerts", () => {
-        cy.signInAsNormalUser();
-        visitQuestion(ORDERS_QUESTION_ID);
-        cy.icon("bell").click();
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText(
-          "To send alerts, an admin needs to set up email integration.",
-        );
+        cy.log("Create a question alert");
+        H.visitQuestion(ORDERS_QUESTION_ID);
+        cy.findByLabelText("Move, trash, and more…").click();
+        H.popover().findByText("Create an alert").click();
+        H.modal().findByText("New alert").should("be.visible");
       });
     });
   });
@@ -110,17 +100,17 @@ describeEE("scenarios > admin > permissions > application", () => {
       beforeEach(() => {
         cy.visit("/admin/permissions/application");
 
-        modifyPermission("All Users", MONITORING_INDEX, "Yes");
+        H.modifyPermission("All Users", MONITORING_INDEX, "Yes");
 
         cy.button("Save changes").click();
 
-        modal().within(() => {
+        H.modal().within(() => {
           cy.findByText("Save permissions?");
           cy.findByText("Are you sure you want to do this?");
           cy.button("Yes").click();
         });
 
-        cy.createNativeQuestion(
+        H.createNativeQuestion(
           {
             name: "broken_question",
             native: { query: "select * from broken_question" },
@@ -131,46 +121,41 @@ describeEE("scenarios > admin > permissions > application", () => {
         cy.signInAsNormalUser();
       });
 
-      it("allows accessing tools and troubleshooting for non-admins", () => {
+      it("allows accessing tools for non-admins", () => {
         cy.visit("/");
         cy.icon("gear").click();
 
-        popover().findByText("Admin settings").click();
+        H.popover().findByText("Admin settings").click();
 
         cy.log("Tools smoke test");
-        cy.location("pathname").should("eq", "/admin/tools/errors");
+        cy.location("pathname").should("eq", "/admin/tools/help");
         cy.findByRole("heading", {
-          name: "Questions that errored when last run",
+          name: "Help",
         });
-        cy.findAllByRole("cell").should("contain", "broken_question");
 
-        cy.log("Troubleshooting smoke test");
-        cy.findByRole("navigation")
-          .findByRole("link", { name: "Troubleshooting" })
+        cy.findByTestId("admin-layout-sidebar")
+          .findByText("Erroring questions")
           .click();
-        cy.location("pathname").should("eq", "/admin/troubleshooting/help");
-        cy.get("main")
-          .should("contain", "Help")
-          .and("contain", "Diagnostic Info");
+        cy.location("pathname").should("eq", "/admin/tools/errors");
+        cy.findByTestId("admin-layout-content").findByText(
+          "Questions that errored when last run",
+        );
       });
     });
 
     describe("revoked", () => {
-      it("does not allow accessing tools, and troubleshooting for non-admins", () => {
+      it("does not allow accessing admin tools for non-admins", () => {
         cy.signInAsNormalUser();
         cy.visit("/");
         cy.icon("gear").click();
 
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("Admin settings").should("not.exist");
+        H.popover().findByText("Admin settings").should("not.exist");
 
         cy.visit("/admin/tools/errors");
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("Sorry, you don’t have permission to see that.");
+        H.main().findByText("Sorry, you don’t have permission to see that.");
 
-        cy.visit("/admin/troubleshooting/help");
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("Sorry, you don’t have permission to see that.");
+        cy.visit("/admin/tools/help");
+        H.main().findByText("Sorry, you don’t have permission to see that.");
       });
     });
   });
@@ -180,11 +165,11 @@ describeEE("scenarios > admin > permissions > application", () => {
       beforeEach(() => {
         cy.visit("/admin/permissions/application");
 
-        modifyPermission("All Users", SETTINGS_INDEX, "Yes");
+        H.modifyPermission("All Users", SETTINGS_INDEX, "Yes");
 
         cy.button("Save changes").click();
 
-        modal().within(() => {
+        H.modal().within(() => {
           cy.findByText("Save permissions?");
           cy.findByText("Are you sure you want to do this?");
           cy.button("Yes").click();
@@ -194,32 +179,29 @@ describeEE("scenarios > admin > permissions > application", () => {
       });
 
       it("allows editing settings as a non-admin user", () => {
-        cy.visit("/");
-        cy.icon("gear").click();
-
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("Admin settings").click();
-
+        cy.visit("/admin/settings");
         cy.url().should("include", "/admin/settings/general");
 
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("License and Billing").should("not.exist");
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("Setup").should("not.exist");
-        // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-        cy.findByText("Updates").should("not.exist");
+        cy.findByTestId("admin-layout-content").within(() => {
+          cy.findByText("License and Billing").should("not.exist");
+          cy.findByLabelText("Updates").should("not.exist");
+          cy.findByLabelText("Site name")
+            .should("be.visible")
+            .clear()
+            .type("NewName")
+            .blur();
+        });
 
-        // General smoke test
-        cy.get("#setting-site-name").clear().type("new name").blur();
-
-        undoToast().findByText("Changes saved").should("be.visible");
+        H.undoToast()
+          .findByText(/changes saved/i)
+          .should("be.visible");
       });
     });
   });
 });
 
 function createSubscription(user_id) {
-  cy.createQuestionAndDashboard({
+  H.createQuestionAndDashboard({
     questionDetails: {
       name: "Test Question",
       query: {
@@ -227,7 +209,7 @@ function createSubscription(user_id) {
       },
     },
   }).then(({ body: { card_id, dashboard_id } }) => {
-    cy.createPulse({
+    H.createPulse({
       name: "Subscription",
       dashboard_id,
       cards: [

@@ -5,9 +5,9 @@ import { Route } from "react-router";
 
 import {
   setupDatabaseEndpoints,
-  setupUserAttributesEndpoint,
   setupExistingImpersonationEndpoint,
   setupMissingImpersonationEndpoint,
+  setupUserAttributesEndpoint,
 } from "__support__/server-mocks";
 import {
   renderWithProviders,
@@ -20,8 +20,11 @@ import { advancedPermissionsSlice } from "metabase-enterprise/advanced_permissio
 import { getImpersonations } from "metabase-enterprise/advanced_permissions/selectors";
 import type { AdvancedPermissionsStoreState } from "metabase-enterprise/advanced_permissions/types";
 import { shared } from "metabase-enterprise/shared/reducer";
-import { createMockDatabase, createMockTable } from "metabase-types/api/mocks";
-import { createMockImpersonation } from "metabase-types/api/mocks/permissions";
+import {
+  createMockDatabase,
+  createMockImpersonation,
+  createMockTable,
+} from "metabase-types/api/mocks";
 
 const groupId = 2;
 const databaseId = 1;
@@ -39,13 +42,11 @@ const setup = async ({
     ...databaseDetails,
   });
   setupDatabaseEndpoints(database);
-  fetchMock.get(
-    {
-      url: `path:/api/database/${databaseId}/metadata`,
-      query: { include_hidden: true },
-    },
-    database,
-  );
+  fetchMock.get({
+    url: `path:/api/database/${databaseId}/metadata`,
+    query: { include_hidden: true },
+    response: database,
+  });
   setupUserAttributesEndpoint(userAttributes);
 
   if (hasImpersonation) {
@@ -113,7 +114,7 @@ describe("impersonation modal", () => {
 
     expect(
       await screen.findByRole("link", { name: /edit settings/i }),
-    ).toHaveAttribute("href", "/admin/databases/1");
+    ).toHaveAttribute("href", "/admin/databases/1/edit");
   });
 
   it("should refer to 'users' instead of 'roles' for redshift impersonation", async () => {
@@ -144,7 +145,9 @@ describe("impersonation modal", () => {
   it("should create impersonation", async () => {
     const store = await setup({ hasImpersonation: false });
 
-    await userEvent.click(await screen.findByText(/pick a user attribute/i));
+    await userEvent.click(
+      await screen.findByPlaceholderText("Pick a user attribute"),
+    );
     await userEvent.click(await screen.findByText("foo"));
 
     expect(await screen.findByRole("button", { name: /save/i })).toBeEnabled();
@@ -166,7 +169,9 @@ describe("impersonation modal", () => {
   it("should update impersonation", async () => {
     const store = await setup();
 
-    await userEvent.click(await screen.findByText(selectedAttribute));
+    await userEvent.click(
+      await screen.findByPlaceholderText("Pick a user attribute"),
+    );
     await userEvent.click(await screen.findByText("bar"));
 
     expect(await screen.findByRole("button", { name: /save/i })).toBeEnabled();
@@ -188,7 +193,9 @@ describe("impersonation modal", () => {
   it("should show only already selected attribute if attributes array is empty", async () => {
     await setup({ hasImpersonation: true, userAttributes: [] });
 
-    await screen.findByText(selectedAttribute);
+    await expect(
+      screen.getByPlaceholderText("Pick a user attribute"),
+    ).toHaveValue(selectedAttribute);
     expect(await screen.findByRole("button", { name: /save/i })).toBeEnabled();
   });
 

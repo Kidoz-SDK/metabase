@@ -10,6 +10,8 @@
    [metabase.util.malli.registry :as mr]
    [metabase.util.malli.schema :as ms]))
 
+(set! *warn-on-reflection* true)
+
 (def ParentID
   "Schema for the `parent-id` of a Field, i.e. an optional ID."
   [:maybe ::lib.schema.id/field])
@@ -58,17 +60,23 @@
        (or (:semantic-type field-metadata)
            (when (:pk? field-metadata) :type/PK))))
 
+(defn- canonical-names-equal?
+  "Check if 'canonical' names of two fields are equal, ignoring case differences."
+  [field-metadata1 field-metadata2]
+  (let [^String name1 (:name field-metadata1)
+        ^String name2 (:name field-metadata2)]
+    (and name1 name2 (.equalsIgnoreCase name1 name2))))
+
 (mu/defn matching-field-metadata :- [:maybe TableMetadataFieldWithOptionalID]
   "Find Metadata that matches `field-metadata` from a set of `other-metadata`, if any exists. Useful for finding the
   corresponding Metabase Field for field metadata from the DB, or vice versa. Will prefer exact matches."
   [field-metadata :- TableMetadataFieldWithOptionalID
    other-metadata :- [:set TableMetadataFieldWithOptionalID]]
-  (let [matches (keep
-                  (fn [other-field-metadata]
-                    (when (= (canonical-name field-metadata)
-                             (canonical-name other-field-metadata))
-                      other-field-metadata))
-                  other-metadata)]
+  (let [matches (into [] (keep
+                          (fn [other-field-metadata]
+                            (when (canonical-names-equal? field-metadata other-field-metadata)
+                              other-field-metadata)))
+                      other-metadata)]
     (case (count matches)
       0
       nil

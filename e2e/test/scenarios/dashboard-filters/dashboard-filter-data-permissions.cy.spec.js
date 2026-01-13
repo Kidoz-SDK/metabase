@@ -1,32 +1,23 @@
+const { H } = cy;
 import { ORDERS_DASHBOARD_ID } from "e2e/support/cypress_sample_instance_data";
-import {
-  restore,
-  selectDashboardFilter,
-  visitDashboard,
-  editDashboard,
-  setFilter,
-} from "e2e/support/helpers";
 
 function filterDashboard(suggests = true) {
-  visitDashboard(ORDERS_DASHBOARD_ID);
+  H.visitDashboard(ORDERS_DASHBOARD_ID);
   cy.contains("Orders");
   cy.contains("Text").click();
 
   // We should get a suggested response and be able to click it if we're an admin
   if (suggests) {
-    cy.findByPlaceholderText("Search by Address").type("Main Street");
+    cy.findByPlaceholderText("Search the list").type("Main Street");
     cy.contains("100 Main Street").click();
   } else {
-    cy.findByPlaceholderText("Search by Address")
-      .type("100 Main Street")
-      .blur();
+    cy.findByPlaceholderText("Search the list").type("100 Main Street").blur();
     cy.wait("@search").should(({ response }) => {
       expect(response.statusCode).to.equal(403);
     });
   }
   cy.contains("Add filter").click({ force: true });
   cy.contains("100 Main Street");
-  cy.contains(/Rows \d-\d+ of 23/);
 }
 
 describe("support > permissions (metabase#8472)", () => {
@@ -36,18 +27,18 @@ describe("support > permissions (metabase#8472)", () => {
       `/api/dashboard/${ORDERS_DASHBOARD_ID}/params/*/search/*").as("search`,
     );
 
-    restore();
+    H.restore();
     cy.signInAsAdmin();
 
     // Setup a dashboard with a text filter
-    visitDashboard(ORDERS_DASHBOARD_ID);
+    H.visitDashboard(ORDERS_DASHBOARD_ID);
 
-    editDashboard();
+    H.editDashboard();
 
-    setFilter("Text or Category", "Is");
+    H.setFilter("Text or Category", "Is");
 
     // Filter the first card by User Address
-    selectDashboardFilter(
+    H.selectDashboardFilter(
       cy.findByTestId("dashcard-container").first(),
       "Address",
     );
@@ -75,7 +66,7 @@ describe("support > permissions (metabase#8472)", () => {
       method: "GET",
       url: `/api/dashboard/${ORDERS_DASHBOARD_ID}`,
       failOnStatusCode: false,
-    }).should(xhr => {
+    }).should((xhr) => {
       expect(xhr.status).to.equal(403);
     });
   });

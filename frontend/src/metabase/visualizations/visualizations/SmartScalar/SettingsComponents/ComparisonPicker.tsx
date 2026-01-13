@@ -1,10 +1,13 @@
+import cx from "classnames";
 import type { MouseEvent } from "react";
 import { useCallback, useState } from "react";
 import { jt, t } from "ttag";
 import _ from "underscore";
 
-import IconButtonWrapper from "metabase/components/IconButtonWrapper";
-import { rem, Menu, Stack, Text } from "metabase/ui";
+import IconButtonWrapper from "metabase/common/components/IconButtonWrapper";
+import CS from "metabase/css/core/index.css";
+import { isEmbeddingSdk } from "metabase/embedding-sdk/config";
+import { Menu, Stack, Text, rem } from "metabase/ui";
 import type {
   DatasetColumn,
   SmartScalarComparison,
@@ -99,7 +102,7 @@ export function ComparisonPicker({
               : undefined
           }
           columns={comparableColumns}
-          onChange={nextValue => {
+          onChange={(nextValue) => {
             handleEditedValueChange(
               { id: selectedValue.id, ...nextValue },
               true,
@@ -117,7 +120,7 @@ export function ComparisonPicker({
               ? selectedValue
               : undefined
           }
-          onChange={nextValue => {
+          onChange={(nextValue) => {
             handleEditedValueChange(
               { id: selectedValue.id, ...nextValue },
               true,
@@ -128,8 +131,8 @@ export function ComparisonPicker({
       );
     }
     return (
-      <Stack spacing="sm">
-        {options.map(optionArgs =>
+      <Stack gap="sm">
+        {options.map((optionArgs) =>
           renderMenuOption({
             editedValue,
             selectedValue,
@@ -149,12 +152,16 @@ export function ComparisonPicker({
       position="bottom-start"
       shadow="sm"
       closeOnItemClick={false}
+      {...(isEmbeddingSdk() && {
+        withinPortal: false,
+        floatingStrategy: "fixed",
+      })}
     >
       <Menu.Target>
         <ComparisonPickerButton
           disabled={isDisabled}
-          leftIcon={isDraggable && <DragHandleIcon name="grabber" />}
-          rightIcon={
+          leftSection={isDraggable && <DragHandleIcon name="grabber" />}
+          rightSection={
             isRemovable && (
               <IconButtonWrapper
                 aria-label={t`Remove`}
@@ -173,11 +180,15 @@ export function ComparisonPicker({
           }}
         >
           <DisplayName value={editedValue} option={selectedOption} />
-          <ExpandIcon name="chevrondown" size={14} />
+          <ExpandIcon
+            className={cx(CS.inline, CS.verticalAlignMiddle)}
+            name="chevrondown"
+            size={14}
+          />
         </ComparisonPickerButton>
       </Menu.Target>
 
-      <Menu.Dropdown miw={rem(344)}>
+      <Menu.Dropdown miw={rem(344)} data-testid="comparison-picker-dropdown">
         {renderMenuDropdownContent()}
       </Menu.Dropdown>
     </Menu>

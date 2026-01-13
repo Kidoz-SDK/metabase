@@ -1,5 +1,6 @@
 import type {
   CollectionPermissions,
+  DatabaseId,
   GroupsPermissions,
   SettingDefinition,
 } from "metabase-types/api";
@@ -7,13 +8,17 @@ import type {
 export type AdminPathKey =
   | "data-model"
   | "settings"
+  | "embedding"
+  | "metabot"
   | "people"
   | "databases"
   | "permissions"
-  | "troubleshooting"
   | "audit"
   | "tools"
-  | "performance";
+  | "performance"
+  | "performance-models"
+  | "performance-dashboards-and-questions"
+  | "performance-databases";
 
 export type AdminPath = {
   key: AdminPathKey;
@@ -28,6 +33,8 @@ export interface AdminState {
     originalDataPermissions: GroupsPermissions;
     collectionPermissions: CollectionPermissions;
     originalCollectionPermissions: CollectionPermissions;
+    tenantCollectionPermissions: CollectionPermissions;
+    originalTenantCollectionPermissions: CollectionPermissions;
     saveError?: string;
     isHelpReferenceOpen: boolean;
     hasRevisionChanged: {
@@ -38,9 +45,12 @@ export interface AdminState {
   settings: {
     settings: SettingDefinition[];
   };
+  databases: {
+    deletionError: null | unknown;
+    deletes: DatabaseId[];
+  };
 }
 
 export interface AdminAppState {
-  isNoticeEnabled: boolean;
   paths: AdminPath[];
 }

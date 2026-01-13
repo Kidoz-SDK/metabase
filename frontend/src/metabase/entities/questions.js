@@ -1,12 +1,13 @@
 import { updateIn } from "icepick";
 import { t } from "ttag";
 
-import { cardApi } from "metabase/api";
+import { cardApi, useGetCardQuery, useListCardsQuery } from "metabase/api";
 import {
   canonicalCollectionId,
   isRootTrashCollection,
 } from "metabase/collections/utils";
-import Collections, {
+import {
+  Collections,
   getCollectionType,
   normalizedCollection,
 } from "metabase/entities/collections";
@@ -16,8 +17,6 @@ import {
   entityCompatibleQuery,
   undo,
 } from "metabase/lib/entities";
-import * as Urls from "metabase/lib/urls";
-import { PLUGIN_MODERATION } from "metabase/plugins";
 import {
   API_UPDATE_QUESTION,
   SOFT_RELOAD_CARD,
@@ -27,13 +26,23 @@ import {
   getMetadataUnfiltered,
 } from "metabase/selectors/metadata";
 
+export const INJECT_RTK_QUERY_QUESTION_VALUE =
+  "metabase/entities/questions/FETCH_ADHOC_METADATA";
+
 /**
  * @deprecated use "metabase/api" instead
  */
-const Questions = createEntity({
+export const Questions = createEntity({
   name: "questions",
   nameOne: "question",
   path: "/api/card",
+
+  rtk: {
+    getUseGetQuery: () => ({
+      useGetQuery: useGetCardQuery,
+    }),
+    useListQuery: useListCardsQuery,
+  },
 
   api: {
     list: (entityQuery, dispatch) =>
@@ -44,18 +53,27 @@ const Questions = createEntity({
         dispatch,
         cardApi.endpoints.getCard,
       ),
-    create: (entityQuery, dispatch) =>
-      entityCompatibleQuery(
-        entityQuery,
+    create: (entityQuery, dispatch) => {
+      const { collection_id, dashboard_id, dashboard_tab_id, ...rest } =
+        entityQuery;
+
+      const destination = dashboard_id
+        ? { dashboard_id, dashboard_tab_id }
+        : { collection_id };
+
+      return entityCompatibleQuery(
+        { ...rest, ...destination },
         dispatch,
         cardApi.endpoints.createCard,
-      ),
-    update: (entityQuery, dispatch) =>
-      entityCompatibleQuery(
+      );
+    },
+    update: (entityQuery, dispatch) => {
+      return entityCompatibleQuery(
         entityQuery,
         dispatch,
         cardApi.endpoints.updateCard,
-      ),
+      );
+    },
     delete: ({ id }, dispatch) =>
       entityCompatibleQuery(id, dispatch, cardApi.endpoints.deleteCard),
   },
@@ -68,15 +86,31 @@ const Questions = createEntity({
         undo(opts, getLabel(card), archived ? t`trashed` : t`restored`),
       ),
 
-    setCollection: (card, collection, opts) => {
-      return async dispatch => {
+    // NOTE: standard questions (i.e. not models, metrics, etc.) can live in dashboards as well as collections.
+    // this function name is incorrect but maintained for consistency with other entities.
+    setCollection: (card, destination, opts) => {
+      return async (dispatch) => {
+        const archived =
+          destination.model === "collection" &&
+          isRootTrashCollection(destination);
+
+        const update =
+          destination.model === "dashboard"
+            ? {
+                dashboard_id: destination.id,
+                archived,
+                delete_old_dashcards: true,
+              }
+            : {
+                collection_id: canonicalCollectionId(destination.id),
+                dashboard_id: null,
+                archived,
+              };
+
         const result = await dispatch(
           Questions.actions.update(
             { id: card.id },
-            {
-              collection_id: canonicalCollectionId(collection && collection.id),
-              archived: isRootTrashCollection(collection),
-            },
+            update,
             undo(opts, getLabel(card), t`moved`),
           ),
         );
@@ -122,36 +156,42 @@ const Questions = createEntity({
     getListUnfiltered: (state, { entityQuery }) => {
       const entityIds =
         Questions.selectors.getEntityIds(state, { entityQuery }) ?? [];
-      return entityIds.map(entityId =>
+      return entityIds.map((entityId) =>
         Questions.selectors.getObjectUnfiltered(state, { entityId }),
       );
     },
   },
 
   objectSelectors: {
-    getName: card => card && card.name,
-    getUrl: (card, opts) => card && Urls.question(card, opts),
+    getName: (card) => card && card.name,
     getColor: () => color("text-medium"),
-    getCollection: card => card && normalizedCollection(card.collection),
-    getIcon,
+    getCollection: (card) => card && normalizedCollection(card.collection),
   },
 
   reducer: (state = {}, { type, payload, error }) => {
     if (type === SOFT_RELOAD_CARD) {
       const { id } = payload;
-      const latestReview = payload.moderation_reviews?.find(x => x.most_recent);
+      const latestReview = payload.moderation_reviews?.find(
+        (x) => x.most_recent,
+      );
 
       if (latestReview) {
-        return updateIn(state, [id], question => ({
+        return updateIn(state, [id], (question) => ({
           ...question,
           moderated_status: latestReview.status,
         }));
       }
     }
+
+    if (type === INJECT_RTK_QUERY_QUESTION_VALUE) {
+      const { id } = payload;
+
+      return updateIn(state, [id], (question) => ({ ...question, ...payload }));
+    }
     return state;
   },
 
-  // NOTE: keep in sync with src/metabase/api/card.clj
+  // NOTE: keep in sync with src/metabase/queries_rest/api/card.clj
   writableProperties: [
     "name",
     "cache_ttl",
@@ -166,9 +206,12 @@ const Questions = createEntity({
     "enable_embedding",
     "embedding_params",
     "collection_id",
+    "dashboard_id",
+    "dashboard_tab_id",
     "collection_position",
     "collection_preview",
     "result_metadata",
+    "delete_old_dashcards",
   ],
 
   getAnalyticsMetadata([object], { action }, getState) {
@@ -188,32 +231,3 @@ function getLabel(card) {
 
   return t`question`;
 }
-
-export function getIcon(card) {
-  const type = PLUGIN_MODERATION.getQuestionIcon(card);
-
-  if (type) {
-    return {
-      name: type.icon,
-      color: type.color ? color(type.color) : undefined,
-      tooltip: type.tooltip,
-    };
-  }
-
-  if (card.type === "model" || card.model === "dataset") {
-    return { name: "model" };
-  }
-
-  if (card.type === "metric" || card.model === "metric") {
-    return { name: "metric" };
-  }
-
-  const visualization = require("metabase/visualizations").default.get(
-    card.display,
-  );
-  return {
-    name: visualization?.iconName ?? "beaker",
-  };
-}
-
-export default Questions;

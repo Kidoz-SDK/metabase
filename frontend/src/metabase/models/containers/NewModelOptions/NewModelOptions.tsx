@@ -1,19 +1,18 @@
 import cx from "classnames";
 import type { Location } from "history";
 import { t } from "ttag";
-import _ from "underscore";
 
-import { useListDatabasesQuery } from "metabase/api";
-import { Grid } from "metabase/components/Grid";
+import { Grid } from "metabase/common/components/Grid";
 import CS from "metabase/css/core/index.css";
-import Databases from "metabase/entities/databases";
 import { useSelector } from "metabase/lib/redux";
-import MetabaseSettings from "metabase/lib/settings";
 import * as Urls from "metabase/lib/urls";
 import NewModelOption from "metabase/models/components/NewModelOption";
 import { NoDatabasesEmptyState } from "metabase/reference/databases/NoDatabasesEmptyState";
-import { getHasDataAccess, getHasNativeWrite } from "metabase/selectors/data";
-import { getSetting } from "metabase/selectors/settings";
+import { getLearnUrl, getSetting } from "metabase/selectors/settings";
+import {
+  canUserCreateNativeQueries,
+  canUserCreateQueries,
+} from "metabase/selectors/user";
 import { getShowMetabaseLinks } from "metabase/selectors/whitelabel";
 
 import {
@@ -22,19 +21,17 @@ import {
   OptionsRoot,
 } from "./NewModelOptions.styled";
 
-const EDUCATIONAL_LINK = MetabaseSettings.learnUrl("data-modeling/models");
+const EDUCATIONAL_LINK = getLearnUrl("metabase-basics/getting-started/models");
 
 interface NewModelOptionsProps {
   location: Location;
 }
 
 const NewModelOptions = ({ location }: NewModelOptionsProps) => {
-  const { data } = useListDatabasesQuery();
-  const databases = data?.data ?? [];
-  const hasDataAccess = getHasDataAccess(databases);
-  const hasNativeWrite = getHasNativeWrite(databases);
+  const hasDataAccess = useSelector(canUserCreateQueries);
+  const hasNativeWrite = useSelector(canUserCreateNativeQueries);
 
-  const lastUsedDatabaseId = useSelector(state =>
+  const lastUsedDatabaseId = useSelector((state) =>
     getSetting(state, "last-used-native-database-id"),
   );
 
@@ -84,11 +81,11 @@ const NewModelOptions = ({ location }: NewModelOptionsProps) => {
               description={t`You can always fall back to a SQL or native query, which is a bit more manual.`}
               to={Urls.newQuestion({
                 mode: "query",
-                type: "native",
+                DEPRECATED_RAW_MBQL_type: "native",
                 creationType: "native_question",
                 cardType: "model",
                 collectionId,
-                databaseId: lastUsedDatabaseId || undefined,
+                DEPRECATED_RAW_MBQL_databaseId: lastUsedDatabaseId || undefined,
               })}
               width={180}
             />
@@ -109,8 +106,4 @@ const NewModelOptions = ({ location }: NewModelOptionsProps) => {
   );
 };
 // eslint-disable-next-line import/no-default-export -- deprecated usage
-export default _.compose(
-  Databases.loadList({
-    loadingAndErrorWrapper: false,
-  }),
-)(NewModelOptions);
+export default NewModelOptions;

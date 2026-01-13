@@ -1,17 +1,21 @@
-/* eslint-disable jest/expect-expect */
 import type { Store } from "@reduxjs/toolkit";
 import fetchMock from "fetch-mock";
 import { Route } from "react-router";
 
 import {
+  setupCollectionItemsEndpoint,
   setupCollectionsEndpoints,
   setupDatabasesEndpoints,
+  setupGdriveGetFolderEndpoint,
+  setupSearchEndpoints,
+  setupSettingEndpoint,
 } from "__support__/server-mocks";
 import {
   renderWithProviders,
   screen,
   waitForLoaderToBeRemoved,
 } from "__support__/ui";
+import { ROOT_COLLECTION } from "metabase/entities/collections";
 import * as dom from "metabase/lib/dom";
 import {
   CLOSE_NAVBAR,
@@ -19,10 +23,15 @@ import {
   isNavbarOpenForPathname,
 } from "metabase/redux/app";
 import type { User } from "metabase-types/api";
-import { createMockDatabase, createMockUser } from "metabase-types/api/mocks";
+import {
+  createMockCollection,
+  createMockDatabase,
+  createMockUser,
+} from "metabase-types/api/mocks";
 import type { State } from "metabase-types/store";
 import {
   createMockAppState,
+  createMockEmbedOptions,
   createMockEmbedState,
   createMockState,
 } from "metabase-types/store/mocks";
@@ -46,13 +55,26 @@ async function setup({
 }: SetupOpts = {}) {
   setupCollectionsEndpoints({ collections: [] });
   setupDatabasesEndpoints([createMockDatabase()]);
+  setupSearchEndpoints([]);
+  setupCollectionItemsEndpoint({
+    collection: createMockCollection(ROOT_COLLECTION),
+    collectionItems: [],
+  });
+  setupGdriveGetFolderEndpoint({ status: "active" });
   fetchMock.get("path:/api/bookmark", []);
+
+  setupSettingEndpoint({
+    settingKey: "version-info",
+    settingValue: {},
+  });
 
   const storeInitialState = createMockState({
     app: createMockAppState({
       isNavbarOpen: isOpen ?? isNavbarOpenForPathname(pathname, true),
     }),
-    embed: createMockEmbedState(embedOptions),
+    embed: createMockEmbedState({
+      options: createMockEmbedOptions(embedOptions),
+    }),
     currentUser: user,
   });
 
@@ -77,12 +99,12 @@ async function setup({
 describe("nav > containers > Navbar > Core App", () => {
   it("should be open when isOpen is true", async () => {
     await setup({ isOpen: true });
-    expectNavbarOpen();
+    await expectNavbarOpen();
   });
 
   it("should be hidden when isOpen is false", async () => {
     await setup({ isOpen: false });
-    expectNavbarClosed();
+    await expectNavbarClosed();
   });
 
   it("should not render when signed out", async () => {
@@ -95,47 +117,47 @@ describe("nav > containers > Navbar > Core App", () => {
     expect(screen.queryByTestId("main-navbar-root")).not.toBeInTheDocument();
   });
 
-  ["question", "model", "dashboard"].forEach(pathname => {
+  ["question/1", "model/1", "dashboard/1"].forEach((pathname) => {
     it(`should be hidden on initial load for a ${pathname}`, async () => {
-      await setup({ pathname: `/${pathname}/1` });
-      expectNavbarClosed();
+      await setup({ pathname: `/${pathname}` });
+      await expectNavbarClosed();
     });
   });
 
   it("should hide when visiting a question", async () => {
     const store = await setup({ pathname: "/" });
-    expectNavbarOpen();
+    await expectNavbarOpen();
     dispatchLocationChange({ store, pathname: "/question/1" });
-    expectNavbarClosed();
+    await expectNavbarClosed();
   });
 
   it("should hide when visiting a question and stay hidden when returning to collection", async () => {
     const store = await setup({ pathname: "/collection/1" });
-    expectNavbarOpen();
+    await expectNavbarOpen();
     dispatchLocationChange({ store, pathname: "/question/1" });
-    expectNavbarClosed();
+    await expectNavbarClosed();
     dispatchLocationChange({ store, pathname: "/collection/1" });
-    expectNavbarClosed();
+    await expectNavbarClosed();
   });
 
   it("should preserve state when navigating collections", async () => {
     const store = await setup({ pathname: "/collection/1" });
-    expectNavbarOpen();
+    await expectNavbarOpen();
     dispatchLocationChange({ store, pathname: "/collection/2" });
-    expectNavbarOpen();
+    await expectNavbarOpen();
     dispatchLocationChange({ store, pathname: "/question/1" });
-    expectNavbarClosed();
+    await expectNavbarClosed();
     dispatchLocationChange({ store, pathname: "/collection/3" });
-    expectNavbarClosed();
+    await expectNavbarClosed();
     dispatchLocationChange({ store, pathname: "/collection/4" });
-    expectNavbarClosed();
+    await expectNavbarClosed();
     store.dispatch({ type: OPEN_NAVBAR });
-    expectNavbarOpen();
+    await expectNavbarOpen();
     dispatchLocationChange({ store, pathname: "/collection/5" });
-    expectNavbarOpen();
+    await expectNavbarOpen();
     store.dispatch({ type: CLOSE_NAVBAR });
     dispatchLocationChange({ store, pathname: "/collection/6" });
-    expectNavbarClosed();
+    await expectNavbarClosed();
   });
 
   describe("embedded", () => {
@@ -154,73 +176,73 @@ describe("nav > containers > Navbar > Core App", () => {
     const normallyVisibleRoutes = ["/"];
     const allRoutes = [...normallyHiddenRoutes, ...normallyVisibleRoutes];
 
-    allRoutes.forEach(route => {
+    allRoutes.forEach((route) => {
       it(`should be visible when embedded and on ${route} top_nav=false&side_nav=true`, async () => {
         await setup({
           pathname: route,
           isOpen: false, // this should be ignored and overridden by the embedding params
           embedOptions: { top_nav: false, side_nav: true },
         });
-        expectNavbarOpen();
+        await expectNavbarOpen();
       });
     });
 
-    normallyVisibleRoutes.forEach(route => {
+    normallyVisibleRoutes.forEach((route) => {
       it(`should be visible when embedded and on ${route} top_nav=true&side_nav=true`, async () => {
         await setup({
           pathname: route,
           isOpen: true,
           embedOptions: { top_nav: true, side_nav: true },
         });
-        expectNavbarOpen();
+        await expectNavbarOpen();
       });
     });
 
-    normallyHiddenRoutes.forEach(route => {
+    normallyHiddenRoutes.forEach((route) => {
       it(`should not be visible when embedded and on ${route} top_nav=true&side_nav=true`, async () => {
         await setup({
           pathname: route,
           isOpen: false,
           embedOptions: { top_nav: true, side_nav: true },
         });
-        expectNavbarClosed();
+        await expectNavbarClosed();
       });
     });
 
-    normallyHiddenRoutes.forEach(route => {
+    normallyHiddenRoutes.forEach((route) => {
       it(`should not be visible when embedded and on ${route} top_nav=true&side_nav=true`, async () => {
         await setup({
           pathname: route,
           isOpen: false,
           embedOptions: { top_nav: true, side_nav: true },
         });
-        expectNavbarClosed();
+        await expectNavbarClosed();
       });
     });
 
     // the current state of App.tsx is such that this should never even happen because we don't even render the parent component
     // but this test will cover any future changes in the component tree
-    allRoutes.forEach(route => {
+    allRoutes.forEach((route) => {
       it(`should not be visible when embedded and on ${route} with side_nav=false`, async () => {
         await setup({
           pathname: route,
           isOpen: false,
           embedOptions: { side_nav: false },
         });
-        expectNavbarClosed();
+        await expectNavbarClosed();
       });
     });
   });
 });
 
-function expectNavbarOpen() {
-  const navbar = screen.getByTestId("main-navbar-root");
+async function expectNavbarOpen() {
+  const navbar = await screen.findByTestId("main-navbar-root");
   expect(navbar).toBeVisible();
   expect(navbar).toHaveAttribute("aria-hidden", "false");
 }
 
-function expectNavbarClosed() {
-  const navbar = screen.getByTestId("main-navbar-root");
+async function expectNavbarClosed() {
+  const navbar = await screen.findByTestId("main-navbar-root");
   expect(navbar).not.toBeVisible();
   expect(navbar).toHaveAttribute("aria-hidden", "true");
 }

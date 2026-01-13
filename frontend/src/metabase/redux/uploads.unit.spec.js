@@ -1,12 +1,17 @@
 import fetchMock from "fetch-mock";
 
+import { getStore } from "__support__/entities-store";
+import { Api } from "metabase/api";
+import { mainReducers } from "metabase/reducers-main";
+import { createMockState } from "metabase-types/store/mocks";
+
 import {
-  uploadFile,
+  MAX_UPLOAD_STRING,
   UPLOAD_FILE_CLEAR,
   UPLOAD_FILE_END,
   UPLOAD_FILE_ERROR,
   UPLOAD_FILE_START,
-  MAX_UPLOAD_STRING,
+  uploadFile,
 } from "./uploads";
 
 const now = Date.now();
@@ -15,7 +20,7 @@ const NOTIFICATION_DELAY = 9000;
 
 const mockUploadCSV = (valid = true) => {
   fetchMock.post(
-    "path:/api/card/from-csv",
+    "path:/api/upload/csv",
     valid
       ? "3"
       : {
@@ -48,7 +53,13 @@ const mockReplaceCSV = (valid = true) => {
 
 describe("csv uploads", () => {
   describe("actions", () => {
-    let dispatch;
+    const store = getStore(
+      { ...mainReducers, [Api.reducerPath]: Api.reducer },
+      createMockState(),
+      [Api.middleware],
+    );
+    const dispatch = jest.spyOn(store, "dispatch");
+
     const file = new File(
       [new Blob(["col1, col2 \n val1, val2"])],
       "test.csv",
@@ -58,11 +69,10 @@ describe("csv uploads", () => {
     );
 
     beforeEach(() => {
-      dispatch = jest.fn();
       jest.useFakeTimers({ advanceTimers: true }).setSystemTime(now);
     });
 
-    afterAll(() => {
+    afterEach(() => {
       jest.useRealTimers();
     });
 

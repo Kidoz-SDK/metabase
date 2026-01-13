@@ -1,25 +1,12 @@
+const { H } = cy;
 import { SAMPLE_DB_ID, USER_GROUPS } from "e2e/support/cypress_data";
 import {
-  ORDERS_QUESTION_ID,
   ORDERS_DASHBOARD_ID,
+  ORDERS_QUESTION_ID,
 } from "e2e/support/cypress_sample_instance_data";
-import {
-  restore,
-  modal,
-  describeEE,
-  isOSS,
-  assertPermissionTable,
-  assertPermissionOptions,
-  modifyPermission,
-  selectSidebarItem,
-  assertSidebarItems,
-  visitQuestion,
-  visitDashboard,
-  selectPermissionRow,
-  setTokenFeatures,
-} from "e2e/support/helpers";
 
-const { ALL_USERS_GROUP, ADMIN_GROUP, COLLECTION_GROUP } = USER_GROUPS;
+const { ALL_USERS_GROUP, ADMIN_GROUP, COLLECTION_GROUP, DATA_GROUP } =
+  USER_GROUPS;
 
 const COLLECTION_ACCESS_PERMISSION_INDEX = 0;
 
@@ -27,21 +14,19 @@ const NATIVE_QUERIES_PERMISSION_INDEX = 0;
 
 describe("scenarios > admin > permissions", { tags: "@OSS" }, () => {
   beforeEach(() => {
-    cy.onlyOn(isOSS);
-
-    restore();
+    H.restore();
     cy.signInAsAdmin();
   });
 
   it("shows hidden tables", () => {
-    cy.visit(`/admin/datamodel/database/${SAMPLE_DB_ID}`);
+    H.DataModel.visit({ databaseId: SAMPLE_DB_ID });
     cy.icon("eye_crossed_out").eq(0).click();
 
     cy.visit(
       `admin/permissions/data/group/${ALL_USERS_GROUP}/database/${SAMPLE_DB_ID}`,
     );
 
-    assertPermissionTable([
+    H.assertPermissionTable([
       ["Accounts", "No"],
       ["Analytic Events", "No"],
       ["Feedback", "No"],
@@ -53,6 +38,16 @@ describe("scenarios > admin > permissions", { tags: "@OSS" }, () => {
     ]);
   });
 
+  it("should not show view data column on OSS", () => {
+    cy.visit(`/admin/permissions/data/group/${ALL_USERS_GROUP}`);
+
+    cy.findByTestId("permission-table").within(() => {
+      cy.findByText("Database name").should("exist");
+      cy.findByText("View data").should("not.exist");
+      cy.findByText("Create queries").should("exist");
+    });
+  });
+
   it("should display error on failed save", () => {
     // revoke some permissions
     cy.visit(`/admin/permissions/data/group/${ALL_USERS_GROUP}`);
@@ -60,12 +55,11 @@ describe("scenarios > admin > permissions", { tags: "@OSS" }, () => {
     cy.findAllByRole("option").contains("Query builder and native").click();
 
     // stub out the PUT and save
-    cy.intercept("PUT", "/api/permissions/graph", req => {
+    cy.intercept("PUT", "/api/permissions/graph", (req) => {
       req.reply(500, "Server error");
     });
     // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
     cy.contains("Save changes").click();
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
     cy.contains("button", "Yes").click();
 
     // see error modal
@@ -79,9 +73,9 @@ describe("scenarios > admin > permissions", { tags: "@OSS" }, () => {
     it("warns about leaving with unsaved changes", () => {
       cy.visit("/admin/permissions/collections");
 
-      selectSidebarItem("First collection");
+      H.selectSidebarItem("First collection");
 
-      modifyPermission(
+      H.modifyPermission(
         "All Users",
         COLLECTION_ACCESS_PERMISSION_INDEX,
         "View",
@@ -89,14 +83,14 @@ describe("scenarios > admin > permissions", { tags: "@OSS" }, () => {
       );
 
       // Navigation to other collection should not show any warnings
-      selectSidebarItem("Our analytics");
+      H.selectSidebarItem("Our analytics");
 
-      modal().should("not.exist");
+      H.modal().should("not.exist");
 
       // Switching to data permissions page
       cy.get("label").contains("Data").click();
 
-      modal().within(() => {
+      H.modal().within(() => {
         cy.findByText("Discard your changes?");
         cy.findByText(
           "Your changes haven't been saved, so you'll lose them if you navigate away.",
@@ -110,7 +104,7 @@ describe("scenarios > admin > permissions", { tags: "@OSS" }, () => {
       // Switching to data permissions page again
       cy.get("label").contains("Data").click();
 
-      modal().button("Discard changes").click();
+      H.modal().button("Discard changes").click();
 
       cy.url().should("include", "/admin/permissions/data/group");
     });
@@ -119,14 +113,14 @@ describe("scenarios > admin > permissions", { tags: "@OSS" }, () => {
       cy.visit("/admin/permissions/collections");
 
       const collections = ["Our analytics", "First collection"];
-      assertSidebarItems(collections);
+      H.assertSidebarItems(collections);
 
-      selectSidebarItem("First collection");
-      assertSidebarItems([...collections, "Second collection"]);
+      H.selectSidebarItem("First collection");
+      H.assertSidebarItems([...collections, "Second collection"]);
 
-      selectSidebarItem("Second collection");
+      H.selectSidebarItem("Second collection");
 
-      assertPermissionTable([
+      H.assertPermissionTable([
         ["Administrators", "Curate"],
         ["All Users", "No access"],
         ["collection", "Curate"],
@@ -135,7 +129,7 @@ describe("scenarios > admin > permissions", { tags: "@OSS" }, () => {
         ["readonly", "View"],
       ]);
 
-      modifyPermission(
+      H.modifyPermission(
         "All Users",
         COLLECTION_ACCESS_PERMISSION_INDEX,
         "View",
@@ -143,9 +137,9 @@ describe("scenarios > admin > permissions", { tags: "@OSS" }, () => {
       );
 
       // Navigate to children
-      selectSidebarItem("Third collection");
+      H.selectSidebarItem("Third collection");
 
-      assertPermissionTable([
+      H.assertPermissionTable([
         ["Administrators", "Curate"],
         ["All Users", "View"], // Check permission has been propagated
         ["collection", "Curate"],
@@ -155,9 +149,9 @@ describe("scenarios > admin > permissions", { tags: "@OSS" }, () => {
       ]);
 
       // Navigate to parent
-      selectSidebarItem("First collection");
+      H.selectSidebarItem("First collection");
 
-      assertPermissionTable([
+      H.assertPermissionTable([
         ["Administrators", "Curate"],
         ["All Users", "No access"],
         ["collection", "Curate"],
@@ -166,16 +160,16 @@ describe("scenarios > admin > permissions", { tags: "@OSS" }, () => {
         ["readonly", "View"],
       ]);
 
-      modifyPermission(
+      H.modifyPermission(
         "All Users",
         COLLECTION_ACCESS_PERMISSION_INDEX,
         "Curate",
         false,
       );
 
-      selectSidebarItem("Second collection");
+      H.selectSidebarItem("Second collection");
 
-      assertPermissionTable([
+      H.assertPermissionTable([
         ["Administrators", "Curate"],
         ["All Users", "View"], // Check permission has not been propagated
         ["collection", "Curate"],
@@ -186,7 +180,7 @@ describe("scenarios > admin > permissions", { tags: "@OSS" }, () => {
 
       cy.button("Save changes").click();
 
-      modal().within(() => {
+      H.modal().within(() => {
         cy.findByText("Save permissions?");
         cy.findByText("Are you sure you want to do this?");
         cy.button("Yes").click();
@@ -195,7 +189,7 @@ describe("scenarios > admin > permissions", { tags: "@OSS" }, () => {
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText("Save changes").should("not.exist");
 
-      assertPermissionTable([
+      H.assertPermissionTable([
         ["Administrators", "Curate"],
         ["All Users", "View"],
         ["collection", "Curate"],
@@ -206,18 +200,18 @@ describe("scenarios > admin > permissions", { tags: "@OSS" }, () => {
     });
   });
 
-  it("don't propagate permissions by checkbox without access select", () => {
+  it("don't propagate permissions after turning off 'Also change sub-collections' toggle (#30494)", () => {
     cy.visit("/admin/permissions/collections");
 
     const collections = ["Our analytics", "First collection"];
-    assertSidebarItems(collections);
+    H.assertSidebarItems(collections);
 
-    selectSidebarItem("First collection");
-    assertSidebarItems([...collections, "Second collection"]);
+    H.selectSidebarItem("First collection");
+    H.assertSidebarItems([...collections, "Second collection"]);
 
-    selectSidebarItem("Second collection");
+    H.selectSidebarItem("Second collection");
 
-    assertPermissionTable([
+    H.assertPermissionTable([
       ["Administrators", "Curate"],
       ["All Users", "No access"],
       ["collection", "Curate"],
@@ -226,24 +220,24 @@ describe("scenarios > admin > permissions", { tags: "@OSS" }, () => {
       ["readonly", "View"],
     ]);
 
-    modifyPermission(
+    H.modifyPermission(
       "All Users",
       COLLECTION_ACCESS_PERMISSION_INDEX,
       "View",
-      false,
+      true, // Turn 'Also change sub-collections' toggle on
     );
 
-    modifyPermission(
+    H.modifyPermission(
       "All Users",
       COLLECTION_ACCESS_PERMISSION_INDEX,
       null,
-      true,
+      false, // Turn 'Also change sub-collections' toggle off
     );
 
     // Navigate to children
-    selectSidebarItem("Third collection");
+    H.selectSidebarItem("Third collection");
 
-    assertPermissionTable([
+    H.assertPermissionTable([
       ["Administrators", "Curate"],
       ["All Users", "No access"], // Check permission hasn't been propagated
       ["collection", "Curate"],
@@ -257,28 +251,28 @@ describe("scenarios > admin > permissions", { tags: "@OSS" }, () => {
     cy.visit("/admin/permissions/collections");
 
     const collections = ["Our analytics", "First collection"];
-    assertSidebarItems(collections);
+    H.assertSidebarItems(collections);
 
-    selectSidebarItem("First collection");
-    assertSidebarItems([...collections, "Second collection"]);
+    H.selectSidebarItem("First collection");
+    H.assertSidebarItems([...collections, "Second collection"]);
 
-    selectSidebarItem("Second collection");
-    selectPermissionRow("All Users", COLLECTION_ACCESS_PERMISSION_INDEX);
-    assertPermissionOptions(["Curate", "View", "No access"]);
+    H.selectSidebarItem("Second collection");
+    H.selectPermissionRow("All Users", COLLECTION_ACCESS_PERMISSION_INDEX);
+    H.assertPermissionOptions(["Curate", "View", "No access"]);
 
-    selectSidebarItem("Third collection");
-    selectPermissionRow("All Users", COLLECTION_ACCESS_PERMISSION_INDEX);
+    H.selectSidebarItem("Third collection");
+    H.selectPermissionRow("All Users", COLLECTION_ACCESS_PERMISSION_INDEX);
 
-    assertPermissionOptions(["Curate", "View"]);
+    H.assertPermissionOptions(["Curate", "View"]);
   });
 
   context("data permissions", () => {
     it("warns about leaving with unsaved changes", () => {
       cy.visit("/admin/permissions");
 
-      selectSidebarItem("All Users");
+      H.selectSidebarItem("All Users");
 
-      modifyPermission(
+      H.modifyPermission(
         "Sample Database",
         NATIVE_QUERIES_PERMISSION_INDEX,
         "Query builder and native",
@@ -291,12 +285,12 @@ describe("scenarios > admin > permissions", { tags: "@OSS" }, () => {
       cy.get("label").contains("Databases").click();
 
       cy.url().should("include", "/admin/permissions/data/database");
-      modal().should("not.exist");
+      H.modal().should("not.exist");
 
       // Switching to collection permissions page
       cy.get("label").contains("Collection").click();
 
-      modal().within(() => {
+      H.modal().within(() => {
         cy.findByText("Discard your changes?");
         cy.findByText(
           "Your changes haven't been saved, so you'll lose them if you navigate away.",
@@ -310,7 +304,7 @@ describe("scenarios > admin > permissions", { tags: "@OSS" }, () => {
       // Switching to collection permissions page again
       cy.get("label").contains("Collection").click();
 
-      modal().button("Discard changes").click();
+      H.modal().button("Discard changes").click();
 
       cy.url().should("include", "/admin/permissions/collections");
     });
@@ -332,7 +326,7 @@ describe("scenarios > admin > permissions", { tags: "@OSS" }, () => {
           "readonly",
         ];
 
-        assertSidebarItems(groups);
+        H.assertSidebarItems(groups);
 
         // filter groups
         cy.findByPlaceholderText("Search for a group").type("a");
@@ -347,13 +341,13 @@ describe("scenarios > admin > permissions", { tags: "@OSS" }, () => {
         // client filter debounce
         cy.wait(300);
 
-        assertSidebarItems(filteredGroups);
+        H.assertSidebarItems(filteredGroups);
       });
 
       it("allows to only view Administrators permissions", () => {
         cy.visit("/admin/permissions");
 
-        selectSidebarItem("Administrators");
+        H.selectSidebarItem("Administrators");
 
         cy.url().should(
           "include",
@@ -365,14 +359,14 @@ describe("scenarios > admin > permissions", { tags: "@OSS" }, () => {
         // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
         cy.findByText("1 person");
 
-        assertPermissionTable([
+        H.assertPermissionTable([
           ["Sample Database", "Query builder and native"],
         ]);
 
         // Drill down to tables permissions
         cy.findByTextEnsureVisible("Sample Database").click();
 
-        assertPermissionTable([
+        H.assertPermissionTable([
           ["Accounts", "Query builder and native"],
           ["Analytic Events", "Query builder and native"],
           ["Feedback", "Query builder and native"],
@@ -388,22 +382,22 @@ describe("scenarios > admin > permissions", { tags: "@OSS" }, () => {
         cy.intercept("/api/permissions/graph/group/1").as("graph");
         cy.visit("/admin/permissions");
 
-        selectSidebarItem("collection");
+        H.selectSidebarItem("collection");
 
-        modifyPermission(
+        H.modifyPermission(
           "Sample Database",
           NATIVE_QUERIES_PERMISSION_INDEX,
           "Query builder and native",
         );
 
-        cy.get("@graph").then(data => {
+        cy.get("@graph").then((data) => {
           cy.request("PUT", "/api/permissions/graph", {
             groups: {},
             revision: data.response.body.revision,
           }).then(() => {
-            selectSidebarItem("data");
+            H.selectSidebarItem("data");
 
-            modal().findByText("Someone just changed permissions");
+            H.modal().findByText("Someone just changed permissions");
           });
         });
       });
@@ -414,23 +408,23 @@ describe("scenarios > admin > permissions", { tags: "@OSS" }, () => {
         cy.intercept("/api/permissions/graph/group/1").as("graph");
         cy.visit("/admin/permissions/");
 
-        selectSidebarItem("collection");
+        H.selectSidebarItem("collection");
 
-        modifyPermission(
+        H.modifyPermission(
           "Sample Database",
           NATIVE_QUERIES_PERMISSION_INDEX,
           "Query builder and native",
         );
 
-        cy.get("@graph").then(data => {
+        cy.get("@graph").then((data) => {
           cy.request("PUT", "/api/permissions/graph", {
             groups: {},
             revision: data.response.body.revision,
           }).then(() => {
             cy.get("label").contains("Databases").click();
-            selectSidebarItem("Sample Database");
+            H.selectSidebarItem("Sample Database");
 
-            modal().findByText("Someone just changed permissions");
+            H.modal().findByText("Someone just changed permissions");
           });
         });
       });
@@ -438,11 +432,11 @@ describe("scenarios > admin > permissions", { tags: "@OSS" }, () => {
   });
 });
 
-describeEE("scenarios > admin > permissions", () => {
+describe("scenarios > admin > permissions", () => {
   beforeEach(() => {
-    restore();
+    H.restore();
     cy.signInAsAdmin();
-    setTokenFeatures("all");
+    H.activateToken("pro-self-hosted");
   });
 
   it("Visualization and Settings query builder buttons are not visible for questions that use blocked data sources", () => {
@@ -460,13 +454,15 @@ describeEE("scenarios > admin > permissions", () => {
     });
 
     cy.signIn("nodata");
-    visitQuestion(ORDERS_QUESTION_ID);
+    H.visitQuestion(ORDERS_QUESTION_ID);
 
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-    cy.findByText("There was a problem with your question");
-    cy.findByTestId("viz-settings-button").should("not.exist");
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-    cy.findByText("Visualization").should("not.exist");
+    H.queryBuilderMain().findByText(
+      "Sorry, you don't have permission to run this query.",
+    );
+    H.queryBuilderFooter()
+      .findByTestId("viz-settings-button")
+      .should("not.exist");
+    H.queryBuilderFooter().findByText("Visualization").should("not.exist");
   });
 
   it("shows permission error for cards that use blocked data sources", () => {
@@ -484,7 +480,7 @@ describeEE("scenarios > admin > permissions", () => {
     });
 
     cy.signIn("nodata");
-    visitDashboard(ORDERS_DASHBOARD_ID);
+    H.visitDashboard(ORDERS_DASHBOARD_ID);
 
     // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
     cy.findByText("Sorry, you don't have permission to see this card.");
@@ -493,11 +489,13 @@ describeEE("scenarios > admin > permissions", () => {
 
 describe("scenarios > admin > permissions", () => {
   beforeEach(() => {
-    restore();
+    H.restore();
     cy.signInAsAdmin();
   });
 
   it("shows permissions help", () => {
+    // pro-token because some help sections are hidden for OSS
+    H.activateToken("pro-self-hosted");
     cy.visit("/admin/permissions");
 
     // Data permissions w/o `legacy-no-self-service` in graph
@@ -578,6 +576,189 @@ describe("scenarios > admin > permissions", () => {
 
     cy.get("@permissionsHelpContent").within(() => {
       cy.findByText("Data permissions");
+    });
+  });
+
+  it("should show a dismissable modal and banner showing split permission changes (#metabase#45073", () => {
+    // We need a way to pass true values for these settings in CI. Generally in CI, these values will always be false
+    // because we always start with a fresh instance. However, to test the flow of someone who has upgraded from 49 -> current
+    // we set them to false and ensure a modal is shown explaining the new permissions structure
+    const tempState = {
+      "show-updated-permission-modal": true,
+      "show-updated-permission-banner": true,
+    };
+
+    // When the app calls for session properties, give them a modified API response
+    cy.intercept("/api/session/properties", (req) => {
+      req.continue((res) => {
+        res.body = { ...res.body, ...tempState };
+      });
+    }).as("sessionProps");
+
+    // These calls are setting the permission to false, so update the local state. When the settings are refreshed
+    // from the browser, they will get the new values from local state
+    cy.intercept("api/setting/show-updated-permission-modal", () => {
+      tempState["show-updated-permission-modal"] = false;
+    });
+
+    cy.intercept("api/setting/show-updated-permission-banner", () => {
+      tempState["show-updated-permission-banner"] = false;
+    });
+
+    cy.visit("/admin/permissions/");
+    cy.wait("@sessionProps");
+
+    cy.findByRole("dialog", { name: /permissions may look different/ })
+      .findByRole("button", { name: "Got it" })
+      .click();
+    cy.wait("@sessionProps");
+
+    cy.findByRole("menuitem", { name: "All Users" }).click();
+    cy.findByRole("alert").should(
+      "contain.text",
+      "Your data permissions may look different",
+    );
+    cy.findByRole("alert").findByRole("button").click();
+
+    //Cypress will error if the page refreshes while it's also intercepting a request
+    cy.wait("@sessionProps");
+
+    cy.reload();
+
+    cy.findByRole("dialog", { name: /permissions may look different/ }).should(
+      "not.exist",
+    );
+    cy.findByRole("alert").should("not.exist");
+  });
+
+  it("split permission change modal should dismiss even if network request fails", () => {
+    // We need a way to pass true values for these settings in CI. Generally in CI, these values will always be false
+    // because we always start with a fresh instance. However, to test the flow of someone who has upgraded from 49 -> current
+    // we set them to false and ensure a modal is shown explaining the new permissions structure
+    const tempState = {
+      "show-updated-permission-modal": true,
+    };
+
+    // When the app calls for session properties, give them a modified API response
+    cy.intercept("/api/session/properties", (req) => {
+      req.continue((res) => {
+        res.body = { ...res.body, ...tempState };
+      });
+    }).as("sessionProps");
+
+    // These calls are setting the permission to false, so update the local state. When the settings are refreshed
+    // from the browser, they will get the new values from local state
+    cy.intercept("api/setting/show-updated-permission-modal", {
+      statusCode: 500,
+    });
+
+    cy.visit("/admin/permissions/");
+    cy.wait("@sessionProps");
+
+    cy.findByRole("dialog", { name: /permissions may look different/ })
+      .findByRole("button", { name: "Got it" })
+      .click();
+    cy.wait("@sessionProps");
+
+    cy.findByRole("menuitem", { name: "All Users" }).click();
+  });
+});
+
+describe("scenarios > admin > permissions", () => {
+  beforeEach(() => {
+    H.restore();
+    cy.signInAsAdmin();
+  });
+
+  context("partial updates", () => {
+    it("partial data permission updates should not remove permissions from other unmodified groups", () => {
+      // check the we have an expected initial state
+      cy.visit(`admin/permissions/data/group/${DATA_GROUP}`);
+      H.assertPermissionTable([
+        ["Sample Database", "Query builder and native"],
+      ]);
+
+      // make a change to the permissions of another group
+      H.selectSidebarItem("nosql");
+      H.assertPermissionTable([["Sample Database", "Query builder only"]]);
+      H.modifyPermission(
+        "Sample Database",
+        NATIVE_QUERIES_PERMISSION_INDEX,
+        "No",
+      );
+
+      // observe the save change request and assert that we don't get back
+      // values for groups we did not modify
+      cy.intercept("PUT", "/api/permissions/graph").as("updateGraph");
+
+      // save changes
+      cy.button("Save changes").click();
+      H.modal().within(() => {
+        cy.button("Yes").click();
+      });
+
+      cy.wait("@updateGraph").then((interception) => {
+        const requestGroupIds = Object.keys(interception.request.body.groups);
+        const responseGroupIds = Object.keys(interception.response.body.groups);
+        expect(requestGroupIds).to.deep.equal(responseGroupIds);
+      });
+
+      // make sure that our other group's permission data did not get changed
+      H.selectSidebarItem("data");
+      H.assertPermissionTable([
+        ["Sample Database", "Query builder and native"],
+      ]);
+    });
+
+    it("partial collection permission updates should not prevent user from making further changes", () => {
+      cy.visit("/admin/permissions/collections");
+
+      H.selectSidebarItem("First collection");
+
+      H.modifyPermission(
+        "All Users",
+        COLLECTION_ACCESS_PERMISSION_INDEX,
+        "View",
+        false,
+      );
+
+      cy.intercept("PUT", "/api/collection/graph?skip-graph=true").as(
+        "updateGraph",
+      );
+
+      cy.button("Save changes").click();
+      H.modal().within(() => {
+        cy.button("Yes").click();
+      });
+
+      cy.wait("@updateGraph").then((interception) => {
+        cy.log("should skip graph in request and response");
+        expect(interception.response.body).to.not.haveOwnProperty("groups");
+      });
+
+      H.selectSidebarItem("First collection");
+
+      H.modifyPermission(
+        "nosql",
+        COLLECTION_ACCESS_PERMISSION_INDEX,
+        "Curate",
+        false,
+      );
+
+      cy.button("Save changes").click();
+      H.modal().within(() => {
+        cy.button("Yes").click();
+      });
+
+      cy.wait("@updateGraph").then((interception) => {
+        cy.log("should not send previously saved edits");
+        expect(interception.request.body.groups).to.not.haveOwnProperty(
+          USER_GROUPS.ALL_USERS_GROUP,
+        );
+
+        cy.log("should not fail when making multiple rounds of edits");
+        expect(interception.response.statusCode).to.equal(200);
+      });
     });
   });
 });

@@ -1,22 +1,15 @@
+const { H } = cy;
 import { SAMPLE_DB_ID } from "e2e/support/cypress_data";
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
-import {
-  restore,
-  visitQuestionAdhoc,
-  sidebar,
-  getDraggableElements,
-  popover,
-  moveDnDKitElement,
-} from "e2e/support/helpers";
 
 const { PEOPLE_ID, PEOPLE } = SAMPLE_DATABASE;
 
 describe("scenarios > visualizations > funnel chart", () => {
   beforeEach(() => {
-    restore();
+    H.restore();
     cy.signInAsNormalUser();
 
-    visitQuestionAdhoc({
+    H.visitQuestionAdhoc({
       dataset_query: {
         type: "query",
         query: {
@@ -28,26 +21,28 @@ describe("scenarios > visualizations > funnel chart", () => {
       },
       display: "funnel",
     });
-    cy.findByTestId("viz-settings-button").click();
-    sidebar().findByText("Data").click();
+    H.openVizSettingsSidebar();
+    H.sidebar().findByText("Data").click();
   });
 
   it("should allow you to reorder and show/hide rows", () => {
     cy.log("ensure that rows are shown");
-    getDraggableElements().should("have.length", 5);
+    H.getDraggableElements().should("have.length", 5);
 
-    getDraggableElements()
+    H.getDraggableElements()
       .first()
       .invoke("text")
-      .then(name => {
+      .then((name) => {
         cy.log(`mode row ${name} down 2`);
         cy.findAllByTestId("funnel-chart-header")
           .first()
           .should("have.text", name);
 
-        moveDnDKitElement(getDraggableElements().first(), { vertical: 100 });
+        H.moveDnDKitElement(H.getDraggableElements().first(), {
+          vertical: 100,
+        });
 
-        getDraggableElements().eq(2).should("have.text", name);
+        H.getDraggableElements().eq(2).should("have.text", name);
 
         cy.findAllByTestId("funnel-chart-header")
           .eq(2)
@@ -55,55 +50,45 @@ describe("scenarios > visualizations > funnel chart", () => {
       });
 
     cy.log("toggle row visibility");
-    getDraggableElements()
+    H.getDraggableElements()
       .eq(1)
       .within(() => {
-        cy.icon("eye_outline").click();
+        cy.icon("eye_outline").click({ force: true });
       });
     cy.findAllByTestId("funnel-chart-header").should("have.length", 4);
 
-    getDraggableElements()
+    H.getDraggableElements()
       .eq(1)
       .within(() => {
-        cy.icon("eye_crossed_out").click();
+        cy.icon("eye_crossed_out").click({ force: true });
       });
     cy.findAllByTestId("funnel-chart-header").should("have.length", 5);
   });
 
   it("should handle row items being filterd out and returned gracefully", () => {
-    moveDnDKitElement(getDraggableElements().first(), { vertical: 100 });
+    H.moveDnDKitElement(H.getDraggableElements().first(), { vertical: 100 });
 
-    getDraggableElements()
+    H.getDraggableElements()
       .eq(1)
       .within(() => {
-        cy.icon("eye_outline").click();
+        cy.icon("eye_outline").click({ force: true });
       });
 
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-    cy.findByText("Filter").click();
-
-    cy.findByTestId("filter-column-Source").within(() => {
-      cy.findByLabelText("Filter operator").click();
-    });
-
-    popover().within(() => {
-      cy.findByText("Is not").click();
-    });
-
-    cy.findByTestId("filter-column-Source").within(() => {
+    H.filter();
+    H.popover().findByText("Source").click();
+    H.selectFilterOperator("Is not");
+    H.popover().within(() => {
       cy.findByText("Facebook").click();
+      cy.button("Apply filter").click();
     });
 
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-    cy.findByText("Apply filters").click();
-
-    getDraggableElements().should("have.length", 4);
+    H.getDraggableElements().should("have.length", 4);
 
     //Ensures that "Google" is still hidden, so it's state hasn't changed.
-    getDraggableElements()
+    H.getDraggableElements()
       .eq(0)
       .within(() => {
-        cy.icon("eye_crossed_out").click();
+        cy.icon("eye_crossed_out").click({ force: true });
       });
 
     cy.log("remove filter");
@@ -112,10 +97,10 @@ describe("scenarios > visualizations > funnel chart", () => {
       cy.icon("close").click();
     });
 
-    getDraggableElements().should("have.length", 5);
+    H.getDraggableElements().should("have.length", 5);
 
     //Re-added items should appear at the end of the list.
-    getDraggableElements().eq(0).should("have.text", "Google");
-    getDraggableElements().eq(4).should("have.text", "Facebook");
+    H.getDraggableElements().eq(0).should("have.text", "Google");
+    H.getDraggableElements().eq(4).should("have.text", "Facebook");
   });
 });

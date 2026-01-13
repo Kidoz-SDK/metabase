@@ -6,8 +6,8 @@ import { setup as baseSetup } from "./setup";
 
 function setup(opts: SetupOpts) {
   baseSetup({
-    hasEnterprisePlugins: true,
     tokenFeatures: { whitelabel: true },
+    enterprisePlugins: ["whitelabel"],
     ...opts,
   });
 }
@@ -43,6 +43,7 @@ describe("SegmentList (EE with token)", () => {
 
   describe("Non-admins", () => {
     const user = createMockUser();
+
     it("should not render help link", () => {
       setup({ user });
 

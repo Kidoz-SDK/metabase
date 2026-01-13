@@ -1,18 +1,20 @@
 import type { Alert, AlertCard } from "../alert";
+import type { Channel } from "../notification-channels";
 
+import { createMockEntityId } from "./entity-id";
 import { createMockUserInfo } from "./user";
 
 export const createMockAlert = (opts?: Partial<Alert>): Alert => ({
   id: 1,
-  name: "Alert",
-  alert_above_goal: false,
-  alert_condition: "rows",
+  name: "Pulse",
+  alert_above_goal: true,
+  alert_condition: "goal",
   alert_first_only: false,
   skip_if_empty: false,
 
   card: createMockAlertCard(),
   parameters: [],
-  channels: [],
+  channels: [createMockChannel()],
 
   dashboard_id: null,
   collection_id: null,
@@ -21,7 +23,7 @@ export const createMockAlert = (opts?: Partial<Alert>): Alert => ({
   can_write: true,
   archived: false,
 
-  entity_id: "1",
+  entity_id: createMockEntityId(),
 
   creator_id: 1,
   creator: createMockUserInfo(),
@@ -29,6 +31,18 @@ export const createMockAlert = (opts?: Partial<Alert>): Alert => ({
   created_at: "2020-01-01T00:00:00.000Z",
   updated_at: "2020-01-01T00:00:00.000Z",
 
+  ...opts,
+});
+
+export const createMockChannel = (opts?: Partial<Channel>): Channel => ({
+  channel_type: "email",
+  details: {},
+  enabled: true,
+  recipients: [],
+  schedule_day: null,
+  schedule_frame: null,
+  schedule_hour: null,
+  schedule_type: "daily",
   ...opts,
 });
 

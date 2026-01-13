@@ -4,27 +4,29 @@ import type { PieArcDatum } from "@visx/shape/lib/shapes/Pie";
 
 import type { ColorGetter } from "metabase/visualizations/types";
 
+import Watermark from "../../watermark.svg?component";
+
 import GaugeLabel from "./GaugeLabel";
 import GaugeNeedle from "./GaugeNeedle";
 import {
-  START_ANGLE,
-  END_ANGLE,
-  CHART_WIDTH,
-  GAUGE_OUTER_RADIUS,
-  GAUGE_INNER_RADIUS,
-  SEGMENT_LABEL_FONT_SIZE,
   CHART_HEIGHT,
+  CHART_WIDTH,
+  END_ANGLE,
+  GAUGE_INNER_RADIUS,
+  GAUGE_OUTER_RADIUS,
+  SEGMENT_LABEL_FONT_SIZE,
+  START_ANGLE,
 } from "./constants";
 import type { GaugeLabelData, GaugeSegment, Position } from "./types";
 import {
-  limit,
   calculateChartScale,
-  calculateValueFontSize,
   calculateRelativeValueAngle,
-  getCirclePositionInSvgCoordinate,
+  calculateValueFontSize,
+  colorGetter,
   gaugeAccessor,
   gaugeSorter,
-  colorGetter,
+  getCirclePositionInSvgCoordinate,
+  limit,
 } from "./utils";
 
 interface GaugeProps {
@@ -34,6 +36,7 @@ interface GaugeProps {
   gaugeLabels: GaugeLabelData[];
   center: Position;
   getColor: ColorGetter;
+  hasDevWatermark: boolean;
 }
 
 // eslint-disable-next-line import/no-default-export -- deprecated usage
@@ -44,6 +47,7 @@ export default function Gauge({
   gaugeLabels,
   center,
   getColor,
+  hasDevWatermark,
 }: GaugeProps) {
   const segmentMinValue = segments[0].min;
   const segmentMaxValue = segments[segments.length - 1].max;
@@ -91,7 +95,7 @@ export default function Gauge({
               startAngle={START_ANGLE}
               endAngle={END_ANGLE}
             >
-              {pie => {
+              {(pie) => {
                 // Renders similar to Pie's default children.
                 // https://github.com/airbnb/visx/blob/978c143dae4057e482b0ca909e8c5a16c85dfd1e/packages/visx-shape/src/shapes/Pie.tsx#L86-L98
                 const baseArcPath = pie.path({
@@ -166,6 +170,17 @@ export default function Gauge({
           </Group>
         </g>
       </g>
+      {hasDevWatermark && (
+        <Watermark
+          x="0"
+          y="0"
+          height={CHART_HEIGHT}
+          width={CHART_WIDTH}
+          preserveAspectRatio="xMinYMin slice"
+          fill={getColor("text-secondary")}
+          opacity={0.2}
+        />
+      )}
     </svg>
   );
 }

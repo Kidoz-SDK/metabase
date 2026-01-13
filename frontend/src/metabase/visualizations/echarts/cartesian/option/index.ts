@@ -1,15 +1,14 @@
 import type { EChartsCoreOption } from "echarts/core";
+import type { YAXisOption } from "echarts/types/dist/shared";
 import type { OptionSourceData } from "echarts/types/src/util/types";
 
 import {
   NEGATIVE_STACK_TOTAL_DATA_KEY,
+  OTHER_DATA_KEY,
   POSITIVE_STACK_TOTAL_DATA_KEY,
   X_AXIS_DATA_KEY,
 } from "metabase/visualizations/echarts/cartesian/constants/dataset";
-import type {
-  DataKey,
-  CartesianChartModel,
-} from "metabase/visualizations/echarts/cartesian/model/types";
+import type { CartesianChartModel } from "metabase/visualizations/echarts/cartesian/model/types";
 import { buildAxes } from "metabase/visualizations/echarts/cartesian/option/axis";
 import { buildEChartsSeries } from "metabase/visualizations/echarts/cartesian/option/series";
 import { getTimelineEventsSeries } from "metabase/visualizations/echarts/cartesian/timeline-events/option";
@@ -21,13 +20,16 @@ import type {
 import type { TimelineEventId } from "metabase-types/api";
 
 import type { ChartMeasurements } from "../chart-measurements/types";
+import { CHART_STYLE } from "../constants/style";
+import { getBarSeriesDataLabelKey } from "../model/util";
 
 import { getGoalLineSeriesOption } from "./goal-line";
 import { getTrendLinesOption } from "./trend-line";
+import type { EChartsSeriesOption } from "./types";
 
-export const getSharedEChartsOptions = (isPlaceholder: boolean) => ({
+export const getSharedEChartsOptions = (isAnimated: boolean) => ({
   useUTC: true,
-  animation: !isPlaceholder,
+  animation: isAnimated,
   animationDuration: 0,
   animationDurationUpdate: 1, // by setting this to 1ms we visually eliminate shape transitions while preserving opacity transitions
   toolbox: {
@@ -41,6 +43,49 @@ export const getSharedEChartsOptions = (isPlaceholder: boolean) => ({
   },
 });
 
+type Axes = ReturnType<typeof buildAxes>;
+
+type NonCategoryYAxisOption = Exclude<YAXisOption, { type?: "category" }>;
+const isNonCategoryYAxisOption = (
+  axis: YAXisOption,
+): axis is NonCategoryYAxisOption => axis.type !== "category";
+
+export const ensureRoomForLabels = (
+  axes: Axes,
+  { leftAxisModel, rightAxisModel }: CartesianChartModel,
+  chartMeasurements: ChartMeasurements,
+  seriesOption: EChartsSeriesOption[],
+): Axes => ({
+  ...axes,
+  yAxis: axes.yAxis.map((axis) => {
+    const axisModel = axis.position === "left" ? leftAxisModel : rightAxisModel;
+    if (!axisModel) {
+      return axis;
+    }
+    const isAxisUsedForBarChart = axisModel.seriesKeys.some((key) => {
+      return seriesOption.some((o) => o.id === key && o.type === "bar");
+    });
+    if (!isAxisUsedForBarChart) {
+      return axis;
+    }
+    const [min] = axisModel.extent;
+    if (min < 0) {
+      const { bounds } = chartMeasurements;
+      const innerHeight = Math.abs(bounds.bottom - bounds.top);
+      const labelPct = CHART_STYLE.seriesLabels.size / innerHeight;
+      const lowerBoundaryGap = labelPct / 2; // `/ 2` because it's okay if the bar label overlaps the axis *line*, we just don't want it to overlap the axis *labels*
+
+      // Only apply numeric boundaryGap to non-category axes
+      if (!isNonCategoryYAxisOption(axis)) {
+        return axis;
+      }
+
+      return { ...axis, boundaryGap: [lowerBoundaryGap, 0] };
+    }
+    return axis;
+  }),
+});
+
 export const getCartesianChartOption = (
   chartModel: CartesianChartModel,
   chartMeasurements: ChartMeasurements,
@@ -48,8 +93,7 @@ export const getCartesianChartOption = (
   selectedTimelineEventsIds: TimelineEventId[],
   settings: ComputedVisualizationSettings,
   chartWidth: number,
-  isPlaceholder: boolean,
-  hoveredSeriesDataKey: DataKey | null,
+  isAnimated: boolean,
   renderingContext: RenderingContext,
 ): EChartsCoreOption => {
   const hasTimelineEvents = timelineEventsModel != null;
@@ -82,19 +126,20 @@ export const getCartesianChartOption = (
     goalSeriesOption,
     trendSeriesOption,
     timelineEventsSeries,
-  ].flatMap(option => option ?? []);
+  ].flatMap((option) => option ?? []);
 
   // dataset option
   const dimensions = [
     X_AXIS_DATA_KEY,
-    ...chartModel.seriesModels.map(seriesModel => seriesModel.dataKey),
-  ];
-
-  if (settings["stackable.stack_type"] != null) {
-    dimensions.push(
-      ...[POSITIVE_STACK_TOTAL_DATA_KEY, NEGATIVE_STACK_TOTAL_DATA_KEY],
-    );
-  }
+    OTHER_DATA_KEY,
+    POSITIVE_STACK_TOTAL_DATA_KEY,
+    NEGATIVE_STACK_TOTAL_DATA_KEY,
+    ...chartModel.seriesModels.map((seriesModel) => [
+      seriesModel.dataKey,
+      getBarSeriesDataLabelKey(seriesModel.dataKey, "+"),
+      getBarSeriesDataLabelKey(seriesModel.dataKey, "-"),
+    ]),
+  ].flatMap((dimension) => dimension);
 
   const echartsDataset = [
     {
@@ -112,26 +157,31 @@ export const getCartesianChartOption = (
       source: chartModel.trendLinesModel?.dataset as OptionSourceData,
       dimensions: [
         X_AXIS_DATA_KEY,
-        ...chartModel.trendLinesModel?.seriesModels.map(s => s.dataKey),
+        ...chartModel.trendLinesModel?.seriesModels.map((s) => s.dataKey),
       ],
     });
   }
 
   return {
-    ...getSharedEChartsOptions(isPlaceholder),
+    ...getSharedEChartsOptions(isAnimated),
     grid: {
       ...chartMeasurements.padding,
+      outerBoundsMode: "none",
     },
     dataset: echartsDataset,
     series: seriesOption,
-    ...buildAxes(
+    ...ensureRoomForLabels(
+      buildAxes(
+        chartModel,
+        chartWidth,
+        chartMeasurements,
+        settings,
+        hasTimelineEvents,
+        renderingContext,
+      ),
       chartModel,
-      chartWidth,
       chartMeasurements,
-      settings,
-      hasTimelineEvents,
-      hoveredSeriesDataKey,
-      renderingContext,
+      dataSeriesOptions,
     ),
   };
 };

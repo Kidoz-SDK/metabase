@@ -1,7 +1,7 @@
 import * as ML from "cljs/metabase.lib.js";
 import type { DatabaseId, TemplateTags } from "metabase-types/api";
 
-import type { MetadataProvider, Query } from "./types";
+import type { MetadataProvider, Query, ValidationError } from "./types";
 
 export function nativeQuery(
   databaseId: DatabaseId,
@@ -27,13 +27,6 @@ export function templateTags(query: Query): TemplateTags {
   return ML.template_tags(query);
 }
 
-export function extractTemplateTags(
-  queryText: string,
-  existingTags?: TemplateTags,
-): TemplateTags {
-  return ML.extract_template_tags(queryText, existingTags);
-}
-
 export function hasWritePermission(query: Query): boolean {
   return ML.has_write_permission(query);
 }
@@ -46,7 +39,7 @@ export function withDifferentDatabase(
   return ML.with_different_database(query, databaseId, metadata);
 }
 
-export function engine(query: Query): string {
+export function engine(query: Query): string | null {
   return ML.engine(query);
 }
 
@@ -81,4 +74,11 @@ export function withNativeExtras(
   nativeExtras: NativeExtras | null,
 ): Query {
   return ML.with_native_extras(query, nativeExtras);
+}
+
+/**
+ * Validates if the template tags in query are all valid and well-formed.
+ */
+export function validateTemplateTags(query: Query): ValidationError[] {
+  return ML.validate_template_tags(query);
 }

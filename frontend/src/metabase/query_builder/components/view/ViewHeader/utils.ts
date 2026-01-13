@@ -15,7 +15,28 @@ export const canExploreResults = (question: Question): boolean => {
     question.isSaved() &&
     question.parameters().length === 0 &&
     canNest &&
-    isEditable && // originally "canRunAdhocQuery"
+    isEditable &&
+    !question.isArchived()
+  );
+};
+
+interface CanShowNativePreviewOpts {
+  question: Question;
+  queryBuilderMode: string;
+}
+
+export const canShowNativePreview = ({
+  question,
+  queryBuilderMode,
+}: CanShowNativePreviewOpts) => {
+  const { isNative } = Lib.queryDisplayInfo(question.query());
+  const isMetric = question.type() === "metric";
+
+  return (
+    !isNative &&
+    !isMetric &&
+    question.database()?.native_permissions === "write" &&
+    queryBuilderMode === "notebook" &&
     !question.isArchived()
   );
 };

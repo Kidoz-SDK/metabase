@@ -1,31 +1,26 @@
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
 
-import BaseExternalLink from "metabase/core/components/ExternalLink";
-import Input from "metabase/core/components/Input";
-import Link from "metabase/core/components/Link";
-import { color } from "metabase/lib/colors";
+import BaseExternalLink from "metabase/common/components/ExternalLink";
+import Input from "metabase/common/components/Input";
+import Link from "metabase/common/components/Link";
 import { RecentsList } from "metabase/nav/components/search/RecentsList";
-import { Icon } from "metabase/ui";
 
-export const DisplayLinkCardWrapper = styled.div<{ fade?: boolean }>`
+export const DisplayLinkCardWrapper = styled.div`
   padding: 0 0.5rem;
   display: flex;
   width: 100%;
   height: 100%;
   align-items: center;
-  pointer-events: ${({ fade }) => (fade ? "none" : "all")};
-  opacity: ${({ fade }) => (fade ? 0.25 : 1)};
 `;
 
-export const EditLinkCardWrapper = styled.div<{ fade?: boolean }>`
+export const EditLinkCardWrapper = styled.div`
   padding: 0 1rem;
   display: flex;
   flex-direction: column;
   justify-content: center;
   width: 100%;
   height: 100%;
-  pointer-events: ${({ fade }) => (fade ? "none" : "all")};
-  opacity: ${({ fade }) => (fade ? 0.25 : 1)};
 `;
 
 export const CardLink = styled(Link)`
@@ -39,7 +34,7 @@ export const CardLink = styled(Link)`
   font-weight: bold;
 
   &:hover {
-    color: ${color("brand")};
+    color: var(--mb-color-brand);
   }
 `;
 
@@ -54,13 +49,8 @@ export const ExternalLink = styled(BaseExternalLink)`
   font-weight: bold;
 
   &:hover {
-    color: ${color("brand")};
+    color: var(--mb-color-brand);
   }
-`;
-
-export const BrandIconWithHorizontalMargin = styled(Icon)`
-  color: ${color("brand")};
-  margin: 0 0.5rem;
 `;
 
 const searchResultsStyles = `
@@ -69,14 +59,14 @@ const searchResultsStyles = `
   min-width: 20rem;
   overflow-y: auto;
 
-  background-color: ${color("bg-white")};
+  background-color: var(--mb-color-bg-white);
   line-height: 24px;
 
   max-height: 400px;
 
-  border: 1px solid ${color("border")};
+  border: 1px solid var(--mb-color-border);
   border-radius: 6px;
-  box-shadow: 0 7px 20px ${color("shadow")};
+  box-shadow: 0 7px 20px var(--mb-color-shadow);
   pointer-events: all;
 `;
 
@@ -90,6 +80,10 @@ export const StyledRecentsList = styled(RecentsList)`
 
 export const StyledInput = styled(Input)`
   pointer-events: all;
+
+  input {
+    max-height: 38px; /* prevents natural height of input from growing beyond the (bordered) card container */
+  }
 
   * {
     pointer-events: all;

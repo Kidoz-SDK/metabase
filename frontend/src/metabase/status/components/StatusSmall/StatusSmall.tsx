@@ -1,12 +1,12 @@
-import Tooltip from "metabase/core/components/Tooltip";
 import type { IconName } from "metabase/ui";
+import { Tooltip } from "metabase/ui";
 import type { InitialSyncStatus } from "metabase-types/api";
 
 import {
-  StatusRoot,
-  StatusIconContainer,
-  StatusIcon,
   StatusContainer,
+  StatusIcon,
+  StatusIconContainer,
+  StatusRoot,
   StatusSpinner,
 } from "./StatusSmall.styled";
 
@@ -26,7 +26,7 @@ const StatusSmall = ({
   onExpand,
 }: StatusSmallProps): JSX.Element => {
   return (
-    <Tooltip tooltip={statusLabel}>
+    <Tooltip label={statusLabel}>
       <StatusRoot role="status" aria-label={statusLabel} onClick={onExpand}>
         <StatusContainer status={status}>
           <StatusIconContainer status={status}>

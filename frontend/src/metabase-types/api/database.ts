@@ -1,11 +1,11 @@
 import type { ScheduleSettings } from "./settings";
 import type { Table } from "./table";
 
-import type { ISO8601Time } from ".";
+import type { ISO8601Time, LongTaskStatus } from ".";
 
 export type DatabaseId = number;
 
-export type InitialSyncStatus = "incomplete" | "complete" | "aborted";
+export type InitialSyncStatus = LongTaskStatus;
 
 export type DatabaseSettings = {
   [key: string]: any;
@@ -14,19 +14,32 @@ export type DatabaseSettings = {
 
 export type DatabaseFeature =
   | "actions"
+  | "actions/data-editing"
   | "basic-aggregations"
   | "binning"
   | "case-sensitivity-string-filter-options"
+  | "convert-timezone"
+  | "datetime-diff"
+  | "database-replication"
+  | "database-routing"
   | "dynamic-schema"
   | "expression-aggregations"
+  | "expression-literals"
   | "expressions"
-  | "foreign-keys"
+  | "expressions/date"
+  | "expressions/datetime"
+  | "expressions/integer"
+  | "expressions/float"
+  | "expressions/text"
+  | "expressions/today"
   | "native-parameters"
   | "nested-queries"
   | "standard-deviation-aggregations"
   | "percentile-aggregations"
   | "persist-models"
   | "persist-models-enabled"
+  | "regex"
+  | "regex/lookaheads-and-lookbehinds"
   | "schemas"
   | "set-timezone"
   | "left-join"
@@ -36,12 +49,20 @@ export type DatabaseFeature =
   | "nested-field-columns"
   | "advanced-math-expressions"
   | "connection-impersonation"
-  | "connection-impersonation-requires-role";
+  | "connection-impersonation-requires-role"
+  | "native-requires-specified-collection"
+  | "window-functions/offset"
+  | "distinct-where"
+  | "saved-question-sandboxing"
+  | "split-part"
+  | "collate"
+  | "transforms/python"
+  | "transforms/table";
 
 export interface Database extends DatabaseData {
   id: DatabaseId;
   is_saved_questions: boolean;
-  features: DatabaseFeature[];
+  features?: DatabaseFeature[];
   creator_id?: number;
   timezone?: string;
   native_permissions: "write" | "none";
@@ -51,6 +72,13 @@ export interface Database extends DatabaseData {
   created_at: ISO8601Time;
   updated_at: ISO8601Time;
   can_upload: boolean;
+  uploads_enabled: boolean;
+  uploads_schema_name: string | null;
+  uploads_table_prefix: string | null;
+  is_audit?: boolean;
+  is_attached_dwh?: boolean;
+  router_database_id?: number | null;
+  router_user_attribute?: string | null;
 
   // Only appears in  GET /api/database/:id
   "can-manage"?: boolean;
@@ -61,7 +89,10 @@ export interface DatabaseData {
   id?: DatabaseId;
   name: string;
   engine: string | undefined;
-  details: Record<string, unknown>;
+  // If current user lacks write permission to database, `details` will be
+  // missing in responses from the backend, cf. implementation of
+  // [[metabase.models.interface/to-json]] for `:model/Database`:
+  details?: Record<string, unknown>;
   schedules: DatabaseSchedules;
   auto_run_queries: boolean | null;
   refingerprint: boolean | null;
@@ -91,13 +122,31 @@ export interface GetDatabaseRequest {
   exclude_uneditable_details?: boolean;
 }
 
+export interface GetDatabaseSettingsAvailableResponse {
+  settings: Record<string, DatabaseLocalSettingAvailability>;
+}
+
+export type DatabaseLocalSettingDisableReason = {
+  key: string;
+  message: string;
+};
+
+export type DatabaseLocalSettingAvailability =
+  | { enabled: true }
+  | { enabled: false; reasons: DatabaseLocalSettingDisableReason[] };
+
+export type GetDatabaseHealthResponse =
+  | { status: "ok" }
+  | { status: "error"; message: string; errors: unknown };
+
 export interface ListDatabasesRequest {
-  include?: "table";
+  include?: "tables";
   saved?: boolean;
   include_editable_data_model?: boolean;
   exclude_uneditable_details?: boolean;
   include_only_uploadable?: boolean;
   include_analytics?: boolean;
+  router_database_id?: DatabaseId;
 }
 
 export interface ListDatabasesResponse {
@@ -133,6 +182,7 @@ export interface GetDatabaseMetadataRequest {
   include_hidden?: boolean;
   include_editable_data_model?: boolean;
   remove_inactive?: boolean;
+  skip_fields?: boolean;
 }
 
 export interface CreateDatabaseRequest {
@@ -151,16 +201,25 @@ export interface UpdateDatabaseRequest {
   id: DatabaseId;
   name?: string;
   engine?: string;
-  refingerprint?: boolean;
+  refingerprint?: boolean | null;
   details?: Record<string, unknown>;
   schedules?: DatabaseSchedules;
   description?: string;
   caveats?: string;
   points_of_interest?: string;
   auto_run_queries?: boolean;
-  cache_ttl?: number;
-  settings?: DatabaseSettings;
+  cache_ttl?: number | null;
+  settings?: DatabaseSettings | null;
 }
+
+export type DatabaseEditErrorType = {
+  data: {
+    message: string;
+    errors: { [key: string]: string };
+  };
+  statusText: string;
+  message: string;
+};
 
 export interface DatabaseIdFieldListQuery {
   include_editable_data_model?: boolean;
@@ -170,4 +229,14 @@ export interface SavedQuestionDatabase {
   id: -1337;
   name: "Saved Questions";
   is_saved_questions: true;
+}
+
+export interface CreateDestinationDatabaseRequest {
+  router_database_id: DatabaseId;
+  destination_database: { name: string; details?: Record<string, unknown> };
+}
+
+export interface UpdateDatabaseRouterRequest {
+  id: DatabaseId;
+  user_attribute: string | null;
 }

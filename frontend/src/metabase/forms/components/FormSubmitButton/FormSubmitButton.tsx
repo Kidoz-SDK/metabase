@@ -13,6 +13,7 @@ export interface FormSubmitButtonProps extends Omit<ButtonProps, "children"> {
   activeLabel?: ReactNode;
   successLabel?: ReactNode;
   failedLabel?: ReactNode;
+  onSuccess?: () => void;
 }
 
 export const FormSubmitButton = forwardRef(function FormSubmitButton(
@@ -23,6 +24,7 @@ export const FormSubmitButton = forwardRef(function FormSubmitButton(
     failedLabel,
     disabled,
     color,
+    onSuccess,
     ...props
   }: FormSubmitButtonProps,
   ref: Ref<HTMLButtonElement>,
@@ -44,6 +46,7 @@ export const FormSubmitButton = forwardRef(function FormSubmitButton(
       type="submit"
       color={submitColor}
       disabled={isDisabled}
+      loading={status === "pending"}
     >
       {submitLabel}
     </Button>

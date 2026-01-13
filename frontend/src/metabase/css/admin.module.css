@@ -47,7 +47,7 @@
 }
 
 .AdminList {
-  background-color: var(--color-bg-light);
+  background-color: var(--mb-color-bg-light);
   border: var(--border-size) var(--border-style) var(--mb-color-border);
   border-radius: var(--default-border-radius);
   width: 266px;
@@ -92,7 +92,7 @@
 
 .AdminListItem.selected,
 .AdminListItem:hover {
-  background-color: white;
+  background-color: var(--mb-color-bg-white);
   border-color: var(--mb-color-border);
   margin-left: -0.5em;
   margin-right: -0.5em;
@@ -114,7 +114,7 @@
 .AdminInput {
   color: var(--mb-color-text-dark);
   padding: var(--padding-1);
-  background-color: var(--color-bg-light);
+  background-color: var(--mb-color-bg-light);
   border: 1px solid transparent;
 }
 
@@ -130,11 +130,6 @@
 
 .TableEditorFieldDescription {
   font-size: 14px;
-}
-
-.TableEditorFieldSemanticType,
-.TableEditorFieldTarget {
-  margin-top: 3px;
 }
 
 .SettingsInput {
@@ -168,4 +163,18 @@
 
 .AdminTable tbody tr:first-child td {
   padding-top: var(--margin-1);
+}
+
+@keyframes animation-name {
+  0% {
+    background-position: 0% 50%;
+  }
+
+  50% {
+    background-position: 100% 50%;
+  }
+
+  100% {
+    background-position: 0% 50%;
+  }
 }

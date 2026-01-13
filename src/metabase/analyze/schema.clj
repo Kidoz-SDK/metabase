@@ -5,13 +5,7 @@
    [metabase.util.malli.registry :as mr]
    [metabase.util.malli.schema :as ms]))
 
-(mr/def ::no-kebab-case-keys
-  [:fn
-   {:error/message "Map should not contain any kebab-case keys"}
-   (fn [m]
-     (every? (fn [k]
-               (not (str/includes? k "-")))
-             (keys m)))])
+(mr/def ::no-kebab-case-keys (ms/MapWithNoKebabKeys))
 
 (mr/def ::Table
   [:and
@@ -23,10 +17,23 @@
   "Schema for a valid instance of a Metabase Table. Using this with `mu/defn` uses less memory than using `(ms/InstanceOf :model/Table)`"
   [:ref ::Table])
 
+;; TODO (Cam 6/26/25) -- this is duplicated with
+;; `:metabase.query-processor.middleware.annotate/qp-results-cased-col` but I didn't use that to avoid circular
+;; references between modules. Deduplicate these
+(mr/def ::qp-results-cased-map
+  [:fn
+   {:error/message "Map where all simple keywords are snake_case; namespaced keywords can be any case."}
+   (fn [m]
+     (and (map? m)
+          (every? (fn [k]
+                    (or (qualified-keyword? k)
+                        (not (str/includes? (name k) "-"))))
+                  (keys m))))])
+
 (mr/def ::Field
   [:and
    (ms/InstanceOf :model/Field)
-   ::no-kebab-case-keys])
+   ::qp-results-cased-map])
 
 (def Field
   "Schema for a valid instance of a Metabase Field. Using this with `mu/defn` uses less memory than using `(ms/InstanceOf :model/Field)`"

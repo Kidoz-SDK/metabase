@@ -40,7 +40,7 @@ podman run -d -p 12345:3000 --name=metabase docker.io/metabase/metabase:latest
 
 ## Pro or Enterprise quick start
 
-Use this quick start if you have a [license token](../paid-features/activating-the-enterprise-edition.md) for a [paid version](https://www.metabase.com/pricing) of Metabase, and you want to run Metabase locally.
+Use this quick start if you have a [license token](../installation-and-operation/activating-the-enterprise-edition.md) for a [Pro or Enterprise version](https://www.metabase.com/pricing/) of Metabase, and you want to run Metabase locally.
 
 Assuming you have [Podman](https://podman.io) installed and running, get the latest container image:
 
@@ -88,7 +88,6 @@ createdb metabaseappdb
 
 No need to add any tables; Metabase will create those on startup. And let's assume that database is accessible via `my-database-host:5432` with username `name` and password `password`.
 
-
 Here's an example Podman command that tells Metabase to use that database:
 
 ```
@@ -110,7 +109,6 @@ If you've already been running Metabase with the default application database (H
 
 ## Additional Podman maintenance and configuration
 
-
 - [Running Metabase as a service](#running-metabase-as-a-service)
 - [Customizing the Metabase Jetty server](#customizing-the-metabase-jetty-server)
 - [Setting the Java Timezone](#setting-the-java-timezone)
@@ -119,7 +117,7 @@ If you've already been running Metabase with the default application database (H
 
 ### Running Metabase as a service
 
-We can use the [systemd](https://systemd.io/) initialization service to register a Metabase service that can be started and stopped automatically. Prior to executing this process, ensure that the Metabase container is operational. Then, utilize Podman's built-in feature to generate the service file as follows:
+We can use the [systemd](https://systemd.io/) initialization service to register a Metabase service that can be started and stopped automatically. Before executing this process, ensure that the Metabase container is operational. Then, use Podman's built-in feature to generate the service file as follows:
 
 ```
 sudo podman generate systemd --new --name metabase > metabase.service
@@ -139,11 +137,9 @@ sudo systemctl enable metabase
 
 To verify that the system functions correctly, reboot the system. Upon completion of the system initialization process, the Metabase container should be operational as intended.
 
-
 ### Customizing the Metabase Jetty server
 
 You can use any of the custom settings from [Customizing the Metabase Jetty Webserver](../configuring-metabase/customizing-jetty-webserver.md) by setting environment variables in your Podman run command.
-
 
 ### Setting the Java Timezone
 

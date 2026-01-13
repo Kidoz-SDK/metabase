@@ -1,30 +1,31 @@
 import { bindActionCreators } from "@reduxjs/toolkit";
 import PropTypes from "prop-types";
 import { Fragment, useCallback } from "react";
-import { connect } from "react-redux";
 import { push } from "react-router-redux";
 import { useAsync } from "react-use";
 import { t } from "ttag";
 import _ from "underscore";
 
 import { PermissionsEditorLegacyNoSelfServiceWarning } from "metabase/admin/permissions/components/PermissionsEditor/PermissionsEditorLegacyWarning";
-import { useDispatch, useSelector } from "metabase/lib/redux";
+import { connect, useDispatch, useSelector } from "metabase/lib/redux";
 import { PLUGIN_ADVANCED_PERMISSIONS } from "metabase/plugins";
+import { getSetting } from "metabase/selectors/settings";
 import { PermissionsApi } from "metabase/services";
-import { Loader, Center } from "metabase/ui";
+import { Center, Loader } from "metabase/ui";
 
 import {
   PermissionsEditor,
   PermissionsEditorEmptyState,
 } from "../../components/PermissionsEditor";
+import { PermissionsEditorSplitPermsMessage } from "../../components/PermissionsEditor/PermissionsEditorSplitPermsMessage";
 import { PermissionsSidebar } from "../../components/PermissionsSidebar";
 import {
-  updateDataPermission,
   LOAD_DATA_PERMISSIONS_FOR_DB,
+  updateDataPermission,
 } from "../../permissions";
 import {
-  getGroupsDataPermissionEditor,
   getDataFocusSidebar,
+  getGroupsDataPermissionEditor,
   getIsLoadingDatabaseTables,
   getLoadingDatabaseTablesError,
 } from "../../selectors/data-permissions";
@@ -33,14 +34,14 @@ import {
   getDatabaseFocusPermissionsUrl,
 } from "../../utils/urls";
 
-const mapDispatchToProps = dispatch => ({
+const mapDispatchToProps = (dispatch) => ({
   dispatch,
   ...bindActionCreators(
     {
       updateDataPermission,
-      switchView: entityType => push(`/admin/permissions/data/${entityType}`),
+      switchView: (entityType) => push(`/admin/permissions/data/${entityType}`),
       navigateToDatabaseList: () => push(DATABASES_BASE_PATH),
-      navigateToItem: item =>
+      navigateToItem: (item) =>
         push(getDatabaseFocusPermissionsUrl(item.entityId)),
     },
     dispatch,
@@ -83,8 +84,12 @@ function DatabasesPermissionsPage({
   sidebarError,
 }) {
   const dispatch = useDispatch();
-  const permissionEditor = useSelector(state =>
+  const permissionEditor = useSelector((state) =>
     getGroupsDataPermissionEditor(state, { params }),
+  );
+
+  const showSplitPermsMessage = useSelector((state) =>
+    getSetting(state, "show-updated-permission-banner"),
   );
 
   const { loading: isLoading } = useAsync(async () => {
@@ -100,7 +105,7 @@ function DatabasesPermissionsPage({
   }, [params.databaseId]);
 
   const handleEntityChange = useCallback(
-    entityType => {
+    (entityType) => {
       switchView(entityType);
     },
     [switchView],
@@ -123,7 +128,7 @@ function DatabasesPermissionsPage({
     dispatch(action.actionCreator(item.entityId, item.id, "database"));
   };
 
-  const handleBreadcrumbsItemSelect = item => dispatch(push(item.url));
+  const handleBreadcrumbsItemSelect = (item) => dispatch(push(item.url));
 
   const showLegacyNoSelfServiceWarning =
     PLUGIN_ADVANCED_PERMISSIONS.shouldShowViewDataColumn &&
@@ -157,7 +162,12 @@ function DatabasesPermissionsPage({
           onBreadcrumbsItemSelect={handleBreadcrumbsItemSelect}
           onChange={handlePermissionChange}
           onAction={handleAction}
-          warnings={() => (
+          preHeaderContent={() => (
+            <>
+              {showSplitPermsMessage && <PermissionsEditorSplitPermsMessage />}
+            </>
+          )}
+          postHeaderContent={() => (
             <>
               {showLegacyNoSelfServiceWarning && (
                 <PermissionsEditorLegacyNoSelfServiceWarning />

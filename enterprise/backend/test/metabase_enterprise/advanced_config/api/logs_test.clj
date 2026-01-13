@@ -1,10 +1,9 @@
-(ns ^:mb/once metabase-enterprise.advanced-config.api.logs-test
+(ns metabase-enterprise.advanced-config.api.logs-test
   "Tests for /api/ee/logs endpoints"
   (:require
    [clojure.test :refer :all]
    [java-time.api :as t]
    [metabase-enterprise.advanced-config.api.logs :as ee.api.logs]
-   [metabase.models.query-execution :refer [QueryExecution]]
    [metabase.query-processor.util :as qp.util]
    [metabase.test :as mt]))
 
@@ -24,13 +23,13 @@
           user-id   (mt/user->id test-user)]
       ;; QueryExecution is an unbounded mega table and query it could result in a full table scan :( (See: #29103)
       ;; Run the test in an empty database to make querying less intense.
-      (mt/with-empty-h2-app-db
-        (mt/with-temp [QueryExecution qe-a (merge query-execution-defaults {}
-                                                  {:executor_id user-id
-                                                   :started_at  (t/minus now (t/days 2))})
-                       QueryExecution qe-b (merge query-execution-defaults {}
-                                                  {:executor_id user-id
-                                                   :started_at  (t/minus now (t/days 32))})]
+      (mt/with-empty-h2-app-db!
+        (mt/with-temp [:model/QueryExecution qe-a (merge query-execution-defaults {}
+                                                         {:executor_id user-id
+                                                          :started_at  (t/minus now (t/days 2))})
+                       :model/QueryExecution qe-b (merge query-execution-defaults {}
+                                                         {:executor_id user-id
+                                                          :started_at  (t/minus now (t/days 32))})]
           (mt/with-premium-features #{:audit-app}
             (testing "Query Executions within `:yyyy-mm` are returned."
               (is (= [(select-keys qe-a [:started_at :id])]
@@ -52,5 +51,4 @@
                  (mt/user-http-request :crowberto :get 200 "ee/logs/query_execution/2023-02")))))
       (testing "only works when `:audit-app` feature is available."
         (mt/with-premium-features #{}
-          (is (= "Audit app is a paid feature not currently available to your instance. Please upgrade to use it. Learn more at metabase.com/upgrade/"
-                 (mt/user-http-request :crowberto :get 402 "ee/logs/query_execution/2023-02"))))))))
+          (mt/assert-has-premium-feature-error "Audit app" (mt/user-http-request :crowberto :get 402 "ee/logs/query_execution/2023-02")))))))

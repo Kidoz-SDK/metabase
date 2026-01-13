@@ -1,8 +1,8 @@
-import { connect } from "react-redux";
-import { goBack, push } from "react-router-redux";
+import { push } from "react-router-redux";
 import _ from "underscore";
 
-import Timelines from "metabase/entities/timelines";
+import { Timelines } from "metabase/entities/timelines";
+import { connect } from "metabase/lib/redux";
 import * as Urls from "metabase/lib/urls";
 import EditTimelineModal from "metabase/timelines/common/components/EditTimelineModal";
 import type { Timeline } from "metabase-types/api";
@@ -30,9 +30,6 @@ const mapDispatchToProps = (dispatch: any) => ({
   onArchive: async (timeline: Timeline) => {
     await dispatch(Timelines.actions.setArchived(timeline, true));
     dispatch(push(Urls.timelinesInCollection(timeline.collection)));
-  },
-  onCancel: () => {
-    dispatch(goBack());
   },
 });
 

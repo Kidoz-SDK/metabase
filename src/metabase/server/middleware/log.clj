@@ -4,23 +4,21 @@
    [clojure.core.async :as a]
    [clojure.string :as str]
    [metabase.api.common :as api]
-   [metabase.async.streaming-response :as streaming-response]
-   [metabase.async.streaming-response.thread-pool :as thread-pool]
-   [metabase.async.util :as async.u]
-   [metabase.db :as mdb]
-   [metabase.driver.sql-jdbc.execute.diagnostic
-    :as sql-jdbc.execute.diagnostic]
-   [metabase.models.setting :refer [defsetting]]
-   [metabase.server :as server]
-   [metabase.server.request.util :as req.util]
+   [metabase.app-db.core :as mdb]
+   [metabase.driver.sql-jdbc.execute.diagnostic :as sql-jdbc.execute.diagnostic]
+   [metabase.request.core :as request]
+   [metabase.server.instance :as server]
+   [metabase.server.settings :as server.settings]
+   [metabase.server.streaming-response :as streaming-response]
+   [metabase.server.streaming-response.thread-pool :as thread-pool]
    [metabase.util :as u]
-   [metabase.util.i18n :as i18n :refer [deferred-tru trs]]
+   [metabase.util.async :as async.u]
    [metabase.util.log :as log]
    [toucan2.core :as t2])
   (:import
    (clojure.core.async.impl.channels ManyToManyChannel)
    (com.mchange.v2.c3p0 PoolBackedDataSource)
-   (metabase.async.streaming_response StreamingResponse)
+   (metabase.server.streaming_response StreamingResponse)
    (org.eclipse.jetty.util.thread QueuedThreadPool)))
 
 (set! *warn-on-reflection* true)
@@ -45,36 +43,36 @@
   (str
    (format "%s %s %d" (u/upper-case-en (name request-method)) uri status)
    (when async-status
-     (format " [%s: %s]" (trs "ASYNC") async-status))))
+     (format " [ASYNC: %s]" async-status))))
 
 (defn- format-performance-info
   [{:keys [start-time call-count-fn _diag-info-fn]
-    :or {start-time    (System/nanoTime)
+    :or {start-time    (u/start-timer)
          call-count-fn (constantly -1)}}]
-  (let [elapsed-time (u/format-nanoseconds (- (System/nanoTime) start-time))
+  (let [elapsed-time (u/since-ms start-time)
         db-calls     (call-count-fn)]
-    (trs "{0} ({1} DB calls)" elapsed-time db-calls)))
+    (format "%.0fms (%s DB calls)" elapsed-time db-calls)))
 
 (defn- stats [diag-info-fn]
   (str
    (when-let [^PoolBackedDataSource pool (let [data-source (mdb/data-source)]
                                            (when (instance? PoolBackedDataSource data-source)
                                              data-source))]
-     (trs "App DB connections: {0}/{1}"
-          (.getNumBusyConnectionsAllUsers pool) (.getNumConnectionsAllUsers pool)))
+     (format "App DB connections: %s/%s"
+             (.getNumBusyConnectionsAllUsers pool) (.getNumConnectionsAllUsers pool)))
    " "
    (when-let [^QueuedThreadPool pool (some-> (server/instance) .getThreadPool)]
-     (trs "Jetty threads: {0}/{1} ({2} idle, {3} queued)"
-          (.getBusyThreads pool)
-          (.getMaxThreads pool)
-          (.getIdleThreads pool)
-          (.getQueueSize pool)))
+     (format "Jetty threads: %s/%s (%s idle, %s queued)"
+             (.getBusyThreads pool)
+             (.getMaxThreads pool)
+             (.getIdleThreads pool)
+             (.getQueueSize pool)))
    " "
-   (trs "({0} total active threads)" (Thread/activeCount))
+   (format "(%s total active threads)" (Thread/activeCount))
    " "
-   (trs "Queries in flight: {0}" (thread-pool/active-thread-count))
+   (format "Queries in flight: %s" (thread-pool/active-thread-count))
    " "
-   (trs "({0} queued)" (thread-pool/queued-thread-count))
+   (format "(%s queued)" (thread-pool/queued-thread-count))
    (when diag-info-fn
      (when-let [diag-info (not-empty (diag-info-fn))]
        (format
@@ -103,7 +101,6 @@
                                (format-threads-info info opts)
                                (format-log-context info opts)
                                (format-error-info info opts)])))
-
 
 ;;; +----------------------------------------------------------------------------------------------------------------+
 ;;; |                                                Logging the Info                                                |
@@ -153,7 +150,6 @@
     (catch Throwable e
       (log/error e "Error logging API request"))))
 
-
 ;;; +----------------------------------------------------------------------------------------------------------------+
 ;;; |                                                 Async Logging                                                  |
 ;;; +----------------------------------------------------------------------------------------------------------------+
@@ -188,7 +184,6 @@
     (log-info info))
   response)
 
-
 ;;; +----------------------------------------------------------------------------------------------------------------+
 ;;; |                                                   Middleware                                                   |
 ;;; +----------------------------------------------------------------------------------------------------------------+
@@ -196,23 +191,17 @@
 ;; Actual middleware. Determines whether request should be logged, and, if so, creates the info dictionary and hands
 ;; off to functions above.
 
-(defsetting health-check-logging-enabled
-  (deferred-tru "Whether to log health check requests from session middleware.")
-  :type       :boolean
-  :default    true
-  :visibility :internal
-  :export?    false)
-
 (defn- logging-disabled-uris
   "The set of URIs that should not be logged."
   []
-  (cond-> #{"/api/util/logs"}
-    (not (health-check-logging-enabled)) (conj "/api/health")))
+  (cond-> #{"/api/logger/logs"}
+    (not (server.settings/health-check-logging-enabled)) (into #{"/api/health" "/livez" "/readyz"})))
 
 (defn- should-log-request? [{:keys [uri], :as request}]
-  ;; don't log calls to /health or /util/logs because they clutter up the logs (especially the window in admin) with
-  ;; useless lines
-  (and (req.util/api-call? request)
+  ;; don't log calls to health checks or /logger/logs because they clutter up the logs (especially the window in admin)
+  ;; with useless lines
+  (and (or (request/api-call? request)
+           (contains? #{"/livez" "/readyz"} uri))
        (not ((logging-disabled-uris) uri))))
 
 (defn log-api-call
@@ -226,7 +215,7 @@
       (t2/with-call-count [call-count-fn]
         (sql-jdbc.execute.diagnostic/capturing-diagnostic-info [diag-info-fn]
           (let [info           {:request       request
-                                :start-time    (System/nanoTime)
+                                :start-time    (u/start-timer)
                                 :call-count-fn call-count-fn
                                 :diag-info-fn  diag-info-fn
                                 :log-context   {:metabase-user-id api/*current-user-id*}}

@@ -7,7 +7,7 @@ import { getChartMeasurements } from "metabase/visualizations/echarts/cartesian/
 import { getWaterfallChartModel } from "metabase/visualizations/echarts/cartesian/waterfall/model";
 import { getWaterfallChartOption } from "metabase/visualizations/echarts/cartesian/waterfall/option";
 
-import { computeStaticWaterfallChartSettings } from "./settings";
+import Watermark from "../../watermark.svg?component";
 
 registerEChartsModules();
 
@@ -16,25 +16,22 @@ const HEIGHT = 360;
 
 export function WaterfallChart({
   rawSeries,
-  dashcardSettings,
+  settings,
   renderingContext,
   width = WIDTH,
   height = HEIGHT,
   isStorybook = false,
+  hasDevWatermark = false,
 }: StaticChartProps) {
-  const computedVisualizationSettings = computeStaticWaterfallChartSettings(
-    rawSeries,
-    dashcardSettings,
-    renderingContext,
-  );
   const chartModel = getWaterfallChartModel(
     rawSeries,
-    computedVisualizationSettings,
+    settings,
+    [],
     renderingContext,
   );
   const chartMeasurements = getChartMeasurements(
     chartModel,
-    computedVisualizationSettings,
+    settings,
     false,
     width,
     height,
@@ -46,7 +43,7 @@ export function WaterfallChart({
     chartMeasurements,
     null,
     [],
-    computedVisualizationSettings,
+    settings,
     false,
     renderingContext,
   );
@@ -58,6 +55,17 @@ export function WaterfallChart({
   return (
     <svg xmlns="http://www.w3.org/2000/svg" width={width} height={height}>
       <g dangerouslySetInnerHTML={{ __html: chartSvg }}></g>
+      {hasDevWatermark && (
+        <Watermark
+          x="0"
+          y="0"
+          height={height}
+          width={width}
+          preserveAspectRatio="xMinYMin slice"
+          fill={renderingContext.getColor("text-secondary")}
+          opacity={0.2}
+        />
+      )}
     </svg>
   );
 }

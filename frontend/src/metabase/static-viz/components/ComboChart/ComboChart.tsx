@@ -9,10 +9,9 @@ import { getCartesianChartModel } from "metabase/visualizations/echarts/cartesia
 import { getLegendItems } from "metabase/visualizations/echarts/cartesian/model/legend";
 import { getCartesianChartOption } from "metabase/visualizations/echarts/cartesian/option";
 
+import Watermark from "../../watermark.svg?component";
 import { Legend } from "../Legend";
 import { calculateLegendRows } from "../Legend/utils";
-
-import { computeStaticComboChartSettings } from "./settings";
 
 const WIDTH = 540;
 const HEIGHT = 360;
@@ -22,11 +21,12 @@ registerEChartsModules();
 
 export const ComboChart = ({
   rawSeries,
-  dashcardSettings,
+  settings,
   renderingContext,
   width = WIDTH,
   height = HEIGHT,
   isStorybook = false,
+  hasDevWatermark = false,
 }: StaticChartProps) => {
   const chart = init(null, null, {
     renderer: "svg",
@@ -35,20 +35,15 @@ export const ComboChart = ({
     height,
   });
 
-  const computedVisualizationSettings = computeStaticComboChartSettings(
-    rawSeries,
-    dashcardSettings,
-    renderingContext,
-  );
-
   const chartModel = getCartesianChartModel(
     rawSeries,
-    computedVisualizationSettings,
+    settings,
+    [],
     renderingContext,
   );
 
   const legendItems = getLegendItems(chartModel.seriesModels);
-  const isReversed = computedVisualizationSettings["legend.is_reversed"];
+  const isReversed = settings["legend.is_reversed"];
   const { height: legendHeight, items: legendLayoutItems } =
     calculateLegendRows({
       items: legendItems,
@@ -60,7 +55,7 @@ export const ComboChart = ({
 
   const chartMeasurements = getChartMeasurements(
     chartModel,
-    computedVisualizationSettings,
+    settings,
     false,
     width,
     height,
@@ -72,10 +67,9 @@ export const ComboChart = ({
     chartMeasurements,
     null,
     [],
-    computedVisualizationSettings,
+    settings,
     WIDTH,
     false,
-    null,
     renderingContext,
   );
 
@@ -93,6 +87,17 @@ export const ComboChart = ({
       <Group top={legendHeight}>
         <g dangerouslySetInnerHTML={{ __html: chartSvg }}></g>
       </Group>
+      {hasDevWatermark && (
+        <Watermark
+          x="0"
+          y="0"
+          height={height}
+          width={width}
+          preserveAspectRatio="xMinYMin slice"
+          fill={renderingContext.getColor("text-secondary")}
+          opacity={0.2}
+        />
+      )}
     </svg>
   );
 };

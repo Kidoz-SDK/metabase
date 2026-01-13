@@ -1,438 +1,149 @@
-(ns ^:mb/once metabase.search.filter-test
+(ns metabase.search.filter-test
   (:require
+   [clojure.math.combinatorics :as math.combo]
    [clojure.test :refer :all]
-   [metabase.models.permissions :as perms]
+   [metabase.config.core :as config]
+   [metabase.models.resolution]
    [metabase.search.config :as search.config]
    [metabase.search.filter :as search.filter]
-   [metabase.test :as mt]))
+   [metabase.search.in-place.filter :as search.in-place.filter]
+   [metabase.search.ingestion :as search.ingestion]
+   [metabase.search.test-util :as search.tu]
+   [metabase.test.fixtures :as fixtures]))
 
-(def ^:private default-search-ctx
-  {:search-string       nil
-   :archived?           false
-   :models             search.config/all-models
-   :model-ancestors?   false
-   :current-user-id    1
-   :current-user-perms #{"/"}})
+(use-fixtures :once (fixtures/initialize :db))
 
-(deftest ^:parallel ->applicable-models-test
-  (testing "without optional filters"
-    (testing "return :models as is"
-      (is (= search.config/all-models
-             (search.filter/search-context->applicable-models
-              default-search-ctx)))
-      (is (= #{}
-             (search.filter/search-context->applicable-models
-              (assoc default-search-ctx :models #{}))))
-      (is (= search.config/all-models
-             (search.filter/search-context->applicable-models
-              (merge default-search-ctx
-                     {:archived? true})))))))
+(use-fixtures :each (fn [thunk] (binding [search.ingestion/*force-sync* true]
+                                  (search.tu/with-new-search-if-available-otherwise-legacy (thunk)))))
 
-(deftest ^:parallel ->applicable-models-test-2
-  (testing "optional filters will return intersection of support models and provided models\n"
-    (testing "created by"
-      (is (= #{"dashboard" "dataset" "action" "card" "metric"}
-             (search.filter/search-context->applicable-models
-              (merge default-search-ctx
-                     {:created-by #{1}}))))
+(defn- filter-keys []
+  (remove #{:ids} (map :context-key (vals search.config/filters))))
 
-      (is (= #{"dashboard" "dataset"}
-             (search.filter/search-context->applicable-models
-              (merge default-search-ctx
-                     {:models #{"dashboard" "dataset" "table"}
-                      :created-by #{1}})))))
+(defn- active-filter-combinations []
+  ;; We ignore :archived? as we've moved some of these filters to the `:where` clause as a simplifying optimization.
+  ;; We ignore :card-db-id as legacy search implements this filter sneakily inside the models themselves.
+  (math.combo/subsets (remove #{:archived? :table-db-id} (filter-keys))))
 
-    (testing "created at"
-      (is (= #{"dashboard" "table" "dataset" "collection" "database" "action" "card" "metric"}
-             (search.filter/search-context->applicable-models
-              (merge default-search-ctx
-                     {:created-at "past3days"}))))
+(defn- with-all-models [search-ctx]
+  (assoc search-ctx :models search.config/all-models))
 
-      (is (= #{"dashboard" "table" "dataset"}
-             (search.filter/search-context->applicable-models
-              (merge default-search-ctx
-                     {:models #{"dashboard" "dataset" "table"}
-                      :created-at "past3days"})))))
+(defn- with-all-models-and-regular-user [search-ctx]
+  (with-all-models (assoc search-ctx :is-impersonated-user? false :is-sandboxed-user? false)))
 
-    (testing "verified"
-      (is (= #{"dataset" "card" "metric"}
-             (search.filter/search-context->applicable-models
-              (merge default-search-ctx
-                     {:verified true}))))
+(defn- with-all-models-and-sandboxed-user [search-ctx]
+  (with-all-models (assoc search-ctx :is-impersonated-user? false :is-sandboxed-user? true)))
 
-      (is (= #{"dataset"}
-             (search.filter/search-context->applicable-models
-              (merge default-search-ctx
-                     {:models   #{"dashboard" "dataset" "table"}
-                      :verified true})))))
+(defn- with-all-models-and-superuser [search-ctx]
+  (-> search-ctx
+      with-all-models-and-regular-user
+      (assoc :is-superuser? true)))
 
-    (testing "last edited by"
-      (is (= #{"dashboard" "dataset" "card" "metric"}
-             (search.filter/search-context->applicable-models
-              (merge default-search-ctx
-                     {:last-edited-by #{1}}))))
+(defn- test-value-for-filter
+  "Returns an appropriate test value for each filter type."
+  [filter-key]
+  (case filter-key
+    ;; Boolean filters
+    (:archived? :search-native-query :verified) true
+    ;; Collection filters (sets/sequences)
+    (:created-by :last-edited-by :ids) #{1}
+    :display-type #{"table"}
+    ;; Date range filters (strings)
+    (:created-at :last-edited-at) "2023-01-01"
+    ;; Single value filters
+    :table-db-id 1
+    true))
 
-      (is (= #{"dashboard" "dataset"}
-             (search.filter/search-context->applicable-models
-              (merge default-search-ctx
-                     {:models         #{"dashboard" "dataset" "table"}
-                      :last-edited-by #{1}})))))
+(defn- create-test-filter-context
+  "Creates a test filter context with appropriate values for each filter."
+  [active-filters]
+  (into {} (map (fn [filter-key]
+                  [filter-key (test-value-for-filter filter-key)])
+                active-filters)))
 
-   (testing "last edited at"
-     (is (= #{"dashboard" "dataset" "action" "metric" "card"}
-            (search.filter/search-context->applicable-models
-             (merge default-search-ctx
-                    {:last-edited-at "past3days"}))))
+(deftest search-context->applicable-models-test
+  (testing "All models (except transforms, which are admin-only) are relevant if we're not looking in the trash"
+    (is (= (disj search.config/all-models "transform")
+           (search.filter/search-context->applicable-models (with-all-models-and-regular-user {:archived? false})))))
 
-     (is (= #{"dashboard" "dataset"}
-            (search.filter/search-context->applicable-models
-             (merge default-search-ctx
-                    {:models   #{"dashboard" "dataset" "table"}
-                     :last-edited-at "past3days"})))))
+  (testing "We only search for certain models in the trash"
+    (is (= #{"dashboard" "dataset" "document" "segment" "measure" "collection" "action" "metric" "card"}
+           (search.filter/search-context->applicable-models (with-all-models-and-regular-user {:archived? true})))))
 
-   (testing "search native query"
-     (is (= #{"dataset" "action" "card" "metric"}
-            (search.filter/search-context->applicable-models
-             (merge default-search-ctx
-                    {:search-native-query true})))))))
+  (testing "Indexed entities and transforms (which are admin-only) are not visible for sandboxed users"
+    (is (= (disj search.config/all-models "indexed-entity" "transform")
+           (search.filter/search-context->applicable-models (with-all-models-and-sandboxed-user {:archived? false})))))
 
-(deftest joined-with-table?-test
-  (are [expected args]
-       (= expected (apply #'search.filter/joined-with-table? args))
+  (testing "All models including transforms are visible for superusers"
+    (is (= search.config/all-models
+           (search.filter/search-context->applicable-models (with-all-models-and-superuser {:archived? false})))))
 
-       false
-       [{} :join :a]
+  (doseq [active-filters (active-filter-combinations)]
+    (testing (str "Consistent models included when filtering on " (vec active-filters))
+      (let [search-ctx (with-all-models-and-regular-user (create-test-filter-context active-filters))]
+        (is (= (search.in-place.filter/search-context->applicable-models search-ctx)
+               (search.filter/search-context->applicable-models search-ctx)))))))
 
-       true
-       [{:join [:a [:= :a.b :c.d]]} :join :a]
+(def kitchen-sink-filter-context
+  {:archived?                    true
+   :collection                   5
+   :created-at                   "2024-10-01"
+   :created-by                   [123]
+   :include-dashboard-questions? true
+   :table-db-id                  231
+   :last-edited-by               [321]
+   :last-edited-at               "2024-10-02"
+   :search-native-query          true
+   :verified                     true
+   :ids                          [1 2 3 4]
+   :non-temporal-dim-ids         "[1]"
+   :has-temporal-dim             true
+   :display-type                 ["line"]
+   :models                       (disj search.config/all-models "dataset")})
 
-       false
-       [{:join [:a [:= :a.b :c.d]]} :join :d]
+(deftest with-filters-test
+  (testing "The kitchen sink context is complete"
+    (is (empty? (remove kitchen-sink-filter-context (filter-keys)))))
 
-       ;; work with multiple join types
-       false
-       [{:join [:a [:= :a.b :c.d]]} :left-join :d]
-
-       ;; do the same with other join types too
-       true
-       [{:left-join [:a [:= :a.b :c.d]]} :left-join :a]
-
-       false
-       [{:left-join [:a [:= :a.b :c.d]]} :left-join :d]))
-
-
-(def ^:private base-search-query
-  {:select [:*]
-   :from   [:table]})
-
-(deftest ^:parallel build-archived-filter-test
-  (testing "archived filters"
-    (is (= [:= :card.archived false]
-           (:where (search.filter/build-filters
-                    base-search-query "card" default-search-ctx))))
-
-    (is (= [:and
-            [:= :table.active true]
-            [:= :table.visibility_type nil]
-            [:not [:= :table.db_id perms/audit-db-id]]]
-           (:where (search.filter/build-filters
-                    base-search-query "table"  default-search-ctx))))))
-
-(deftest ^:parallel build-table-filter-always-ignores-audit-tables
-  (is (contains?
-         (set (:where (search.filter/build-filters
-                       base-search-query "table"  default-search-ctx)))
-         [:not [:= :table.db_id perms/audit-db-id]])))
-
-(deftest ^:parallel build-filter-with-search-string-test
-  (testing "with search string"
-    (is (= [:and
-            [:or
-             [:like [:lower :card.name] "%a%"]
-             [:like [:lower :card.name] "%string%"]
-             [:like [:lower :card.description] "%a%"]
-             [:like [:lower :card.description] "%string%"]]
-            [:= :card.archived false]]
-           (:where (search.filter/build-filters
-                    base-search-query "card"
-                    (merge default-search-ctx {:search-string "a string"})))))))
-
-(deftest date-range-filter-clause-test
-  (mt/with-clock #t "2023-05-04T10:02:05Z[UTC]"
-    (are [created-at expected-where]
-         (= expected-where (#'search.filter/date-range-filter-clause :card.created_at created-at))
-         ;; absolute datetime
-         "Q1-2023"                                 [:and [:>= [:cast :card.created_at :date] #t "2023-01-01"]
-                                                    [:< [:cast :card.created_at :date]  #t "2023-04-01"]]
-         "2016-04-18~2016-04-23"                   [:and [:>= [:cast :card.created_at :date] #t "2016-04-18"]
-                                                    [:< [:cast :card.created_at :date]  #t "2016-04-24"]]
-         "2016-04-18"                              [:and [:>= [:cast :card.created_at :date] #t "2016-04-18"]
-                                                    [:< [:cast :card.created_at :date]  #t "2016-04-19"]]
-         "2023-05-04~"                             [:> [:cast :card.created_at :date]  #t "2023-05-04"]
-         "~2023-05-04"                             [:< [:cast :card.created_at :date]  #t "2023-05-05"]
-         "2016-04-18T10:30:00~2016-04-23T11:30:00" [:and [:>= :card.created_at #t "2016-04-18T10:30"]
-                                                    [:< :card.created_at #t "2016-04-23T11:31:00"]]
-         "2016-04-23T10:00:00"                     [:and [:>= :card.created_at #t "2016-04-23T10:00"]
-                                                    [:< :card.created_at  #t "2016-04-23T10:01"]]
-         "2016-04-18T10:30:00~"                    [:> :card.created_at #t "2016-04-18T10:30"]
-         "~2016-04-18T10:30:00"                    [:< :card.created_at #t "2016-04-18T10:31"]
-         ;; relative datetime
-         "past3days"                               [:and [:>= [:cast :card.created_at :date] #t "2023-05-01"]
-                                                    [:< [:cast :card.created_at :date]  #t "2023-05-04"]]
-         "past3days~"                              [:and [:>= [:cast :card.created_at :date] #t "2023-05-01"]
-                                                    [:< [:cast :card.created_at :date] #t "2023-05-05"]]
-         "past3hours~"                             [:and [:>= :card.created_at #t "2023-05-04T07:00"]
-                                                    [:< :card.created_at #t "2023-05-04T11:00"]]
-         "next3days"                               [:and [:>= [:cast :card.created_at :date] #t "2023-05-05"]
-                                                    [:< [:cast :card.created_at :date]  #t "2023-05-08"]]
-         "thisminute"                              [:and [:>= :card.created_at #t "2023-05-04T10:02"]
-                                                    [:< :card.created_at #t "2023-05-04T10:03"]]
-         "lasthour"                                [:and [:>= :card.created_at #t "2023-05-04T09:00"]
-                                                    [:< :card.created_at #t "2023-05-04T10:00"]]
-         "past1months-from-36months"               [:and [:>= [:cast :card.created_at :date] #t "2020-04-01"]
-                                                    [:< [:cast :card.created_at :date]  #t "2020-05-01"]]
-         "today"                                   [:and [:>= [:cast :card.created_at :date] #t "2023-05-04"]
-                                                    [:< [:cast :card.created_at :date] #t "2023-05-05"]]
-         "yesterday"                               [:and [:>= [:cast :card.created_at :date] #t "2023-05-03"]
-                                                    [:< [:cast :card.created_at :date] #t "2023-05-04"]])))
-
-;; both created at and last-edited-at use [[search.filter/date-range-filter-clause]]
-;; to generate the filter clause so for the full test cases, check [[date-range-filter-clause-test]]
-;; these 2 tests are for checking the shape of the query
-(deftest ^:parallel created-at-filter-test
-  (testing "created-at filter"
-    (is (= {:select [:*]
-            :from   [:table]
+  (testing "In the general case, we simply filter by models, and exclude dashboard cards"
+    (is (= {:select [:some :stuff]
+            :from   :somewhere
             :where  [:and
-                     [:= :card.archived false]
-                     [:>= [:cast :card.created_at :date] #t "2016-04-18"]
-                     [:< [:cast :card.created_at :date]  #t "2016-04-24"]]}
-           (search.filter/build-filters
-            base-search-query "card"
-            (merge default-search-ctx {:created-at "2016-04-18~2016-04-23"}))))))
-
-(deftest ^:parallel last-edited-at-filter-test
-  (testing "last edited at filter"
-    (is (= {:select [:*]
-            :from   [:table]
-            :join   [:revision [:= :revision.model_id :card.id]]
+                     [:= 1 2]
+                     [:or [:= nil :search_index.dashboard_id] nil]]}
+           (search.filter/with-filters {:models []} {:select [:some :stuff], :from :somewhere})))
+    (is (= {:select [:some :stuff]
+            :from   :somewhere
             :where  [:and
-                     [:= :card.archived false]
-                     [:= :revision.most_recent true]
-                     [:= :revision.model "Card"]
-                     [:>= [:cast :revision.timestamp :date] #t "2016-04-18"]
-                     [:< [:cast :revision.timestamp :date] #t "2016-04-24"]]}
-           (search.filter/build-filters
-            base-search-query "dataset"
-            (merge default-search-ctx {:last-edited-at "2016-04-18~2016-04-23"}))))
+                     [:in :search_index.model ["a"]]
+                     [:or [:= nil :search_index.dashboard_id] nil]]}
+           (search.filter/with-filters {:models ["a"]} {:select [:some :stuff], :from :somewhere}))))
 
-   (testing "do not join twice if has both last-edited-at and last-edited-by"
-     (is (= {:select [:*]
-             :from   [:table]
-             :join   [:revision [:= :revision.model_id :card.id]]
-             :where  [:and
-                      [:= :card.archived false]
-                      [:= :revision.most_recent true]
-                      [:= :revision.model "Card"]
-                      [:>= [:cast :revision.timestamp :date] #t "2016-04-18"]
-                      [:< [:cast :revision.timestamp :date] #t "2016-04-24"]
-                      [:= :revision.user_id 1]]}
-            (search.filter/build-filters
-             base-search-query "dataset"
-             (merge default-search-ctx {:last-edited-at "2016-04-18~2016-04-23"
-                                        :last-edited-by #{1}})))))
-
-   (testing "for actiion"
-     (is (= {:select [:*]
-             :from   [:table]
-             :where  [:and [:= :action.archived false]
-                      [:>= [:cast :action.updated_at :date] #t "2016-04-18"]
-                      [:< [:cast :action.updated_at :date] #t "2016-04-24"]]}
-            (search.filter/build-filters
-             base-search-query "action"
-             (merge default-search-ctx {:last-edited-at "2016-04-18~2016-04-23"})))))))
-
-(deftest ^:parallel build-created-by-filter-test
-  (testing "created-by filter"
-    (is (= [:and [:= :card.archived false] [:= :card.creator_id 1]]
-           (:where (search.filter/build-filters
-                    base-search-query "card"
-                    (merge default-search-ctx
-                           {:created-by #{1}})))))
-    (is (= [:and [:= :card.archived false] [:in :card.creator_id #{1 2}]]
-           (:where (search.filter/build-filters
-                    base-search-query "card"
-                    (merge default-search-ctx
-                           {:created-by #{1 2}})))))))
-
-(deftest ^:parallel build-last-edited-by-filter-test
-  (testing "last edited by filter"
-    (is (= {:select [:*]
-            :from   [:table]
-            :where  [:and
-                     [:= :card.archived false]
-                     [:= :revision.most_recent true]
-                     [:= :revision.model "Card"]
-                     [:= :revision.user_id 1]]
-            :join   [:revision [:= :revision.model_id :card.id]]}
-           (search.filter/build-filters
-            base-search-query "dataset"
-            (merge default-search-ctx
-                   {:last-edited-by #{1}}))))))
-
-(deftest ^:parallel build-last-edited-by-filter-test-2
-  (testing "last edited by filter"
-    (is (= {:select [:*]
-            :from   [:table]
-            :where  [:and
-                     [:= :card.archived false]
-                     [:= :revision.most_recent true]
-                     [:= :revision.model "Card"]
-                     [:in :revision.user_id #{1 2}]]
-            :join   [:revision [:= :revision.model_id :card.id]]}
-           (search.filter/build-filters
-            base-search-query "dataset"
-            (merge default-search-ctx
-                   {:last-edited-by #{1 2}}))))))
-
-(deftest ^:parallel build-verified-filter-test
-  (testing "verified filter"
-    (mt/with-premium-features #{:content-verification}
-      (testing "for cards"
-        (is (= (merge
-                base-search-query
-                {:where  [:and
-                          [:= :card.archived false]
-                          [:= :moderation_review.status "verified"]
-                          [:= :moderation_review.moderated_item_type "card"]
-                          [:= :moderation_review.most_recent true]]
-                 :join   [:moderation_review [:= :moderation_review.moderated_item_id :card.id]]})
-               (search.filter/build-filters
-                base-search-query "card"
-                (merge default-search-ctx {:verified true}))))))))
-
-(deftest ^:parallel build-verified-filter-test-1b
-  (testing "verified filter"
-    (mt/with-premium-features #{:content-verification}
-      (testing "for models"
-        (is (= (merge
-                base-search-query
-                {:where  [:and
-                          [:= :card.archived false]
-                          [:= :moderation_review.status "verified"]
-                          [:= :moderation_review.moderated_item_type "card"]
-                          [:= :moderation_review.most_recent true]]
-                 :join   [:moderation_review [:= :moderation_review.moderated_item_id :card.id]]})
-               (search.filter/build-filters
-                base-search-query "dataset"
-                (merge default-search-ctx {:verified true}))))))))
-
-(deftest ^:parallel build-verified-filter-test-2
-  (testing "verified filter"
-    (mt/with-premium-features #{}
-      (testing "for cards without ee features"
-        (is (= (merge
-                base-search-query
-                {:where  [:and
-                          [:= :card.archived false]
-                          [:inline [:= 0 1]]]})
-               (search.filter/build-filters
-                base-search-query "card"
-                (merge default-search-ctx {:verified true}))))))))
-
-(deftest ^:parallel build-verified-filter-test-2b
-  (testing "verified filter"
-    (mt/with-premium-features #{}
-      (testing "for models without ee features"
-        (is (= (merge
-                base-search-query
-                {:where  [:and
-                          [:= :card.archived false]
-                          [:inline [:= 0 1]]]})
-               (search.filter/build-filters
-                base-search-query "dataset"
-                (merge default-search-ctx {:verified true}))))))))
-
-(deftest ^:parallel build-filter-throw-error-for-unsuported-filters-test
-  (testing "throw error for filtering with unsupport models"
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo
-         #":created-by filter for database is not supported"
-         (search.filter/build-filters
-          base-search-query
-          "database"
-          (merge default-search-ctx
-                 {:created-by #{1}}))))))
-
-(deftest build-filters-indexed-entity-test
-  (testing "users that are not sandboxed or impersonated can search for indexed entity"
-    (with-redefs [search.filter/sandboxed-or-impersonated-user? (constantly false)]
-      (is (= [:and
-              [:or [:like [:lower :model-index-value.name] "%foo%"]]
-              [:inline [:= 1 1]]]
-             (:where (search.filter/build-filters
-                      base-search-query
-                      "indexed-entity"
-                      (merge default-search-ctx {:search-string "foo"}))))))))
-
-(deftest build-filters-indexed-entity-test-2
-  (testing "otherwise search result is empty"
-    (with-redefs [search.filter/sandboxed-or-impersonated-user? (constantly true)]
-      (is (= [:and
-              [:or [:= 0 1]]
-              [:inline [:= 1 1]]]
-             (:where (search.filter/build-filters
-                      base-search-query
-                      "indexed-entity"
-                      (merge default-search-ctx {:search-string "foo"}))))))))
-
-(deftest ^:parallel build-filters-search-native-query
-  (doseq [model ["dataset" "card"]]
-    (testing model
-      (testing "do not search for native query by default"
-        (is (= [:and
-                [:or [:like [:lower :card.name] "%foo%"] [:like [:lower :card.description] "%foo%"]]
-                [:= :card.archived false]]
-               (:where (search.filter/build-filters
-                        base-search-query
-                        model
-                        (merge default-search-ctx {:search-string "foo"})))))))))
-
-(deftest ^:parallel build-filters-search-native-query-2
-  (doseq [model ["dataset" "card"]]
-    (testing model
-      (testing "search in both name, description and dataset_query if is enabled"
-        (is (= [:and [:or
-                      [:like [:lower :card.name] "%foo%"]
-                      [:and [:= :card.query_type "native"] [:like [:lower :card.dataset_query] "%foo%"]]
-                      [:like [:lower :card.description] "%foo%"]]
-                [:= :card.archived false]]
-               (:where (search.filter/build-filters
-                        base-search-query
-                        model
-                        (merge default-search-ctx {:search-string "foo" :search-native-query true})))))))))
-
-(deftest ^:parallel build-filters-search-native-query-3
-  (testing "action"
-    (testing "do not search for native query by default"
-      (is (= [:and
-              [:or [:like [:lower :action.name] "%foo%"] [:like [:lower :action.description] "%foo%"]]
-              [:= :action.archived false]]
-             (:where (search.filter/build-filters
-                      base-search-query
-                      "action"
-                      (merge default-search-ctx {:search-string "foo"}))))))))
-
-(deftest ^:parallel build-filters-search-native-query-4
-  (testing "action"
-    (testing "search in both name, description and dataset_query if is enabled"
-      (is (= [:and
-              [:or
-               [:like [:lower :action.name] "%foo%"]
-               [:like [:lower :query_action.dataset_query] "%foo%"]
-               [:like [:lower :action.description] "%foo%"]]
-              [:= :action.archived false]]
-             (:where (search.filter/build-filters
-                      base-search-query
-                      "action"
-                      (merge default-search-ctx {:search-string "foo" :search-native-query true}))))))))
+  (testing "We can insert appropriate constraints for all the filters"
+    (is (= {:select [:some :stuff]
+            :from   :somewhere
+            ;; This :where clause is a set to avoid flakes, since the clause order will be non-deterministic.
+            :where  #{:and
+                      [:in :search_index.model (cond-> #{"dashboard" "table" "segment" "measure" "collection" "database" "action" "indexed-entity" "metric" "card" "document"}
+                                                 config/ee-available? (conj "transform"))]
+                      [:in :search_index.model_id ["1" "2" "3" "4"]]
+                      [:in :search_index.model ["card" "dataset" "metric" "dashboard" "action"]]
+                      [:= :search_index.archived true]
+                      [:>= [:cast :search_index.model_created_at :date] #t"2024-10-01"]
+                      [:< [:cast :search_index.model_created_at :date] #t"2024-10-02"]
+                      ;; depends on whether :content-verification is enabled
+                      #_[:= :search_index.verified true]
+                      [:in :search_index.creator_id [123]]
+                      [:or
+                       [:= nil :search_index.dashboard_id]
+                       [:not= [:inline 0] [:coalesce :search_index.dashboardcard_count [:inline 0]]]]
+                      [:= :search_index.database_id 231]
+                      [:>= [:cast :search_index.last_edited_at :date] #t"2024-10-02"]
+                      [:< [:cast :search_index.last_edited_at :date] #t"2024-10-03"]
+                      [:in :search_index.last_editor_id [321]]
+                      [:= :search_index.non_temporal_dim_ids "[1]"]
+                      [:= :search_index.has_temporal_dim true]
+                      [:in :search_index.display_type ["line"]]
+                      [:or [:= :search_index.collection_id 5] [:like :collection.location "%/5/%"]]
+                      [:not= :search_index.model [:inline "table"]]}}
+           (-> (search.filter/with-filters kitchen-sink-filter-context {:select [:some :stuff], :from :somewhere})
+               (update :where set))))))

@@ -1,34 +1,8 @@
-.Chart,
-.Detail {
-  position: absolute;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  right: 0;
-}
-
-.Chart {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.Detail {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-}
-
-.Value {
-  color: var(--mb-color-text-dark);
-  font-size: 22px;
-  font-weight: bolder;
-}
-
-.Title {
-  color: var(--mb-color-text-light);
-  font-size: 14px;
-  font-weight: bold;
-  text-transform: uppercase;
+.PieChartContainer {
+  div > svg {
+    /* Make sure the svg is centralized to avoid overflow and flickering when container is resized */
+    left: 50% !important;
+    position: absolute;
+    translate: -50% 0;
+  }
 }

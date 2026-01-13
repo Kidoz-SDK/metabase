@@ -1,13 +1,13 @@
 import crossfilter from "crossfilter";
-import d3 from "d3";
-import { t } from "ttag";
+import * as d3 from "d3";
 import _ from "underscore";
 
 import { isNotNull } from "metabase/lib/types";
-import { getColumnKey } from "metabase-lib/v1/queries/utils/get-column-key";
-import { isDimension, isMetric, isDate } from "metabase-lib/v1/types/utils/isa";
+import { getColumnKey } from "metabase-lib/v1/queries/utils/column-key";
+import { isDate, isDimension, isMetric } from "metabase-lib/v1/types/utils/isa";
 
 export const MAX_SERIES = 100;
+export const MAX_REASONABLE_SANKEY_DIMENSION_CARDINALITY = 100;
 
 const SPLIT_AXIS_UNSPLIT_COST = -100;
 const SPLIT_AXIS_COST_FACTOR = 2;
@@ -26,11 +26,14 @@ export function columnsAreValid(colNames, data, filter = () => true) {
   for (const col of data.cols) {
     colsByName[col.name] = col;
   }
-  return colNames.reduce(
+
+  const isValid = colNames.reduce(
     (acc, name) =>
       acc && (name == null || (colsByName[name] && filter(colsByName[name]))),
     true,
   );
+
+  return Boolean(isValid);
 }
 
 // computed size properties (drop 'px' and convert string -> Number)
@@ -112,18 +115,18 @@ function axisCost(seriesExtents, favorUnsplit = true) {
 export function computeSplit(extents, left = [], right = []) {
   const unassigned = extents
     .map((e, i) => i)
-    .filter(i => left.indexOf(i) < 0 && right.indexOf(i) < 0);
+    .filter((i) => left.indexOf(i) < 0 && right.indexOf(i) < 0);
 
   // if any are assigned to right we have decided to split so don't favor unsplit
   const favorUnsplit = right.length > 0;
 
-  const cost = split =>
+  const cost = (split) =>
     axisCost(
-      split[0].map(i => extents[i]),
+      split[0].map((i) => extents[i]),
       favorUnsplit,
     ) +
     axisCost(
-      split[1].map(i => extents[i]),
+      split[1].map((i) => extents[i]),
       favorUnsplit,
     );
 
@@ -146,27 +149,6 @@ export function computeSplit(extents, left = [], right = []) {
   }
 }
 
-const AGGREGATION_NAME_MAP = {
-  avg: t`Average`,
-  count: t`Count`,
-  sum: t`Sum`,
-  distinct: t`Distinct`,
-  stddev: t`Standard Deviation`,
-};
-const AGGREGATION_NAME_REGEX = new RegExp(
-  `^(${Object.keys(AGGREGATION_NAME_MAP).join("|")})(_\\d+)?$`,
-);
-
-export function getFriendlyName(column) {
-  if (AGGREGATION_NAME_REGEX.test(column.name)) {
-    const friendly = AGGREGATION_NAME_MAP[column.display_name.toLowerCase()];
-    if (friendly) {
-      return friendly;
-    }
-  }
-  return column.display_name;
-}
-
 export function isSameSeries(seriesA, seriesB) {
   return (
     (seriesA && seriesA.length) === (seriesB && seriesB.length) &&
@@ -183,7 +165,7 @@ export function isSameSeries(seriesA, seriesB) {
 }
 
 export function colorShades(color, count) {
-  return _.range(count).map(i =>
+  return _.range(count).map((i) =>
     colorShade(color, 1 - Math.min(0.25, 1 / count) * i),
   );
 }
@@ -195,13 +177,15 @@ export function colorShade(hex, shade = 0) {
   }
   const components = (
     match[1] != null ? match.slice(1, 4) : match.slice(4, 7)
-  ).map(d => parseInt(d, 16));
+  ).map((d) => parseInt(d, 16));
   const min = Math.min(...components);
   const max = Math.max(...components);
   return (
     "#" +
     components
-      .map(c => Math.round(min + (max - min) * shade * (c / 255)).toString(16))
+      .map((c) =>
+        Math.round(min + (max - min) * shade * (c / 255)).toString(16),
+      )
       .join("")
   );
 }
@@ -212,12 +196,12 @@ const cardinalityCache = new Map();
 export function getColumnCardinality(cols, rows, index) {
   const col = cols[index];
   const key = getColumnKey(col);
-  if (!cardinalityCache.has(key)) {
+  if (!cardinalityCache.has(key) && rows) {
     const dataset = crossfilter(rows);
     cardinalityCache.set(
       key,
       dataset
-        .dimension(d => d[index])
+        .dimension((d) => d[index])
         .group()
         .size(),
     );
@@ -232,7 +216,7 @@ export function getColumnExtent(cols, rows, index) {
   if (!extentCache.has(col)) {
     extentCache.set(
       col,
-      d3.extent(rows, row => row[index]),
+      d3.extent(rows, (row) => row[index]),
     );
   }
   return extentCache.get(col);
@@ -256,10 +240,10 @@ export function getCardAfterVisualizationClick(nextCard, previousCard) {
         ? // Just recycle the original card id of previous card if there was one
           previousCard.original_card_id
         : // A multi-aggregation or multi-breakout series legend / drill-through action
-        // should always use the id of underlying/previous card
-        isMultiseriesQuestion
-        ? previousCard.id
-        : nextCard.id,
+          // should always use the id of underlying/previous card
+          isMultiseriesQuestion
+          ? previousCard.id
+          : nextCard.id,
       id: null,
     };
   } else {
@@ -300,9 +284,9 @@ export function getSingleSeriesDimensionsAndMetrics(
 
   // in MBQL queries that are broken out, metrics and dimensions are mutually exclusive
   // in SQL queries and raw MBQL queries metrics are numeric, summable, non-PK/FK and dimensions can be anything
-  const metricColumns = cols.filter(col => isMetric(col));
+  const metricColumns = cols.filter((col) => isMetric(col));
   const dimensionNotMetricColumns = cols.filter(
-    col => isDimension(col) && !isMetric(col),
+    (col) => isDimension(col) && !isMetric(col),
   );
   if (
     dimensionNotMetricColumns.length <= maxDimensions &&
@@ -339,8 +323,8 @@ export function getSingleSeriesDimensionsAndMetrics(
   }
 
   return {
-    dimensions: dimensions.length > 0 ? dimensions.map(c => c.name) : [null],
-    metrics: metrics.length > 0 ? metrics.map(c => c.name) : [null],
+    dimensions: dimensions.length > 0 ? dimensions.map((c) => c.name) : [null],
+    metrics: metrics.length > 0 ? metrics.map((c) => c.name) : [null],
   };
 }
 
@@ -365,7 +349,7 @@ export function computeMaxDecimalsForValues(values, options) {
     let maxDecimalCount = 0;
     for (const value of values) {
       const parts = formatter.formatToParts(value);
-      const part = parts.find(p => p.type === "fraction");
+      const part = parts.find((p) => p.type === "fraction");
       const decimalCount = part ? part.value.length : 0;
       if (decimalCount > maxDecimalCount) {
         maxDecimalCount = decimalCount;
@@ -385,8 +369,8 @@ export const preserveExistingColumnsOrder = (prevColumns, newColumns) => {
   const newSet = new Set(newColumns);
   const prevSet = new Set(prevColumns);
 
-  const addedColumns = newColumns.filter(column => !prevSet.has(column));
-  const prevOrderedColumnsExceptRemoved = prevColumns.map(column =>
+  const addedColumns = newColumns.filter((column) => !prevSet.has(column));
+  const prevOrderedColumnsExceptRemoved = prevColumns.map((column) =>
     newSet.has(column) ? column : null,
   );
 
@@ -440,3 +424,100 @@ export const getDefaultPivotColumn = (cols, rows) => {
     null
   );
 };
+
+const MAX_SANKEY_COLUMN_PAIRS_TO_CHECK = 6;
+
+function findSankeyColumnPair(dimensionColumns, rows) {
+  if (dimensionColumns.length < 2) {
+    return null;
+  }
+
+  const pairsToCheck = Math.min(
+    dimensionColumns.length - 1,
+    MAX_SANKEY_COLUMN_PAIRS_TO_CHECK,
+  );
+  for (let i = 0; i < pairsToCheck; i++) {
+    const sourceCol = dimensionColumns[i];
+
+    const sourceValues = new Set(rows.map((row) => row[sourceCol.index]));
+
+    const targetCol = dimensionColumns.slice(i + 1).find((maybeTarget) => {
+      return rows.some((row) => sourceValues.has(row[maybeTarget.index]));
+    });
+
+    if (targetCol) {
+      return {
+        source: sourceCol.column.name,
+        target: targetCol.column.name,
+      };
+    }
+  }
+
+  return {
+    source: dimensionColumns[0].column.name,
+    target: dimensionColumns[1].column.name,
+  };
+}
+
+export function findSensibleSankeyColumns(data) {
+  if (!data?.cols || !data?.rows) {
+    return null;
+  }
+
+  const { cols, rows } = data;
+
+  // Single pass through columns to categorize them
+  const { dimensionColumns, metricColumn } = cols.reduce(
+    (acc, col, index) => {
+      if (isMetric(col)) {
+        // Take the first metric column we find
+        if (!acc.metricColumn) {
+          acc.metricColumn = col;
+        }
+      } else if (isDimension(col) && !isDate(col)) {
+        // Limited quick cardinality check before doing full computation
+        const uniqueValues = new Set();
+        const rowsToQuickCheck = Math.min(
+          rows.length,
+          MAX_REASONABLE_SANKEY_DIMENSION_CARDINALITY * 1.5,
+        );
+        for (let i = 0; i < rowsToQuickCheck; i++) {
+          uniqueValues.add(rows[i][index]);
+        }
+
+        // Only do full cardinality check if initial sample looks promising
+        if (
+          uniqueValues.size > 0 &&
+          uniqueValues.size <= MAX_REASONABLE_SANKEY_DIMENSION_CARDINALITY
+        ) {
+          const cardinality = getColumnCardinality(cols, rows, index);
+          if (
+            cardinality > 0 &&
+            cardinality <= MAX_REASONABLE_SANKEY_DIMENSION_CARDINALITY
+          ) {
+            acc.dimensionColumns.push({ column: col, index, cardinality });
+          }
+        }
+      }
+      return acc;
+    },
+    { dimensionColumns: [], metricColumn: null },
+  );
+
+  if (!metricColumn) {
+    return null;
+  }
+
+  dimensionColumns.sort((a, b) => a.cardinality - b.cardinality);
+
+  const dimensionPair = findSankeyColumnPair(dimensionColumns, rows);
+  if (!dimensionPair) {
+    return null;
+  }
+
+  return {
+    source: dimensionPair.source,
+    target: dimensionPair.target,
+    metric: metricColumn.name,
+  };
+}

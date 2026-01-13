@@ -1,11 +1,13 @@
 /* eslint-disable react/prop-types */
 import { useCallback, useState } from "react";
-import { connect } from "react-redux";
 import { push } from "react-router-redux";
+import _ from "underscore";
 
-import { LeaveConfirmationModal } from "metabase/components/LeaveConfirmationModal";
-import Segments from "metabase/entities/segments";
-import * as MetabaseAnalytics from "metabase/lib/analytics";
+import { LeaveRouteConfirmModal } from "metabase/common/components/LeaveConfirmModal";
+import { useCallbackEffect } from "metabase/common/hooks/use-callback-effect";
+import { Segments } from "metabase/entities/segments";
+import { Tables } from "metabase/entities/tables";
+import { connect } from "metabase/lib/redux";
 
 import SegmentForm from "../components/SegmentForm";
 import { updatePreviewSummary } from "../datamodel";
@@ -32,12 +34,11 @@ const UpdateSegmentFormInner = ({
   const [isDirty, setIsDirty] = useState(false);
 
   const handleSubmit = useCallback(
-    async segment => {
+    async (segment) => {
       setIsDirty(false);
 
       try {
         await updateSegment(segment);
-        MetabaseAnalytics.trackStructEvent("Data Model", "Segment Updated");
         onChangeLocation("/admin/datamodel/segments");
       } catch (error) {
         setIsDirty(isDirty);
@@ -54,14 +55,21 @@ const UpdateSegmentFormInner = ({
         onIsDirtyChange={setIsDirty}
         onSubmit={handleSubmit}
       />
-      <LeaveConfirmationModal isEnabled={isDirty} route={route} />
+      <LeaveRouteConfirmModal isEnabled={isDirty} route={route} />
     </>
   );
 };
 
-const UpdateSegmentForm = Segments.load({
-  id: (state, props) => parseInt(props.params.id),
-})(UpdateSegmentFormInner);
+const UpdateSegmentForm = _.compose(
+  Segments.load({
+    id: (_state, { params }) => parseInt(params.id),
+  }),
+  Tables.load({
+    id: (_state, { segment }) => segment?.table_id,
+    fetchType: "fetchMetadataAndForeignTables",
+    requestType: "fetchMetadataDeprecated",
+  }),
+)(UpdateSegmentFormInner);
 
 const CreateSegmentForm = ({
   route,
@@ -71,22 +79,26 @@ const CreateSegmentForm = ({
 }) => {
   const [isDirty, setIsDirty] = useState(false);
 
+  /**
+   * Navigation is scheduled so that LeaveConfirmationModal's isEnabled
+   * prop has a chance to re-compute on re-render
+   */
+  const [, scheduleCallback] = useCallbackEffect();
+
   const handleSubmit = useCallback(
-    async segment => {
+    (segment) => {
       setIsDirty(false);
 
-      try {
-        await createSegment({
-          ...segment,
-          table_id: segment.definition["source-table"],
-        });
-        MetabaseAnalytics.trackStructEvent("Data Model", "Segment Updated");
-        onChangeLocation("/admin/datamodel/segments");
-      } catch (error) {
-        setIsDirty(isDirty);
-      }
+      scheduleCallback(async () => {
+        try {
+          await createSegment(segment);
+          onChangeLocation("/admin/datamodel/segments");
+        } catch (error) {
+          setIsDirty(isDirty);
+        }
+      });
     },
-    [createSegment, isDirty, onChangeLocation],
+    [scheduleCallback, createSegment, isDirty, onChangeLocation],
   );
 
   return (
@@ -96,12 +108,12 @@ const CreateSegmentForm = ({
         onIsDirtyChange={setIsDirty}
         onSubmit={handleSubmit}
       />
-      <LeaveConfirmationModal isEnabled={isDirty} route={route} />
+      <LeaveRouteConfirmModal isEnabled={isDirty} route={route} />
     </>
   );
 };
 
-const SegmentApp = props => {
+const SegmentApp = (props) => {
   if (props.params.id) {
     return <UpdateSegmentForm {...props} />;
   }

@@ -1,28 +1,25 @@
 import { t } from "ttag";
 
-import type { ConfirmationState } from "metabase/hooks/use-confirmation";
-import type { Member } from "metabase-types/api";
-import type { User } from "metabase-types/api/user";
+import type { ConfirmationState } from "metabase/common/hooks/use-confirmation";
+import type { Member, Membership, User } from "metabase-types/api";
 import type { AdminPath, AdminPathKey } from "metabase-types/store";
 
-import type { UserWithGroupManagerPermission } from "./types/user";
-
 const REVOKE_MANAGING_CONFIRMATION = {
+  // eslint-disable-next-line ttag/no-module-declaration -- see metabase#55045
   title: t`Are you sure?`,
+  // eslint-disable-next-line ttag/no-module-declaration -- see metabase#55045
   message: t`You will not be able to manage users of this group anymore.`,
 };
 
-const canAccessPeople = (user?: UserWithGroupManagerPermission) =>
+const canAccessPeople = (user?: User) =>
   user?.permissions?.is_group_manager ?? false;
 
-export const groupManagerAllowedPathGetter = (
-  user?: UserWithGroupManagerPermission,
-): AdminPathKey[] => {
+export const groupManagerAllowedPathGetter = (user?: User): AdminPathKey[] => {
   return canAccessPeople(user) ? ["people"] : [];
 };
 
 export const getRevokedAllGroupManagersPath = (adminPaths: AdminPath[]) => {
-  const allowedItems = adminPaths.filter(item => item.key !== "people");
+  const allowedItems = adminPaths.filter((item) => item.key !== "people");
 
   return allowedItems.length > 0 ? allowedItems[0].path : "/";
 };
@@ -32,7 +29,7 @@ export const getRevokeManagerPeopleRedirect = (
   adminPaths: AdminPath[],
 ) => {
   const isRemovingLastManagerMembership =
-    currentUserMemberships.filter(m => m.is_group_manager).length === 1;
+    currentUserMemberships.filter((m) => m.is_group_manager).length === 1;
 
   if (isRemovingLastManagerMembership) {
     return getRevokedAllGroupManagersPath(adminPaths);
@@ -46,7 +43,7 @@ export const getRevokeManagerGroupsRedirect = (
   adminPaths: AdminPath[],
 ) => {
   const isRemovingLastManagerMembership =
-    currentUserMemberships.filter(m => m.is_group_manager).length === 1;
+    currentUserMemberships.filter((m) => m.is_group_manager).length === 1;
 
   if (!isRemovingLastManagerMembership) {
     return "/admin/people/groups";
@@ -57,12 +54,12 @@ export const getRevokeManagerGroupsRedirect = (
 
 export const getRemoveMembershipConfirmation = (
   currentUser: User,
-  currentUserMemberships: Member[],
+  currentUserMemberships: Membership[],
   deletedMembershipId: number,
-): Partial<ConfirmationState> | null => {
+): Pick<ConfirmationState, "title" | "message"> | null => {
   const isRemovingSelf =
     currentUserMemberships.find(
-      membership => membership.membership_id === deletedMembershipId,
+      (membership) => membership.membership_id === deletedMembershipId,
     ) != null;
 
   return isRemovingSelf && !currentUser.is_superuser
@@ -72,8 +69,8 @@ export const getRemoveMembershipConfirmation = (
 
 export const getChangeMembershipConfirmation = (
   currentUser: User,
-  updatedMembership: Member,
-): Partial<ConfirmationState> | null => {
+  updatedMembership: Membership,
+): Pick<ConfirmationState, "title" | "message"> | null => {
   const isRevokingFromSelf =
     updatedMembership.user_id === currentUser.id &&
     !updatedMembership.is_group_manager;

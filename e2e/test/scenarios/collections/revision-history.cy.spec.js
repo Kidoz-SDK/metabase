@@ -1,20 +1,10 @@
 import { onlyOn } from "@cypress/skip-test";
 
+const { H } = cy;
 import {
-  ORDERS_QUESTION_ID,
   ORDERS_DASHBOARD_ID,
+  ORDERS_QUESTION_ID,
 } from "e2e/support/cypress_sample_instance_data";
-import {
-  restore,
-  visitDashboard,
-  saveDashboard,
-  visitQuestion,
-  questionInfoButton,
-  rightSidebar,
-  openQuestionsSidebar,
-  editDashboard,
-  sidebar,
-} from "e2e/support/helpers";
 
 const PERMISSIONS = {
   curate: ["admin", "normal", "nodata"],
@@ -26,7 +16,7 @@ describe("revision history", () => {
   beforeEach(() => {
     cy.intercept("POST", "/api/revision/revert").as("revert");
 
-    restore();
+    H.restore();
   });
 
   describe("reproductions", () => {
@@ -35,15 +25,15 @@ describe("revision history", () => {
     });
 
     it("shouldn't render revision history steps when there was no diff (metabase#1926)", () => {
-      cy.createDashboard().then(({ body }) => {
-        visitDashboard(body.id);
-        editDashboard();
+      H.createDashboard().then(({ body }) => {
+        H.visitDashboard(body.id);
+        H.editDashboard();
       });
 
       // Save the dashboard without any changes made to it (TODO: we should probably disable "Save" button in the first place)
-      saveDashboard();
-      editDashboard();
-      saveDashboard();
+      H.saveDashboard({ awaitRequest: false });
+      H.editDashboard();
+      H.saveDashboard({ awaitRequest: false });
 
       openRevisionHistory();
 
@@ -56,7 +46,7 @@ describe("revision history", () => {
 
   Object.entries(PERMISSIONS).forEach(([permission, userGroup]) => {
     context(`${permission} access`, () => {
-      userGroup.forEach(user => {
+      userGroup.forEach((user) => {
         // This function `onlyOn` will not generate tests for any other condition.
         // It helps to make both our tests and Cypress runner sidebar clean
         onlyOn(permission === "curate", () => {
@@ -77,15 +67,15 @@ describe("revision history", () => {
               cy.intercept("GET", "/api/dashboard/*").as("fetchDashboard");
               cy.intercept("POST", "/api/card/*/query").as("cardQuery");
 
-              cy.createDashboard().then(({ body }) => {
-                visitDashboard(body.id);
-                editDashboard();
+              H.createDashboard().then(({ body }) => {
+                H.visitDashboard(body.id);
+                H.editDashboard();
               });
 
-              openQuestionsSidebar();
-              sidebar().findByText("Orders, Count").click();
+              H.openQuestionsSidebar();
+              H.sidebar().findByText("Orders, Count").click();
               cy.wait("@cardQuery");
-              saveDashboard();
+              H.saveDashboard();
 
               // this is dirty, but seems like the only reliable way
               // to wait until SET_DASHBOARD_EDITING is dispatched,
@@ -94,7 +84,8 @@ describe("revision history", () => {
               cy.wait(100);
 
               openRevisionHistory();
-              rightSidebar().within(() => {
+              H.sidesheet().within(() => {
+                cy.findByRole("tab", { name: "History" }).click();
                 cy.findByText(/added a card/)
                   .siblings("button")
                   .should("not.exist");
@@ -102,9 +93,8 @@ describe("revision history", () => {
               });
             });
 
-            // skipped because it's super flaky in CI
-            it.skip("should be able to revert a dashboard (metabase#15237)", () => {
-              visitDashboard(ORDERS_DASHBOARD_ID);
+            it("should be able to revert a dashboard (metabase#15237)", () => {
+              H.visitDashboard(ORDERS_DASHBOARD_ID);
               openRevisionHistory();
               clickRevert(/created this/);
 
@@ -113,13 +103,16 @@ describe("revision history", () => {
                 expect(body.cause).not.to.exist;
               });
 
-              // We reverted the dashboard to the state prior to adding any cards to it
-              // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-              cy.findByText("This dashboard is looking empty.");
+              cy.log(
+                "We reverted the dashboard to the state prior to adding any cards to it",
+              );
+              cy.findByTestId("dashboard-empty-state").should("exist");
 
-              // Should be able to revert back again
-              // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-              cy.findByText("History");
+              cy.log("Should be able to revert back again");
+              cy.findByTestId("dashboard-history-list").should(
+                "contain",
+                "You reverted to an earlier version.",
+              );
               clickRevert(/added a card/);
 
               cy.wait("@revert").then(({ response: { statusCode, body } }) => {
@@ -127,16 +120,16 @@ describe("revision history", () => {
                 expect(body.cause).not.to.exist;
               });
 
-              // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-              cy.findByText("117.03");
+              cy.findByTestId("visualization-root").should("contain", "117.03");
             });
 
             it("should be able to access the question's revision history via the revision history button in the header of the query builder", () => {
               cy.skipOn(user === "nodata");
 
-              visitQuestion(ORDERS_QUESTION_ID);
+              H.visitQuestion(ORDERS_QUESTION_ID);
 
               cy.findByTestId("revision-history-button").click();
+              cy.findByRole("tab", { name: "History" }).click();
 
               cy.findByTestId("question-revert-button").click();
 
@@ -152,12 +145,13 @@ describe("revision history", () => {
             it("should be able to revert the question via the action button found in the saved question timeline", () => {
               cy.skipOn(user === "nodata");
 
-              visitQuestion(ORDERS_QUESTION_ID);
+              H.visitQuestion(ORDERS_QUESTION_ID);
 
-              questionInfoButton().click();
-              // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-              cy.findByText("History").click();
+              H.questionInfoButton().click();
+              cy.findByRole("tab", { name: "History" }).click();
+
               // Last revert is the original state
+              // eslint-disable-next-line no-unsafe-element-filtering
               cy.findAllByTestId("question-revert-button").last().click();
 
               cy.wait("@revert").then(({ response: { statusCode, body } }) => {
@@ -176,13 +170,13 @@ describe("revision history", () => {
             it("should not see question nor dashboard revert buttons (metabase#13229)", () => {
               cy.signIn(user);
 
-              visitDashboard(ORDERS_DASHBOARD_ID);
+              H.visitDashboard(ORDERS_DASHBOARD_ID);
               openRevisionHistory();
               cy.findAllByRole("button", { name: "Revert" }).should(
                 "not.exist",
               );
 
-              visitQuestion(ORDERS_QUESTION_ID);
+              H.visitQuestion(ORDERS_QUESTION_ID);
               cy.findByRole("button", { name: /Edited .*/ }).click();
 
               cy.findAllByRole("button", { name: "Revert" }).should(
@@ -197,18 +191,27 @@ describe("revision history", () => {
 });
 
 function clickRevert(event_name, index = 0) {
+  // eslint-disable-next-line no-unsafe-element-filtering
   cy.findAllByLabelText(event_name).eq(index).click();
 }
 
 function openRevisionHistory() {
   cy.intercept("GET", "/api/revision*").as("revisionHistory");
-  cy.get("main header").within(() => {
-    cy.icon("info").click();
-  });
-  cy.wait("@revisionHistory");
 
-  rightSidebar().within(() => {
-    cy.findByText("History");
+  cy.findByTestId("dashboard-header")
+    .findByLabelText("More info")
+    .should("be.visible")
+    .click();
+
+  H.sidesheet().within(() => {
+    cy.findByRole("tab", { name: "History" }).click();
+    cy.wait("@revisionHistory");
+
+    cy.findByRole("tab", { name: "History" }).should(
+      "have.attr",
+      "aria-selected",
+      "true",
+    );
     cy.findByTestId("dashboard-history-list").should("be.visible");
   });
 }

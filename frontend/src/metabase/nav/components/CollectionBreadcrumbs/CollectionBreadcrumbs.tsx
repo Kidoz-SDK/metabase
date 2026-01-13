@@ -1,22 +1,35 @@
 import { Fragment } from "react";
 
-import { isRootCollection } from "metabase/collections/utils";
-import { useToggle } from "metabase/hooks/use-toggle";
-import CollectionBadge from "metabase/questions/components/CollectionBadge";
-import type { Collection } from "metabase-types/api";
+import { Badge } from "metabase/common/components/Badge";
+import { useToggle } from "metabase/common/hooks/use-toggle";
+import * as Urls from "metabase/lib/urls";
+import { CollectionBadge } from "metabase/questions/components/CollectionBadge";
+import type {
+  Collection,
+  CollectionEssentials,
+  CollectionId,
+  Dashboard,
+} from "metabase-types/api";
 
 import {
+  BreadcrumbsPathSeparator,
   ExpandButton,
   PathContainer,
-  PathSeparator,
 } from "./CollectionBreadcrumbs.styled";
+import { getCollectionList } from "./utils";
 
 export interface CollectionBreadcrumbsProps {
   collection?: Collection;
+  dashboard?: Dashboard;
+  onClick?: (collection: CollectionEssentials) => void;
+  baseCollectionId: CollectionId | null;
 }
 
 export const CollectionBreadcrumbs = ({
   collection,
+  dashboard,
+  onClick,
+  baseCollectionId = null,
 }: CollectionBreadcrumbsProps): JSX.Element | null => {
   const [isExpanded, { toggle }] = useToggle(false);
 
@@ -24,20 +37,22 @@ export const CollectionBreadcrumbs = ({
     return null;
   }
 
-  const ancestors = collection.effective_ancestors || [];
-  const hasRoot = ancestors[0] && isRootCollection(ancestors[0]);
-  const [_, ...crumbsWithoutRoot] = ancestors;
-  const parts = hasRoot ? crumbsWithoutRoot : ancestors;
+  const parts = getCollectionList({
+    baseCollectionId,
+    collection,
+  });
+
+  const separator = <BreadcrumbsPathSeparator>/</BreadcrumbsPathSeparator>;
 
   const content =
     parts.length > 1 && !isExpanded ? (
       <>
         <CollectionBadge
           collectionId={parts[0].id}
-          inactiveColor="text-medium"
           isSingleLine
+          onClick={onClick ? () => onClick(collection) : undefined}
         />
-        <PathSeparator>/</PathSeparator>
+        {separator}
         <ExpandButton
           small
           borderless
@@ -45,30 +60,45 @@ export const CollectionBreadcrumbs = ({
           onlyIcon
           onClick={toggle}
         />
-        <PathSeparator>/</PathSeparator>
+        {separator}
       </>
     ) : (
-      parts.map(collection => (
+      parts.map((collection) => (
         <Fragment key={collection.id}>
           <CollectionBadge
             collectionId={collection.id}
-            inactiveColor="text-medium"
             isSingleLine
+            onClick={onClick ? () => onClick(collection) : undefined}
           />
-          <PathSeparator>/</PathSeparator>
+          {separator}
         </Fragment>
       ))
     );
 
   return (
-    <PathContainer>
-      {content}
-      <CollectionBadge
-        collectionId={collection.id}
-        inactiveColor="text-medium"
-        isSingleLine
-      />
-    </PathContainer>
+    <>
+      <PathContainer>
+        {content}
+        <CollectionBadge
+          collectionId={collection.id}
+          isSingleLine
+          onClick={onClick ? () => onClick(collection) : undefined}
+        />
+      </PathContainer>
+      {dashboard && (
+        <>
+          {separator}
+          <Badge
+            icon={{ name: "dashboard" }}
+            inactiveColor="text-light"
+            isSingleLine
+            to={Urls.dashboard(dashboard)}
+          >
+            {dashboard.name}
+          </Badge>
+        </>
+      )}
+    </>
   );
 };
 

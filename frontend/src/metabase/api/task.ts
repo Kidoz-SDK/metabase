@@ -2,30 +2,43 @@ import type {
   ListTasksRequest,
   ListTasksResponse,
   Task,
+  TaskInfo,
 } from "metabase-types/api";
 
 import { Api } from "./api";
-import { provideTaskTags, provideTaskListTags } from "./tags";
+import {
+  provideTaskListTags,
+  provideTaskTags,
+  provideUniqueTasksListTags,
+} from "./tags";
 
 export const taskApi = Api.injectEndpoints({
-  endpoints: builder => ({
+  endpoints: (builder) => ({
     listTasks: builder.query<ListTasksResponse, ListTasksRequest | void>({
-      query: params => ({
+      query: (params) => ({
         method: "GET",
         url: "/api/task",
         params,
       }),
-      providesTags: response =>
+      providesTags: (response) =>
         response ? provideTaskListTags(response.data) : [],
     }),
+    listUniqueTasks: builder.query<string[], void>({
+      query: () => ({
+        method: "GET",
+        url: "/api/task/unique-tasks",
+      }),
+      providesTags: (response) =>
+        response ? provideUniqueTasksListTags() : [],
+    }),
     getTask: builder.query<Task, number>({
-      query: id => ({
+      query: (id) => ({
         method: "GET",
         url: `/api/task/${id}`,
       }),
-      providesTags: task => (task ? provideTaskTags(task) : []),
+      providesTags: (task) => (task ? provideTaskTags(task) : []),
     }),
-    getTasksInfo: builder.query<unknown, void>({
+    getTasksInfo: builder.query<TaskInfo, void>({
       query: () => ({
         method: "GET",
         url: "/api/task/info",
@@ -34,5 +47,9 @@ export const taskApi = Api.injectEndpoints({
   }),
 });
 
-export const { useListTasksQuery, useGetTaskQuery, useGetTasksInfoQuery } =
-  taskApi;
+export const {
+  useListTasksQuery,
+  useListUniqueTasksQuery,
+  useGetTaskQuery,
+  useGetTasksInfoQuery,
+} = taskApi;

@@ -1,19 +1,19 @@
 import userEvent from "@testing-library/user-event";
+import type { JSX } from "react";
 import { Route } from "react-router";
 
 import { mockSettings } from "__support__/settings";
 import { getIcon, renderWithProviders, screen } from "__support__/ui";
+import { SyncedEmbedFrame } from "metabase/public/components/EmbedFrame";
 import type { AppErrorDescriptor } from "metabase-types/store";
 import { createMockAppState } from "metabase-types/store/mocks";
-
-import EmbedFrame from "../../components/EmbedFrame";
 
 import PublicApp from "./PublicApp";
 
 type SetupOpts = {
   name?: string;
   description?: string;
-  actionButtons?: JSX.Element[];
+  actionButtons?: JSX.Element | null;
   error?: AppErrorDescriptor;
   hasEmbedBranding?: boolean;
   hash?: string;
@@ -31,11 +31,11 @@ function setup({
   renderWithProviders(
     <Route
       path="/public/dashboard/:id"
-      component={props => (
+      component={(props) => (
         <PublicApp {...props}>
-          <EmbedFrame {...embedFrameProps}>
+          <SyncedEmbedFrame {...embedFrameProps}>
             <h1 data-testid="test-content">Test</h1>
-          </EmbedFrame>
+          </SyncedEmbedFrame>
         </PublicApp>
       )}
     />,
@@ -63,11 +63,13 @@ describe("PublicApp", () => {
   it("renders description", async () => {
     setup({ name: "My Title", description: "My Description" });
     await userEvent.hover(getIcon("info"));
-    expect(screen.getByText("My Description")).toBeInTheDocument();
+    expect(await screen.findByText("My Description")).toBeInTheDocument();
   });
 
   it("renders action buttons", () => {
-    setup({ actionButtons: [<button key="test">Click Me</button>] });
+    setup({
+      actionButtons: <button key="test">Click Me</button>,
+    });
     expect(
       screen.getByRole("button", { name: "Click Me" }),
     ).toBeInTheDocument();
@@ -75,8 +77,7 @@ describe("PublicApp", () => {
 
   it("renders branding", () => {
     setup();
-    expect(screen.getByText(/Powered by/i)).toBeInTheDocument();
-    expect(screen.getByText(/Metabase/)).toBeInTheDocument();
+    expect(screen.getByText("Powered by")).toBeInTheDocument();
   });
 
   it("renders not found page on error", () => {
@@ -104,14 +105,12 @@ describe("PublicApp", () => {
 
   it("renders branding in error states", () => {
     setup({ error: { status: 404 } });
-    expect(screen.getByText(/Powered by/i)).toBeInTheDocument();
-    expect(screen.getByText(/Metabase/)).toBeInTheDocument();
+    expect(screen.getByText("Powered by")).toBeInTheDocument();
   });
 
   it("hides branding in error states if it's turned off", () => {
     setup({ error: { status: 404 }, hasEmbedBranding: false });
-    expect(screen.queryByText(/Powered by/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Metabase/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Powered by")).not.toBeInTheDocument();
   });
 
   describe("theming", () => {
@@ -123,12 +122,15 @@ describe("PublicApp", () => {
       expect(embedFrame).not.toHaveAttribute("data-embed-theme");
     });
 
-    test.each(["night", "transparent"])("correctly handles %s theme", theme => {
-      setup({ hash: `#theme=${theme}` });
-      expect(screen.getByTestId("embed-frame")).toHaveAttribute(
-        "data-embed-theme",
-        theme,
-      );
-    });
+    test.each(["night", "transparent"])(
+      "correctly handles %s theme",
+      (theme) => {
+        setup({ hash: `#theme=${theme}` });
+        expect(screen.getByTestId("embed-frame")).toHaveAttribute(
+          "data-embed-theme",
+          theme,
+        );
+      },
+    );
   });
 });

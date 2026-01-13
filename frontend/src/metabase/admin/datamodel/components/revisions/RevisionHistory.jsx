@@ -4,69 +4,72 @@ import PropTypes from "prop-types";
 import { Component } from "react";
 import { t } from "ttag";
 
-import Breadcrumbs from "metabase/components/Breadcrumbs";
-import LoadingAndErrorWrapper from "metabase/components/LoadingAndErrorWrapper";
+import Breadcrumbs from "metabase/common/components/Breadcrumbs";
+import { LoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper";
 import CS from "metabase/css/core/index.css";
-import Tables from "metabase/entities/tables";
 import { assignUserColors } from "metabase/lib/formatting";
+import * as Urls from "metabase/lib/urls";
 
 import Revision from "./Revision";
 
-class RevisionHistory extends Component {
+export default class RevisionHistory extends Component {
   static propTypes = {
-    object: PropTypes.object,
+    segment: PropTypes.object,
     revisions: PropTypes.array,
-    table: PropTypes.object,
   };
 
   render() {
-    const { object, objectType, revisions, table, user } = this.props;
+    const { segment, revisions, user } = this.props;
 
     let userColorAssignments = {};
     if (revisions) {
       userColorAssignments = assignUserColors(
-        revisions.map(r => r.user.id),
+        revisions.map((r) => r.user.id),
         user.id,
       );
     }
 
     return (
-      <LoadingAndErrorWrapper loading={!object || !revisions}>
+      <LoadingAndErrorWrapper
+        loading={!segment || !revisions}
+        className={cx(CS.wrapper, CS.scrollY, CS.bgWhite)}
+      >
         {() => (
-          <div className={CS.wrapper}>
+          <>
             <Breadcrumbs
               className={CS.py4}
               crumbs={[
-                objectType === "segment"
-                  ? [t`Segments`, `/admin/datamodel/segments?table=${table.id}`]
-                  : [t`Metrics`, `/admin/datamodel/metrics?table=${table.id}`],
-                [this.props.objectType + t` History`],
+                [
+                  t`Segments`,
+                  Urls.dataModelSegments({ tableId: segment.table_id }),
+                ],
+                [t`Segment History`],
               ]}
             />
-            <div className={cx(CS.wrapper, CS.py4)} style={{ maxWidth: 950 }}>
+            <div
+              className={cx(CS.wrapper, CS.py4)}
+              style={{ maxWidth: 950 }}
+              data-testid="segment-revisions"
+            >
               <h2 className={CS.mb4}>
-                {t`Revision History for`} &quot;{object.name}&quot;
+                {t`Revision History for`} &quot;{segment.name}&quot;
               </h2>
               <ol>
-                {revisions.map(revision => (
+                {revisions.map((revision) => (
                   <Revision
                     key={revision.id}
                     revision={revision}
-                    objectName={object.name}
+                    tableId={segment.table_id}
+                    objectName={segment.name}
                     currentUser={user}
-                    tableMetadata={table}
                     userColor={userColorAssignments[revision.user.id]}
                   />
                 ))}
               </ol>
             </div>
-          </div>
+          </>
         )}
       </LoadingAndErrorWrapper>
     );
   }
 }
-
-export default Tables.load({
-  id: (state, { object: { table_id } }) => table_id,
-})(RevisionHistory);

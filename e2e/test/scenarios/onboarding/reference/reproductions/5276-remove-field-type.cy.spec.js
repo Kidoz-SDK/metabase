@@ -1,8 +1,8 @@
-import { popover, restore } from "e2e/support/helpers";
+const { H } = cy;
 
 describe("issue 5276", () => {
   beforeEach(() => {
-    restore();
+    H.restore();
     cy.signInAsAdmin();
     cy.intercept("PUT", "/api/field/*").as("updateField");
   });
@@ -18,16 +18,15 @@ describe("issue 5276", () => {
     cy.findByText("Products").click();
     // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
     cy.findByText("Fields in this table").click();
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-    cy.findByText("Edit").click();
 
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-    cy.findByText("Score").click();
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-    popover().within(() => cy.findByText("No field type").click());
+    // Calling .click on this element goes into edit more and immediately calls resetForm to pull us back out
+    // no idea why. TODO: Fix
+    cy.button(/Edit/).trigger("click");
+
+    cy.findByDisplayValue("Score").click();
+    H.popover().findByText("No semantic type").click();
     cy.button("Save").click();
     cy.wait("@updateField");
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-    cy.findByText("Score").should("not.exist");
+    cy.findByDisplayValue("Score").should("not.exist");
   });
 });

@@ -9,21 +9,22 @@ import {
 import {
   renderWithProviders,
   screen,
+  waitFor,
   waitForLoaderToBeRemoved,
   within,
 } from "__support__/ui";
 import type { WritebackParameter } from "metabase-types/api";
 import {
-  createMockDashboard,
   createMockActionDashboardCard,
-  createMockDashboardCard,
-  createMockQueryAction,
-  createMockCard,
-  createMockParameter,
   createMockActionParameter,
+  createMockCard,
   createMockCollectionItem,
+  createMockDashboard,
+  createMockDashboardCard,
   createMockFieldSettings,
   createMockImplicitCUDActions,
+  createMockParameter,
+  createMockQueryAction,
 } from "metabase-types/api/mocks";
 
 import { ConnectedActionDashcardSettings } from "./ActionDashcardSettings";
@@ -85,7 +86,7 @@ const setup = (
     React.ComponentProps<typeof ConnectedActionDashcardSettings>
   >,
 ) => {
-  const searchItems = models.map(model =>
+  const searchItems = models.map((model) =>
     createMockCollectionItem({ ...model, model: "dataset" }),
   );
   const closeSpy = jest.fn();
@@ -163,7 +164,7 @@ describe("ActionViz > ActionDashcardSettings", () => {
 
         await userEvent.click(within(formSection).getByTestId("select-button"));
 
-        const popover = await screen.findByRole("grid");
+        const popover = await screen.findByRole("tree");
 
         expect(
           within(popover).getByText(dashboardParameter.name),
@@ -213,7 +214,7 @@ describe("ActionViz > ActionDashcardSettings", () => {
 
         await userEvent.click(within(formSection).getByTestId("select-button"));
 
-        const popover = await screen.findByRole("grid");
+        const popover = await screen.findByRole("tree");
 
         expect(
           within(popover).queryByText("Ask the user"),
@@ -272,7 +273,7 @@ describe("ActionViz > ActionDashcardSettings", () => {
 
       await userEvent.click(within(formSection).getByTestId("select-button"));
 
-      const popover = await screen.findByRole("grid");
+      const popover = await screen.findByRole("tree");
 
       expect(within(popover).getByText("Select a value")).toBeInTheDocument();
       expect(within(popover).getByText(DEFAULT_VALUE)).toBeInTheDocument();
@@ -313,7 +314,7 @@ describe("ActionViz > ActionDashcardSettings", () => {
 
         await userEvent.click(within(formSection).getByTestId("select-button"));
 
-        const popover = await screen.findByRole("grid");
+        const popover = await screen.findByRole("tree");
 
         expect(
           within(popover).queryByText("Ask the user"),
@@ -349,7 +350,7 @@ describe("ActionViz > ActionDashcardSettings", () => {
 
         await userEvent.click(within(formSection).getByTestId("select-button"));
 
-        const popover = await screen.findByRole("grid");
+        const popover = await screen.findByRole("tree");
 
         expect(within(popover).getByText("Select a value")).toBeInTheDocument();
         expect(
@@ -456,6 +457,16 @@ describe("ActionViz > ActionDashcardSettings", () => {
     ).toBeInTheDocument();
   });
 
+  it("should be valid and not crash when the action does not have parameters (metabase#32665)", async () => {
+    const { closeSpy } = setup({
+      dashcard: createMockActionDashboardCard({
+        action: createMockQueryAction(),
+      }),
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(closeSpy).toHaveBeenCalled();
+  });
+
   it("shows parameters for an action", async () => {
     setup({
       dashcard: actionDashcardWithAction,
@@ -470,6 +481,11 @@ describe("ActionViz > ActionDashcardSettings", () => {
     });
 
     await waitForLoaderToBeRemoved();
+    await waitFor(() => {
+      expect(
+        screen.getByTestId(`action-item-${actions2[0].name}`),
+      ).toBeInTheDocument();
+    });
 
     const queryAction = screen.getByTestId(`action-item-${actions2[0].name}`);
     const implicitAction = screen.getByTestId(
@@ -538,7 +554,7 @@ function dashcardFactory({
     ...actionDashcardWithAction,
     action: action,
     parameter_mappings: mapped
-      ? action.parameters.map(parameter => ({
+      ? action.parameters.map((parameter) => ({
           parameter_id: dashboardParameter.id,
           target: parameter.target,
         }))

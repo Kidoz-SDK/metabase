@@ -1,23 +1,24 @@
 (ns metabase.lib.segment-test
   (:require
+   #?@(:cljs ([metabase.test-runner.assert-exprs.approximately-equal]))
    [clojure.test :refer [are deftest is testing]]
    [metabase.lib.core :as lib]
    [metabase.lib.metadata :as lib.metadata]
    [metabase.lib.metadata.calculation :as lib.metadata.calculation]
    [metabase.lib.test-metadata :as meta]
    [metabase.lib.test-util :as lib.tu]
-   #?@(:cljs ([metabase.test-runner.assert-exprs.approximately-equal]))))
+   [metabase.lib.test-util.macros :as lib.tu.macros]))
 
 #?(:cljs (comment metabase.test-runner.assert-exprs.approximately-equal/keep-me))
 
 (def ^:private segment-id 100)
 
 (def ^:private segment-definition
-  {:source-table (meta/id :venues)
-   :aggregation  [[:count]]
-   :filter       [:and
-                  [:> [:field (meta/id :venues :id) nil] [:* [:field (meta/id :venues :price) nil] 11]]
-                  [:contains [:field (meta/id :venues :name) nil] "BBQ" {:case-sensitive true}]]})
+  (:query (lib.tu.macros/mbql-query venues
+            {:aggregation [[:count]]
+             :filter      [:and
+                           [:> $id [:* $price 11]]
+                           [:contains $name "BBQ" {:case-sensitive true}]]})))
 
 (def ^:private segments-db
   {:segments [{:id          segment-id
@@ -30,7 +31,7 @@
   (lib.tu/mock-metadata-provider meta/metadata-provider segments-db))
 
 (def ^:private metadata-provider-with-cards
-  (lib.tu/mock-metadata-provider lib.tu/metadata-provider-with-mock-cards segments-db))
+  (lib.tu/mock-metadata-provider (lib.tu/metadata-provider-with-mock-cards) segments-db))
 
 (def ^:private segment-clause
   [:segment {:lib/uuid (str (random-uuid))} segment-id])
@@ -115,7 +116,7 @@
       (is (nil? (lib/available-segments query)))))
   (testing "query based on a card -- don't return Segments"
     (doseq [card-key [:venues :venues/native]]
-      (let [query (lib/query metadata-provider-with-cards (card-key lib.tu/mock-cards))]
+      (let [query (lib/query metadata-provider-with-cards (card-key (lib.tu/mock-cards)))]
         (is (not (lib/uses-segment? query segment-id)))
         (is (nil? (lib/available-segments (lib/append-stage query))))))))
 
@@ -127,7 +128,7 @@
              (count segments)))
       ;; test with both `:metadata/segment` and with a `:segment` ref clause
       (doseq [segment [(first segments)
-                      [:segment {:lib/uuid (str (random-uuid))} segment-id]]]
+                       [:segment {:lib/uuid (str (random-uuid))} segment-id]]]
         (testing (pr-str (list 'lib/filter 'query segment))
           (let [query' (lib/filter query segment)]
             (is (lib/uses-segment? query' segment-id))
@@ -145,3 +146,127 @@
                       :description       "The ID is greater than 11 times the price and the name contains \"BBQ\"."}]
                     (map (partial lib/display-info query')
                          (lib/filters query'))))))))))
+
+(defn- segment-definition-with-filter
+  "Create an MBQL5 segment definition with the given filter clause and metadata provider."
+  [mp filter-clause]
+  (-> (lib/query mp (meta/table-metadata :venues))
+      (lib/filter filter-clause)))
+
+(defn- segment-definition-referencing
+  "Create a segment definition that references another segment by ID."
+  [mp referenced-segment-id]
+  (segment-definition-with-filter mp [:segment {:lib/uuid (str (random-uuid))} referenced-segment-id]))
+
+(deftest ^:parallel check-segment-overwrite-no-refs-test
+  (testing "Segment with no segment references - should pass"
+    (let [mp         (lib.tu/mock-metadata-provider meta/metadata-provider {})
+          definition (segment-definition-with-filter mp (lib/> (meta/field-metadata :venues :price) 2))]
+      (is (nil? (lib/check-segment-overwrite 1 definition))))))
+
+(deftest ^:parallel check-segment-overwrite-valid-ref-test
+  (testing "Segment referencing another segment (no cycle) - should pass"
+    (let [;; Segment 2 has no segment references - use base provider for its definition
+          segment-2-def (segment-definition-with-filter
+                         meta/metadata-provider
+                         (lib/> (meta/field-metadata :venues :price) 2))
+          mp            (lib.tu/mock-metadata-provider
+                         meta/metadata-provider
+                         {:segments [{:id         2
+                                      :name       "Segment 2"
+                                      :table-id   (meta/id :venues)
+                                      :definition segment-2-def}]})
+          ;; Segment 1 references Segment 2 - use mp so it can find segment 2
+          segment-1-def (segment-definition-referencing mp 2)]
+      (is (nil? (lib/check-segment-overwrite 1 segment-1-def))))))
+
+(deftest ^:parallel check-segment-overwrite-self-reference-not-in-mp-test
+  (testing "Segment referencing itself - should throw (reported as does not exist since segment being saved isn't in mp)"
+    (let [mp            (lib.tu/mock-metadata-provider meta/metadata-provider {})
+          segment-1-def (segment-definition-referencing mp 1)]
+      (is (thrown-with-msg?
+           #?(:clj Exception :cljs js/Error)
+           #"does not exist"
+           (lib/check-segment-overwrite 1 segment-1-def))))))
+
+(deftest ^:parallel check-segment-overwrite-self-reference-in-mp-test
+  (testing "Segment referencing itself (segment exists in mp) - should throw cycle"
+    (let [simple-def (segment-definition-with-filter
+                      meta/metadata-provider
+                      (lib/> (meta/field-metadata :venues :price) 2))
+          mp         (lib.tu/mock-metadata-provider
+                      meta/metadata-provider
+                      {:segments [{:id         1
+                                   :name       "Segment 1"
+                                   :table-id   (meta/id :venues)
+                                   :definition simple-def}]})
+          segment-1-def (segment-definition-referencing mp 1)]
+      (is (thrown-with-msg?
+           #?(:clj Exception :cljs js/Error)
+           #"[Cc]ycle"
+           (lib/check-segment-overwrite 1 segment-1-def))))))
+
+(deftest ^:parallel check-segment-overwrite-indirect-cycle-test
+  (testing "Segment A -> Segment B -> Segment A - should throw"
+    (let [;; Segment 1 exists with a simple definition (will be overwritten)
+          simple-def    (segment-definition-with-filter
+                         meta/metadata-provider
+                         (lib/> (meta/field-metadata :venues :price) 2))
+          ;; Segment 2 references Segment 1
+          segment-2-def (segment-definition-referencing meta/metadata-provider 1)
+          mp            (lib.tu/mock-metadata-provider
+                         meta/metadata-provider
+                         {:segments [{:id         1
+                                      :name       "Segment 1"
+                                      :table-id   (meta/id :venues)
+                                      :definition simple-def}
+                                     {:id         2
+                                      :name       "Segment 2"
+                                      :table-id   (meta/id :venues)
+                                      :definition segment-2-def}]})
+          ;; New definition for Segment 1 references Segment 2 -> creates cycle: 1 -> 2 -> 1
+          segment-1-def (segment-definition-referencing mp 2)]
+      (is (thrown-with-msg?
+           #?(:clj Exception :cljs js/Error)
+           #"[Cc]ycle"
+           (lib/check-segment-overwrite 1 segment-1-def))))))
+
+(deftest ^:parallel check-segment-overwrite-longer-cycle-test
+  (testing "Segment A -> B -> C -> A - should throw"
+    (let [;; Segment 1 exists with a simple definition (will be overwritten)
+          simple-def    (segment-definition-with-filter
+                         meta/metadata-provider
+                         (lib/> (meta/field-metadata :venues :price) 2))
+          ;; Segment 3 references Segment 1
+          segment-3-def (segment-definition-referencing meta/metadata-provider 1)
+          ;; Segment 2 references Segment 3
+          segment-2-def (segment-definition-referencing meta/metadata-provider 3)
+          mp            (lib.tu/mock-metadata-provider
+                         meta/metadata-provider
+                         {:segments [{:id         1
+                                      :name       "Segment 1"
+                                      :table-id   (meta/id :venues)
+                                      :definition simple-def}
+                                     {:id         2
+                                      :name       "Segment 2"
+                                      :table-id   (meta/id :venues)
+                                      :definition segment-2-def}
+                                     {:id         3
+                                      :name       "Segment 3"
+                                      :table-id   (meta/id :venues)
+                                      :definition segment-3-def}]})
+          ;; New definition for Segment 1 references Segment 2 -> creates cycle: 1 -> 2 -> 3 -> 1
+          segment-1-def (segment-definition-referencing mp 2)]
+      (is (thrown-with-msg?
+           #?(:clj Exception :cljs js/Error)
+           #"[Cc]ycle"
+           (lib/check-segment-overwrite 1 segment-1-def))))))
+
+(deftest ^:parallel check-segment-overwrite-unknown-segment-test
+  (testing "Segment referencing unknown segment - should throw"
+    (let [mp            (lib.tu/mock-metadata-provider meta/metadata-provider {})
+          segment-1-def (segment-definition-referencing mp 999)]
+      (is (thrown-with-msg?
+           #?(:clj Exception :cljs js/Error)
+           #"does not exist"
+           (lib/check-segment-overwrite 1 segment-1-def))))))

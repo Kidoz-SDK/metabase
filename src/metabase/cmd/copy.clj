@@ -4,13 +4,15 @@
   data from an application database to any empty application database for all combinations of supported application
   database types."
   (:require
-   #_{:clj-kondo/ignore [:deprecated-namespace]}
    [clojure.java.jdbc :as jdbc]
+   [clojure.string :as str]
    [honey.sql :as sql]
-   [metabase.config :as config]
-   [metabase.db :as mdb]
-   [metabase.db.setup :as mdb.setup]
-   [metabase.plugins.classloader :as classloader]
+   [metabase.app-db.core :as mdb]
+   [metabase.app-db.setup :as mdb.setup]
+   [metabase.classloader.core :as classloader]
+   [metabase.config.core :as config]
+   [metabase.models.init]
+   [metabase.models.resolution :as models.resolution]
    [metabase.util :as u]
    [metabase.util.i18n :refer [trs]]
    [metabase.util.log :as log]
@@ -21,6 +23,11 @@
    (java.sql SQLException)))
 
 (set! *warn-on-reflection* true)
+
+(comment
+  ;; need at least basic model dynamic resolution stuff loaded. This SHOULD already be loaded by [[metabase.core.init]]
+  ;; but we'll include it here too for the benefit of tests.
+  metabase.models.init/keep-me)
 
 (defn- log-ok []
   (log/info (u/colorize 'green "[OK]")))
@@ -43,18 +50,20 @@
   `(do-step ~msg (fn [] ~@body)))
 
 (def entities
-  "Entities in the order they should be serialized/deserialized. This is done so we make sure that we load
-  instances of entities before others that might depend on them, e.g. `Databases` before `Tables` before `Fields`."
+  "Entities in the order they should be serialized/deserialized in `load-from-h2`. This is done so we make sure that
+   we load instances of entities before others that might depend on them, e.g. `Databases` before `Tables` before
+   `Fields`."
   (concat
-   [:model/Database
+   [:model/Channel
+    :model/ChannelTemplate
+    :model/Database
     :model/User
     :model/Setting
     :model/Table
     :model/Field
     :model/FieldValues
+    :model/FieldUserSettings
     :model/Segment
-    :model/LegacyMetric
-    :model/LegacyMetricImportantField
     :model/ModerationReview
     :model/Revision
     :model/ViewLog
@@ -95,13 +104,33 @@
     :model/ModelIndex
     :model/ModelIndexValue
     ;; 48+
-    :model/TablePrivileges
     :model/AuditLog
     :model/RecentViews
-    :model/UserParameterValue]
+    :model/UserParameterValue
+    ;; 51+
+    :model/Notification
+    :model/NotificationSubscription
+    :model/NotificationHandler
+    :model/NotificationRecipient
+    :model/NotificationCard
+    ;; 57+
+    :model/Glossary
+    ;; 58+
+    :model/AuthIdentity
+    :model/Document
+    :model/DocumentBookmark
+    :model/Comment
+    :model/CommentReaction
+    ;; 59+
+    :model/Measure]
    (when config/ee-available?
-     [:model/GroupTableAccessPolicy
-      :model/ConnectionImpersonation])))
+     [:model/Sandbox
+      :model/Tenant
+      :model/ConnectionImpersonation
+      :model/Metabot
+      :model/MetabotConversation
+      :model/MetabotMessage
+      :model/MetabotPrompt])))
 
 (defn- objects->colums+values
   "Given a sequence of objects/rows fetched from the H2 DB, return a the `columns` that should be used in the `INSERT`
@@ -121,7 +150,7 @@
 (def ^:private chunk-size 100)
 
 (defn- insert-chunk!
-  "Insert of `chunkk` of rows into the target database table with `table-name`."
+  "Insert of `chunk` of rows into the target database table with `table-name`."
   [target-db-type target-db-conn-spec table-name chunkk]
   (log/debugf "Inserting chunk of %d rows" (count chunkk))
   (try
@@ -157,13 +186,27 @@
     ;; For security purposes, do NOT copy connection details for H2 Databases by default; replace them with an empty map.
     ;; Why? Because this is a potential pathway to injecting sneaky H2 connection parameters that cause RCEs. For the
     ;; Sample Database, the correct details are reset automatically on every
-    ;; launch (see [[metabase.sample-data/update-sample-database-if-needed!]]), and we don't support connecting other H2
+    ;; launch (see [[metabase.sample-data.impl/update-sample-database-if-needed!]]), and we don't support connecting other H2
     ;; Databases in prod anyway, so this ultimately shouldn't cause anyone any problems.
-    (if *copy-h2-database-details*
-      identity
-      (map (fn [database]
-             (cond-> database
-               (= (:engine database) "h2") (assoc :details "{}")))))
+    (map (fn [database]
+           (cond-> database
+             (or (:is_attached_dwh database)
+                 (and (not *copy-h2-database-details*)
+                      (= (:engine database) "h2"))) (assoc :details "{}"))))
+
+    :model/Setting
+    ;; Never create dumps with read-only-mode turned on.
+    ;; It will be confusing to restore from and prevent key rotation.
+    (remove (fn [{k :key}] (= k "read-only-mode")))
+
+    :model/Table
+    ;; unique_table_helper is a computed/generated column
+    (map #(dissoc % :unique_table_helper))
+
+    :model/Field
+    ;; unique_field_helper is a computed/generated column
+    (map #(dissoc % :unique_field_helper))
+
     ;; else
     identity))
 
@@ -317,9 +360,10 @@
     :model/Session
     :model/ImplicitAction
     :model/HTTPAction
+    :model/FieldUserSettings
     :model/QueryAction
-    :model/ModelIndexValue
-    :model/TablePrivileges})
+    :model/MetabotConversation
+    :model/ModelIndexValue})
 
 (defmulti ^:private postgres-id-sequence-name
   {:arglists '([model])}
@@ -330,7 +374,7 @@
   (str (name (t2/table-name model)) "_id_seq"))
 
 ;;; we changed the table name to `sandboxes` but never updated the underlying ID sequences or constraint names.
-(defmethod postgres-id-sequence-name :model/GroupTableAccessPolicy
+(defmethod postgres-id-sequence-name :model/Sandbox
   [_model]
   "group_table_access_policy_id_seq")
 
@@ -360,7 +404,6 @@
                             {:model model}
                             e))))))))
 
-
 (defmethod update-sequence-values! :h2
   [_db-type data-source]
   #_{:clj-kondo/ignore [:discouraged-var]}
@@ -379,8 +422,10 @@
    source-data-source :- (ms/InstanceOfClass javax.sql.DataSource)
    target-db-type     :- [:enum :h2 :postgres :mysql]
    target-data-source :- (ms/InstanceOfClass javax.sql.DataSource)]
-  ;; make sure the entire system is loaded before running this test, to make sure we account for all the models.
-  (doseq [ns-symb u/metabase-namespace-symbols]
+  ;; make sure all model namespaces are loaded
+  (doseq [ns-symb (cond->> (vals models.resolution/model->namespace)
+                    (not config/ee-available?)
+                    (remove #(str/starts-with? (str %) "metabase-enterprise")))]
     (classloader/require ns-symb))
   ;; make sure the source database is up-do-date
   (step (trs "Set up {0} source database and run migrations..." (name source-db-type))

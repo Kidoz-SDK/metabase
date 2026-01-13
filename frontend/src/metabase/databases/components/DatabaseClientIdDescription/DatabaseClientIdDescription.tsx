@@ -1,7 +1,7 @@
 import { useFormikContext } from "formik";
 import { jt, t } from "ttag";
 
-import ExternalLink from "metabase/core/components/ExternalLink";
+import ExternalLink from "metabase/common/components/ExternalLink";
 import CS from "metabase/css/core/index.css";
 import type { DatabaseData } from "metabase-types/api";
 
@@ -18,14 +18,14 @@ const DatabaseClientIdDescription = (): JSX.Element | null => {
     return null;
   }
 
-  const projectId = details["project-id"] ?? "";
+  const projectId = details?.["project-id"] ?? "";
   const projectUrl = new URL(CREDENTIAL_URLS[engine]);
   projectUrl.searchParams.set("project", String(projectId));
 
   return (
     <span>
       {jt`${(
-        <ExternalLink className={CS.link} href={projectUrl.href}>
+        <ExternalLink key="link" className={CS.link} href={projectUrl.href}>
           {t`Click here`}
         </ExternalLink>
       )} to generate a Client ID and Client Secret for your project.`}{" "}

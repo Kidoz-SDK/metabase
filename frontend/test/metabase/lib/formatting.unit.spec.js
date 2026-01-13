@@ -1,21 +1,30 @@
-import moment from "moment-timezone"; // eslint-disable-line no-restricted-imports -- deprecated usage
+import dayjs from "dayjs";
 import { isElementOfType } from "react-dom/test-utils";
 
-import ExternalLink from "metabase/core/components/ExternalLink";
+import { mockSettings } from "__support__/settings";
+import ExternalLink from "metabase/common/components/ExternalLink";
+import Link from "metabase/common/components/Link";
 import {
   capitalize,
-  formatNumber,
-  formatValue,
-  formatUrl,
   formatDateTimeWithUnit,
+  formatNumber,
   formatTime,
   formatTimeWithUnit,
-  slugify,
+  formatUrl,
+  formatValue,
   getCurrencySymbol,
+  slugify,
 } from "metabase/lib/formatting";
 import { TYPE } from "metabase-lib/v1/types/constants";
+import { createMockColumn } from "metabase-types/api/mocks";
+
+const SITE_URL = "http://localhost:3000";
 
 describe("formatting", () => {
+  beforeAll(() => {
+    mockSettings({ site_url: SITE_URL });
+  });
+
   describe("capitalize", () => {
     it("capitalizes a single word", () => {
       expect(capitalize("hello")).toBe("Hello");
@@ -45,16 +54,19 @@ describe("formatting", () => {
     it("should format 0 correctly", () => {
       expect(formatNumber(0)).toEqual("0");
     });
+
     it("should format 1 and -1 correctly", () => {
       expect(formatNumber(1)).toEqual("1");
       expect(formatNumber(-1)).toEqual("-1");
     });
+
     it("should format large positive and negative numbers correctly", () => {
       expect(formatNumber(10)).toEqual("10");
       expect(formatNumber(99999999)).toEqual("99,999,999");
       expect(formatNumber(-10)).toEqual("-10");
       expect(formatNumber(-99999999)).toEqual("-99,999,999");
     });
+
     it("should format large numbers correctly with non-default number separator", () => {
       const options = { number_separators: ",." };
       expect(formatNumber(10.1, options)).toEqual("10,1");
@@ -62,45 +74,91 @@ describe("formatting", () => {
       expect(formatNumber(-10.1, options)).toEqual("-10,1");
       expect(formatNumber(-99999999.9, options)).toEqual("-99.999.999,9");
     });
+
     it("should format to 2 significant digits", () => {
       expect(formatNumber(1 / 3)).toEqual("0.33");
       expect(formatNumber(-1 / 3)).toEqual("-0.33");
       expect(formatNumber(0.0001 / 3)).toEqual("0.000033");
     });
+
     describe("in enclosing negative mode", () => {
       it("should format -4 as (4)", () => {
         expect(formatNumber(-4, { negativeInParentheses: true })).toEqual(
           "(4)",
         );
       });
+
       it("should format 7 as 7", () => {
         expect(formatNumber(7, { negativeInParentheses: true })).toEqual("7");
       });
+
       it("should format 0 as 0", () => {
         expect(formatNumber(0, { negativeInParentheses: true })).toEqual("0");
       });
     });
+
     describe("in compact mode", () => {
       it("should format 0 as 0", () => {
         expect(formatNumber(0, { compact: true })).toEqual("0");
       });
+
       it("shouldn't display small numbers as 0", () => {
         expect(formatNumber(0.1, { compact: true })).toEqual("0.1");
         expect(formatNumber(-0.1, { compact: true })).toEqual("-0.1");
         expect(formatNumber(0.01, { compact: true })).toEqual("0.01");
         expect(formatNumber(-0.01, { compact: true })).toEqual("-0.01");
       });
+
       it("should round up and down", () => {
         expect(formatNumber(1.01, { compact: true })).toEqual("1.01");
         expect(formatNumber(-1.01, { compact: true })).toEqual("-1.01");
         expect(formatNumber(1.9, { compact: true })).toEqual("1.9");
         expect(formatNumber(-1.9, { compact: true })).toEqual("-1.9");
       });
+
       it("should format large numbers with metric units", () => {
         expect(formatNumber(1, { compact: true })).toEqual("1");
         expect(formatNumber(1000, { compact: true })).toEqual("1.0k");
         expect(formatNumber(1111, { compact: true })).toEqual("1.1k");
       });
+
+      it("should format large numbers correctly with non-default number separator", () => {
+        const options = { compact: true, number_separators: ",." };
+        expect(formatNumber(10.1, options)).toEqual("10,1");
+        expect(formatNumber(99999999.9, options)).toEqual("100,0M");
+        expect(formatNumber(-10.1, options)).toEqual("-10,1");
+        expect(formatNumber(-99999999.9, options)).toEqual("-100,0M");
+      });
+
+      it("should format big integers", () => {
+        expect(formatNumber(9223372036854775807n, {})).toEqual(
+          "9,223,372,036,854,775,807",
+        );
+      });
+
+      it("should format big integers correctly with non-default number separators", () => {
+        const options = { number_separators: ",." };
+        expect(formatNumber(1000n, options)).toEqual("1.000");
+      });
+
+      it("should format big integers with scale options", () => {
+        const options = { scale: 10 };
+        expect(formatNumber(1000n, options)).toEqual("10,000");
+      });
+
+      it("should resepect 'decimals' setting", () => {
+        expect(formatNumber(500000, { compact: true, decimals: 0 })).toBe(
+          "500k",
+        );
+        expect(formatNumber(500000, { compact: true })).toBe("500.0k");
+        expect(formatNumber(10.1, { compact: true })).toBe("10.1");
+        expect(formatNumber(10.1, { compact: true, decimals: 0 })).toBe("10");
+        expect(formatNumber(99999999.9, { compact: true })).toBe("100.0M");
+        expect(formatNumber(99999999.9, { compact: true, decimals: 0 })).toBe(
+          "100M",
+        );
+      });
+
       it("should format percentages", () => {
         const options = { compact: true, number_style: "percent" };
         expect(formatNumber(0.867, { number_style: "percent" })).toEqual(
@@ -120,6 +178,7 @@ describe("formatting", () => {
         expect(formatNumber(11.11, options)).toEqual("1.1k%");
         expect(formatNumber(-0.22, options)).toEqual("-22%");
       });
+
       it("should format scientific notation", () => {
         const options = { compact: true, number_style: "scientific" };
         expect(formatNumber(0, options)).toEqual("0.0e+0");
@@ -129,6 +188,7 @@ describe("formatting", () => {
         expect(formatNumber(123456.78, options)).toEqual("1.2e+5");
         expect(formatNumber(-123456.78, options)).toEqual("-1.2e+5");
       });
+
       it("should obey custom separators in scientific notiation", () => {
         const options = {
           compact: true,
@@ -142,6 +202,7 @@ describe("formatting", () => {
         expect(formatNumber(123456.78, options)).toEqual("1,2e+5");
         expect(formatNumber(-123456.78, options)).toEqual("-1,2e+5");
       });
+
       it("should format currency values", () => {
         const options = {
           compact: true,
@@ -164,6 +225,7 @@ describe("formatting", () => {
         ).toEqual("$1.2M");
       });
     });
+
     it("should format to correct number of decimal places", () => {
       expect(formatNumber(0.1)).toEqual("0.1");
       expect(formatNumber(0.11)).toEqual("0.11");
@@ -217,9 +279,22 @@ describe("formatting", () => {
   });
 
   describe("formatValue", () => {
+    it("should return null on nullish values by default", () => {
+      expect(formatValue(null)).toEqual(null);
+      expect(formatValue(undefined)).toEqual(null);
+    });
+
+    it("should format null as (empty) when stringifyNull option is true", () => {
+      expect(formatValue(null, { stringifyNull: true })).toEqual("(empty)");
+      expect(formatValue(undefined, { stringifyNull: true })).toEqual(
+        "(empty)",
+      );
+    });
+
     it("should format numbers with null column", () => {
       expect(formatValue(12345)).toEqual("12345");
     });
+
     it("should format numbers with commas", () => {
       expect(
         formatValue(12345, {
@@ -227,6 +302,20 @@ describe("formatting", () => {
         }),
       ).toEqual("12,345");
     });
+
+    it("should format big integers", () => {
+      const options = {
+        column: { base_type: TYPE.Number, semantic_type: TYPE.Number },
+      };
+
+      expect(formatValue(9223372036854775807n, options)).toEqual(
+        "9,223,372,036,854,775,807",
+      );
+      expect(formatValue("9223372036854775807", options)).toEqual(
+        "9,223,372,036,854,775,807",
+      );
+    });
+
     it("should format zip codes without commas", () => {
       expect(
         formatValue(12345, {
@@ -234,6 +323,7 @@ describe("formatting", () => {
         }),
       ).toEqual("12345");
     });
+
     it("should format latitude and longitude columns correctly", () => {
       expect(
         formatValue(37.7749, {
@@ -246,7 +336,8 @@ describe("formatting", () => {
         }),
       ).toEqual("122.41940000° W");
     });
-    it("should return a component for links in jsx + rich mode", () => {
+
+    it("should return the component for external links in jsx + rich mode", () => {
       expect(
         isElementOfType(
           formatValue("http://metabase.com/", { jsx: true, rich: true }),
@@ -254,6 +345,38 @@ describe("formatting", () => {
         ),
       ).toEqual(true);
     });
+
+    it("should return a component for internal links in jsx + rich mode", () => {
+      expect(
+        isElementOfType(formatValue(SITE_URL, { jsx: true, rich: true }), Link),
+      ).toBe(true);
+    });
+
+    it("should return a component for relative links in jsx + rich mode", () => {
+      const column = createMockColumn({
+        name: "column_name",
+        base_type: "type/Text",
+        effective_type: "type/Text",
+        semantic_type: "type/URL",
+      });
+      expect(
+        isElementOfType(
+          formatValue("/question/12", {
+            jsx: true,
+            rich: true,
+            view_as: "link",
+            link_url: "{{column_name}}",
+            clicked: {
+              value: "/question/12",
+              column: column,
+              data: [{ value: "question/12", col: column }],
+            },
+          }),
+          Link,
+        ),
+      ).toEqual(true);
+    });
+
     it("should not return an ExternalLink for links in jsx + rich mode if there's click behavior", () => {
       const formatted = formatValue("http://metabase.com/", {
         jsx: true,
@@ -271,6 +394,7 @@ describe("formatting", () => {
       // expect the text to be in a div (which has link formatting) rather than ExternalLink
       expect(formatted.props["data-testid"]).toEqual("link-formatted-text");
     });
+
     it("should render image", () => {
       const formatted = formatValue("http://metabase.com/logo.png", {
         jsx: true,
@@ -281,6 +405,7 @@ describe("formatting", () => {
       expect(formatted.type).toEqual("img");
       expect(formatted.props.src).toEqual("http://metabase.com/logo.png");
     });
+
     it("should render image with a click behavior in jsx + rich mode (metabase#17161)", () => {
       const formatted = formatValue("http://metabase.com/logo.png", {
         jsx: true,
@@ -296,6 +421,7 @@ describe("formatting", () => {
       expect(formatted.type).toEqual("img");
       expect(formatted.props.src).toEqual("http://metabase.com/logo.png");
     });
+
     it("should return a component for email addresses in jsx + rich mode", () => {
       expect(
         isElementOfType(
@@ -304,6 +430,7 @@ describe("formatting", () => {
         ),
       ).toEqual(true);
     });
+
     it("should not add mailto prefix if there's a different semantic type", () => {
       expect(
         formatValue("foobar@example.test", {
@@ -313,6 +440,7 @@ describe("formatting", () => {
         }),
       ).toEqual("foobar@example.test");
     });
+
     it("should display hour-of-day with 12 hour clock", () => {
       expect(
         formatValue(24, {
@@ -326,6 +454,7 @@ describe("formatting", () => {
         }),
       ).toEqual("12:00 AM");
     });
+
     it("should display hour-of-day with 24 hour clock", () => {
       expect(
         formatValue(24, {
@@ -339,6 +468,7 @@ describe("formatting", () => {
         }),
       ).toEqual("00:00");
     });
+
     it("should not include time for type/Date type (metabase#7494)", () => {
       expect(
         formatValue("2019-07-07T00:00:00.000Z", {
@@ -358,6 +488,7 @@ describe("formatting", () => {
     it("should return a string when not in jsx mode", () => {
       expect(formatUrl("http://metabase.com/")).toEqual("http://metabase.com/");
     });
+
     it("should return a component for http:, https:, and mailto: links in jsx mode", () => {
       expect(
         isElementOfType(
@@ -378,6 +509,7 @@ describe("formatting", () => {
         ),
       ).toEqual(true);
     });
+
     it("should return a component for custom protocols if the column type is URL", () => {
       expect(
         isElementOfType(
@@ -390,6 +522,7 @@ describe("formatting", () => {
         ),
       ).toEqual(true);
     });
+
     it("should not return a component for bad urls if the column type is URL", () => {
       expect(
         formatUrl("invalid-blah-blah-blah", {
@@ -399,11 +532,13 @@ describe("formatting", () => {
         }),
       ).toEqual("invalid-blah-blah-blah");
     });
+
     it("should not return a component for custom protocols if the column type isn't URL", () => {
       expect(
         formatUrl("myproto:some-custom-thing", { jsx: true, rich: true }),
       ).toEqual("myproto:some-custom-thing");
     });
+
     it("should not return a link component for unrecognized links in jsx mode", () => {
       expect(
         isElementOfType(
@@ -412,6 +547,7 @@ describe("formatting", () => {
         ),
       ).toEqual(false);
     });
+
     it("should return a string for javascript:, data:, and other links in jsx mode", () => {
       expect(
         formatUrl("javascript:alert('pwnd')", { jsx: true, rich: true }),
@@ -524,18 +660,15 @@ describe("formatting", () => {
     });
 
     it("should always format week ranges according to returned data", () => {
-      try {
-        // globally set locale to es
-        moment.locale("es");
-        expect(
-          formatDateTimeWithUnit("2019-07-07T00:00:00.000Z", "week", {
-            type: "cell",
-          }),
-        ).toEqual("julio 7, 2019 – julio 13, 2019");
-      } finally {
-        // globally reset locale
-        moment.locale("en");
-      }
+      setSpanishLocale();
+
+      expect(
+        formatDateTimeWithUnit("2019-07-07T00:00:00.000Z", "week", {
+          type: "cell",
+        }),
+      ).toEqual("julio 7, 2019 – julio 13, 2019");
+
+      resetLocale();
     });
 
     it("should format days of week with default options", () => {
@@ -595,6 +728,87 @@ describe("formatting", () => {
         ).toEqual(formatted);
       },
     );
+
+    describe("day-of-year formatting", () => {
+      it("should format day-of-year as plain number", () => {
+        expect(formatDateTimeWithUnit(1, "day-of-year")).toEqual(1);
+        expect(formatDateTimeWithUnit(100, "day-of-year")).toEqual(100);
+        expect(formatDateTimeWithUnit(365, "day-of-year")).toEqual(365);
+      });
+
+      it("should format day-of-year from date strings", () => {
+        // January 1st = day 1
+        expect(formatDateTimeWithUnit("2023-01-01", "day-of-year")).toEqual(1);
+        // February 1st = day 32 (31 days in January + 1)
+        expect(formatDateTimeWithUnit("2023-02-01", "day-of-year")).toEqual(32);
+        // December 31st = day 365 (non-leap year)
+        expect(formatDateTimeWithUnit("2023-12-31", "day-of-year")).toEqual(
+          365,
+        );
+      });
+
+      it("should handle leap year correctly", () => {
+        // December 31st in a leap year = day 366
+        expect(formatDateTimeWithUnit("2020-12-31", "day-of-year")).toEqual(
+          366,
+        );
+        // February 29th in a leap year = day 60
+        expect(formatDateTimeWithUnit("2020-02-29", "day-of-year")).toEqual(60);
+      });
+    });
+
+    describe("week-of-year formatting", () => {
+      it("should format week numbers with ordinal suffixes", () => {
+        expect(formatDateTimeWithUnit(1, "week-of-year")).toEqual("1st");
+        expect(formatDateTimeWithUnit(2, "week-of-year")).toEqual("2nd");
+        expect(formatDateTimeWithUnit(3, "week-of-year")).toEqual("3rd");
+        expect(formatDateTimeWithUnit(4, "week-of-year")).toEqual("4th");
+        expect(formatDateTimeWithUnit(21, "week-of-year")).toEqual("21st");
+        expect(formatDateTimeWithUnit(22, "week-of-year")).toEqual("22nd");
+        expect(formatDateTimeWithUnit(23, "week-of-year")).toEqual("23rd");
+        expect(formatDateTimeWithUnit(24, "week-of-year")).toEqual("24th");
+        expect(formatDateTimeWithUnit(53, "week-of-year")).toEqual("53rd");
+      });
+
+      it("should handle edge cases for ordinal suffixes", () => {
+        expect(formatDateTimeWithUnit(11, "week-of-year")).toEqual("11th");
+        expect(formatDateTimeWithUnit(12, "week-of-year")).toEqual("12th");
+        expect(formatDateTimeWithUnit(13, "week-of-year")).toEqual("13th");
+      });
+
+      it("should format week-of-year from date strings", () => {
+        // January 1st, 2023 (Sunday) is in week 52 of 2022 (ISO week)
+        const week1 = formatDateTimeWithUnit("2023-01-02", "week-of-year"); // Monday Jan 2 is week 1
+        expect(week1).toMatch(/^1[a-z]+$/);
+
+        // Mid-year dates
+        const midYear = formatDateTimeWithUnit("2023-06-15", "week-of-year");
+        expect(midYear).toMatch(/^2[0-9][a-z]+$/);
+
+        // End of year
+        const endYear = formatDateTimeWithUnit("2023-12-25", "week-of-year");
+        expect(endYear).toMatch(/^5[0-3][a-z]+$/);
+      });
+
+      it("should remove square brackets from English ordinals", () => {
+        expect(formatDateTimeWithUnit(1, "week-of-year")).toEqual("1st");
+        expect(formatDateTimeWithUnit(2, "week-of-year")).toEqual("2nd");
+        expect(formatDateTimeWithUnit(3, "week-of-year")).toEqual("3rd");
+      });
+
+      it("should handle non-English locales where ordinals are not wrapped in brackets (#66658)", () => {
+        const originalLocale = dayjs.locale();
+        try {
+          require("dayjs/locale/fr");
+          dayjs.locale("fr");
+          expect(formatDateTimeWithUnit(1, "week-of-year")).toEqual("1er");
+          expect(formatDateTimeWithUnit(2, "week-of-year")).toEqual("2");
+          expect(formatDateTimeWithUnit(3, "week-of-year")).toEqual("3");
+        } finally {
+          dayjs.locale(originalLocale);
+        }
+      });
+    });
   });
 
   describe("formatTime", () => {
@@ -713,3 +927,14 @@ describe("formatting", () => {
     });
   });
 });
+
+function setSpanishLocale() {
+  // globally set locale to es
+  require("dayjs/locale/es");
+  dayjs.locale("es");
+  dayjs.updateLocale(dayjs.locale(), { weekStart: 0 });
+}
+
+function resetLocale() {
+  dayjs.locale("en");
+}

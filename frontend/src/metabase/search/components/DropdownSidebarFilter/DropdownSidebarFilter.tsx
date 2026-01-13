@@ -1,10 +1,9 @@
-/* eslint-disable react/prop-types */
 import type { MouseEvent } from "react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { isEmpty } from "underscore";
 
-import Popover from "metabase/components/Popover";
-import useIsSmallScreen from "metabase/hooks/use-is-small-screen";
+import Popover from "metabase/common/components/Popover";
+import useIsSmallScreen from "metabase/common/hooks/use-is-small-screen";
 import { useSelector } from "metabase/lib/redux";
 import { isNotNull } from "metabase/lib/types";
 import type {
@@ -15,12 +14,12 @@ import type {
 } from "metabase/search/types";
 import { getIsNavbarOpen } from "metabase/selectors/app";
 import type { IconName } from "metabase/ui";
-import { Text, Box, Center, Button, Stack, Icon } from "metabase/ui";
+import { Box, Button, Center, Icon, Stack, Text } from "metabase/ui";
 
 import {
-  GroupOverflowHidden,
   DropdownFieldSet,
   DropdownLabelIcon,
+  GroupOverflowHidden,
   SearchEventSandbox,
 } from "./DropdownSidebarFilter.styled";
 
@@ -105,26 +104,25 @@ export const DropdownSidebarFilter = ({
         legend={fieldHasValue ? label() : undefined}
         fieldHasValueOrFocus={fieldHasValue}
       >
-        <GroupOverflowHidden position="apart" noWrap w="100%">
+        <GroupOverflowHidden justify="space-between" wrap="nowrap" w="100%">
           {fieldHasValue ? (
             <DisplayComponent value={value} />
           ) : (
-            <GroupOverflowHidden noWrap>
+            <GroupOverflowHidden wrap="nowrap">
               {iconName && <DropdownLabelIcon size={16} name={iconName} />}
-              <Text weight={700} truncate>
+              <Text fw={700} truncate>
                 {label()}
               </Text>
             </GroupOverflowHidden>
           )}
           <Button
             data-testid="sidebar-filter-dropdown-button"
-            compact
+            size="compact-xs"
             mr="0.25rem"
-            size="xs"
             c="inherit"
             variant="subtle"
             onClick={onClearFilter}
-            leftIcon={
+            leftSection={
               <Center m="-0.25rem">
                 <Icon size={16} name={getDropdownIcon()} />
               </Center>
@@ -150,7 +148,7 @@ export const DropdownSidebarFilter = ({
                 <Stack mah={maxHeight}>
                   <ContentComponent
                     value={value}
-                    onChange={selected => onApplyFilter(selected)}
+                    onChange={(selected) => onApplyFilter(selected)}
                     width={popoverWidth}
                   />
                 </Stack>

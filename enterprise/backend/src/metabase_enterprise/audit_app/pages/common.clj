@@ -7,8 +7,7 @@
    [medley.core :as m]
    [metabase-enterprise.audit-app.query-processor.middleware.handle-audit-queries
     :as qp.middleware.audit]
-   [metabase.db :as mdb]
-   [metabase.db.query :as mdb.query]
+   [metabase.app-db.core :as mdb]
    [metabase.driver.sql-jdbc.execute :as sql-jdbc.execute]
    [metabase.driver.sql-jdbc.sync :as sql-jdbc.sync]
    [metabase.query-processor.schema :as qp.schema]
@@ -78,33 +77,29 @@
           form))
       (dissoc query :with)))))
 
-;; TODO - fixme
 (def ^:private ^{:arglists '([])} application-db-default-timezone
   ;; cache the application DB's default timezone for an hour. I don't expect this information to change *ever*,
   ;; really, but it seems like it is possible that it *could* change. Determining this for every audit query seems
   ;; wasteful however.
-  ;;
-  ;; This is cached by db-type and the JDBC connection spec in case that gets changed/swapped out for one reason or
-  ;; another
-  (let [timezone (memoize/ttl
-                  #_{:clj-kondo/ignore [:deprecated-var]}
-                  sql-jdbc.sync/db-default-timezone
-                  :ttl/threshold (u/hours->ms 1))]
+  (mdb/memoize-for-application-db
+   (memoize/ttl
     (fn []
-      (timezone (mdb/db-type) {:datasource (mdb/app-db)}))))
+      #_{:clj-kondo/ignore [:deprecated-var]}
+      (sql-jdbc.sync/db-default-timezone (mdb/db-type) {:datasource (mdb/app-db)}))
+    :ttl/threshold (u/hours->ms 1))))
 
 (defn- compile-honeysql [driver honeysql-query]
   (try
     (let [honeysql-query (cond-> honeysql-query
                            ;; MySQL 5.x does not support CTEs, so convert them to subselects instead
                            (= driver :mysql) CTEs->subselects)]
-      (mdb.query/compile (add-default-params honeysql-query)))
+      (mdb/compile (add-default-params honeysql-query)))
     (catch Throwable e
       (throw (ex-info (tru "Error compiling audit query: {0}" (ex-message e))
                       {:driver driver, :honeysql-query honeysql-query}
                       e)))))
 
-(mu/defn ^:private reduce-results* :- :some
+(mu/defn- reduce-results* :- :some
   [honeysql-query :- :map
    rff            :- ::qp.schema/rff
    init]

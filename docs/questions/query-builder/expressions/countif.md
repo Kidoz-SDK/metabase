@@ -10,15 +10,15 @@ Syntax: `CountIf(condition)`.
 
 Example: in the table below, `CountIf([Plan] = "Basic")` would return 3.
 
-| ID  | Plan        |
-|-----|-------------|
-| 1   | Basic       |
-| 2   | Basic       |
-| 3   | Basic       |
-| 4   | Business    |
-| 5   | Premium     |
+| ID  | Plan     |
+| --- | -------- |
+| 1   | Basic    |
+| 2   | Basic    |
+| 3   | Basic    |
+| 4   | Business |
+| 5   | Premium  |
 
-> [Aggregations](../expressions-list.md#aggregations) like `CountIf` should be added to the query builder's [**Summarize** menu](../../query-builder/introduction.md#summarizing-and-grouping-by) > **Custom Expression** (scroll down in the menu if needed).
+> [Aggregations](../expressions-list.md#aggregations) like `CountIf` should be added to the query builder's [**Summarize** menu](../../query-builder/summarizing-and-grouping.md) > **Custom Expression** (scroll down in the menu if needed).
 
 ## Parameters
 
@@ -28,13 +28,13 @@ Example: in the table below, `CountIf([Plan] = "Basic")` would return 3.
 
 We'll use the following sample data to show you `CountIf` with [required](#required-conditions), [optional](#optional-conditions), and [mixed](#some-required-and-some-optional-conditions) conditions.
 
-| ID  | Plan        | Active Subscription |
-|-----|-------------| --------------------|
-| 1   | Basic       | true                |
-| 2   | Basic       | true                | 
-| 3   | Basic       | false               |
-| 4   | Business    | false               |
-| 5   | Premium     | true                |
+| ID  | Plan     | Active Subscription |
+| --- | -------- | ------------------- |
+| 1   | Basic    | true                |
+| 2   | Basic    | true                |
+| 3   | Basic    | false               |
+| 4   | Business | false               |
+| 5   | Premium  | true                |
 
 ### Required conditions
 
@@ -73,17 +73,17 @@ Returns 2 on the sample data: there are only two Basic or Business plans that la
 In general, to get a conditional count for a category or group, such as the number of inactive subscriptions per plan, you'll:
 
 1. Write a `CountIf` expression with your conditions.
-2. Add a [**Group by**](../../query-builder/introduction.md#summarizing-and-grouping-by) column in the query builder.
+2. Add a [**Group by**](../../query-builder/summarizing-and-grouping.md) column in the query builder.
 
 Using the sample data:
 
-| ID  | Plan        | Active Subscription |
-|-----|-------------| --------------------|
-| 1   | Basic       | true                |
-| 2   | Basic       | true                | 
-| 3   | Basic       | false               |
-| 4   | Business    | false               |
-| 5   | Premium     | true                |
+| ID  | Plan     | Active Subscription |
+| --- | -------- | ------------------- |
+| 1   | Basic    | true                |
+| 2   | Basic    | true                |
+| 3   | Basic    | false               |
+| 4   | Business | false               |
+| 5   | Premium  | true                |
 
 Count the total number of inactive subscriptions per plan:
 
@@ -101,105 +101,70 @@ CountIf([Payment], [Plan] != true)
 
 To view your conditional counts by plan, set the **Group by** column to "Plan".
 
-| Plan      | Total Inactive Subscriptions |
-|-----------|------------------------------|
-| Basic     | 1                            | 
-| Business  | 1                            |
-| Premium   | 0                            |
+| Plan     | Total Inactive Subscriptions |
+| -------- | ---------------------------- |
+| Basic    | 1                            |
+| Business | 1                            |
+| Premium  | 0                            |
 
 > Tip: when sharing your work with other people, it's helpful to use the `OR` filter, even though the `!=` filter is shorter. The inclusive `OR` filter makes it easier to understand which categories (e.g., plans) are included in your conditional count.
 
 ## Accepted data types
 
-| [Data type](https://www.metabase.com/learn/databases/data-types-overview#examples-of-data-types) | Works with `CountIf`      |
-| ------------------------------------------------------------------------------------------------ | ------------------------- |
-| String                                                                                           | ❌                        |
-| Number                                                                                           | ❌                        |
-| Timestamp                                                                                        | ❌                        |
-| Boolean                                                                                          | ✅                        |
-| JSON                                                                                             | ❌                        |
+| [Data type](https://www.metabase.com/learn/grow-your-data-skills/data-fundamentals/data-types-overview#examples-of-data-types) | Works with `CountIf` |
+| ------------------------------------------------------------------------------------------------------------------------------ | -------------------- |
+| String                                                                                                                         | ❌                   |
+| Number                                                                                                                         | ❌                   |
+| Timestamp                                                                                                                      | ❌                   |
+| Boolean                                                                                                                        | ✅                   |
+| JSON                                                                                                                           | ❌                   |
 
 `CountIf` accepts a [function](../expressions-list.md#functions) or [conditional statement](../expressions.md#conditional-operators) that returns a boolean value (`true` or `false`).
 
 ## Related functions
 
-Different ways to do the same thing, because it's fun to try new things.
-
 **Metabase**
-- [case](#case)
-- [CumulativeCount](#cumulativecount)
+
+- [Conditional running counts](#conditional-running-counts)
 
 **Other tools**
+
 - [SQL](#sql)
 - [Spreadsheets](#spreadsheets)
 - [Python](#python)
 
-### case
+### Conditional running counts
 
-You can combine [`Count`](../expressions-list.md#count) with [`case`](./case.md):
-
-```
-Count(case([Plan] = "Basic", [ID]))
-```
-
-to do the same thing as `CountIf`:
-
-```
-CountIf([Plan] = "Basic")
-```
-
-The `case` version lets you count a different column when the condition isn't met. For example, if you've got data from different sources:
-
-| ID: Source A  | Plan: Source A | ID: Source B  | Plan: Source B       | 
-|---------------|----------------|---------------| ---------------------|
-| 1             | Basic          |               |                      |
-|               |                | B             | basic                |
-|               |                | C             | basic                |
-| 4             | Business       | D             | business             |
-| 5             | Premium        | E             | premium              |
-
-To count the total number of Basic plans across both sources, you could create a `case` expression to:
-
-- Count the rows in "ID: Source A" where "Plan: Source A = "Basic"
-- Count the rows in "ID: Source B" where "Plan: Source B = "basic"
-
-```
-Count(case([Plan: Source A] = "Basic", [ID: Source A], 
-            case([Plan: Source B] = "basic", [ID: Source B])))
-```
-
-### CumulativeCount
-
-`CountIf` doesn't do running counts. You'll need to combine [CumulativeCount](../expressions-list.md#cumulativecount) with [`case`](./case.md).
+`CountIf` doesn't do running counts, and [CumulativeCount](../expressions/cumulative.md) doesn't accept conditions (or any other arguments) . To do conditional running counts, you'll need to be creative: combine [CumulativeSum](../expressions/cumulative.md) (not `CumulativeCount`! ) with [`case`](./case.md). The idea is to use `case` to return `1` when a condition is satisfied and `0` when it isn't, then compute the running sum of all the 1's.
 
 If our sample data is a time series:
 
-| ID  | Plan        | Active Subscription | Created Date     |
-|-----|-------------| --------------------|------------------|
-| 1   | Basic       | true                | October 1, 2020  |
-| 2   | Basic       | true                | October 1, 2020  | 
-| 3   | Basic       | false               | October 1, 2020  |
-| 4   | Business    | false               | November 1, 2020 |
-| 5   | Premium     | true                | November 1, 2020 |
+| ID  | Plan     | Active Subscription | Created Date     |
+| --- | -------- | ------------------- | ---------------- |
+| 1   | Basic    | true                | October 1, 2020  |
+| 2   | Basic    | true                | October 1, 2020  |
+| 3   | Basic    | false               | October 1, 2020  |
+| 4   | Business | false               | November 1, 2020 |
+| 5   | Premium  | true                | November 1, 2020 |
 
 And we want to get the running count of active plans like this:
 
 | Created Date: Month | Total Active Plans to Date |
-|---------------------|----------------------------|
+| ------------------- | -------------------------- |
 | October 2020        | 2                          |
 | November 2020       | 3                          |
 
 Create an aggregation from **Summarize** > **Custom expression**:
 
 ```
-CumulativeCount(case([Active Subscription] = true, [ID]))
+CumulativeSum(case([Active Subscription] = true, 1,0))
 ```
 
 You'll also need to set the **Group by** column to "Created Date: Month".
 
 ### SQL
 
-When you run a question using the [query builder](https://www.metabase.com/glossary/query_builder), Metabase will convert your query builder settings (filters, summaries, etc.) into a SQL query, and run that query against your database to get your results.
+When you run a question using the [query builder](https://www.metabase.com/glossary/query-builder), Metabase will convert your query builder settings (filters, summaries, etc.) into a SQL query, and run that query against your database to get your results.
 
 If our [sample data](#multiple-conditions) is stored in a PostgreSQL database, the SQL query:
 
@@ -217,11 +182,11 @@ CountIf([Plan] = "Basic")
 If you want to get [conditional counts broken out by group](#conditional-counts-by-group), the SQL query:
 
 ```sql
-SELECT 
+SELECT
     plan,
     COUNT(CASE WHEN active_subscription = false THEN id END) AS total_inactive_subscriptions
 FROM accounts
-GROUP BY 
+GROUP BY
     plan
 ```
 
@@ -231,7 +196,7 @@ The `SELECT` part of the SQl query matches the Metabase expression:
 CountIf([Active Subscription] = false)
 ```
 
-The `GROUP BY` part of the SQL query matches a Metabase [**Group by**](../../query-builder/introduction.md#summarizing-and-grouping-by) set to the "Plan" column.
+The `GROUP BY` part of the SQL query matches a Metabase [**Group by**](../../query-builder/summarizing-and-grouping.md) set to the "Plan" column.
 
 ### Spreadsheets
 
@@ -273,7 +238,7 @@ To get a [conditional count with a grouping column](#conditional-counts-by-group
     len(df_filtered.groupby('Plan'))
 ```
 
-The Python code above will produce the same result as the Metabase `CountIf` expression (with the [**Group by**](../../query-builder/introduction.md#summarizing-and-grouping-by) column set to "Plan").
+The Python code above will produce the same result as the Metabase `CountIf` expression (with the [**Group by**](../../query-builder/summarizing-and-grouping.md) column set to "Plan").
 
 ```
 CountIf([Active Subscription] = false)
@@ -282,4 +247,4 @@ CountIf([Active Subscription] = false)
 ## Further reading
 
 - [Custom expressions documentation](../expressions.md)
-- [Custom expressions tutorial](https://www.metabase.com/learn/questions/custom-expressions)
+- [Custom expressions tutorial](https://www.metabase.com/learn/metabase-basics/querying-and-dashboards/questions/custom-expressions)

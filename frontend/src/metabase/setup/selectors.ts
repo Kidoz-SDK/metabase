@@ -1,9 +1,14 @@
+import { createSelector } from "@reduxjs/toolkit";
+
 import { isEEBuild } from "metabase/lib/utils";
 import { getSetting } from "metabase/selectors/settings";
-import type { DatabaseData, LocaleData } from "metabase-types/api";
+import type {
+  DatabaseData,
+  LocaleData,
+  TokenFeature,
+} from "metabase-types/api";
 import type { InviteInfo, Locale, State, UserInfo } from "metabase-types/store";
 
-import { isNotFalsy } from "./../lib/types";
 import type { SetupStep } from "./types";
 
 const DEFAULT_LOCALES: LocaleData[] = [];
@@ -36,6 +41,10 @@ export const getInvite = (state: State): InviteInfo | undefined => {
   return state.setup.invite;
 };
 
+export const getIsEmbeddingUseCase = (state: State): boolean => {
+  return state.setup.isEmbeddingUseCase;
+};
+
 export const getIsLocaleLoaded = (state: State): boolean => {
   return state.setup.isLocaleLoaded;
 };
@@ -51,7 +60,8 @@ export const getIsStepActive = (state: State, step: SetupStep): boolean => {
 export const getIsStepCompleted = (state: State, step: SetupStep): boolean => {
   const steps = getSteps(state);
   return (
-    steps.findIndex(s => s.key === step) < steps.findIndex(s => s.isActiveStep)
+    steps.findIndex((s) => s.key === step) <
+    steps.findIndex((s) => s.isActiveStep)
   );
 };
 
@@ -71,6 +81,11 @@ export const getIsHosted = (state: State): boolean => {
   return getSetting(state, "is-hosted?");
 };
 
+export const getTokenFeature = (state: State, feature: TokenFeature) => {
+  const tokenFeatures = getSetting(state, "token-features");
+  return tokenFeatures[feature];
+};
+
 export const getAvailableLocales = (state: State): LocaleData[] => {
   return getSetting(state, "available-locales") ?? DEFAULT_LOCALES;
 };
@@ -79,42 +94,76 @@ export const getIsEmailConfigured = (state: State): boolean => {
   return getSetting(state, "email-configured?");
 };
 
-export const getSteps = (state: State) => {
-  const usageReason = getUsageReason(state);
-  const activeStep = getStep(state);
-  const tokenFeatures = getSetting(state, "token-features");
+export const getSteps = createSelector(
+  [
+    (state: State) => getUsageReason(state),
+    (state: State) => getStep(state),
+    (state: State) => getSetting(state, "token-features"),
+    (state: State) => state.setup.licenseToken,
+    (state: State) => getIsEmbeddingUseCase(state),
+  ],
+  (
+    usageReason,
+    activeStep,
+    tokenFeatures,
+    licenseToken,
+    isEmbeddingUseCase,
+  ) => {
+    const isPaidPlan =
+      tokenFeatures &&
+      Object.values(tokenFeatures).some((value) => value === true);
+    const hasAddedPaidPlanInPreviousStep = Boolean(licenseToken);
 
-  const isPaidPlan =
-    tokenFeatures && Object.values(tokenFeatures).some(value => value === true);
-  const hasAddedPaidPlanInPreviousStep = Boolean(state.setup.licenseToken);
+    const shouldShowDBConnectionStep = usageReason !== "embedding";
+    const shouldShowLicenseStep =
+      isEEBuild() && (!isPaidPlan || hasAddedPaidPlanInPreviousStep);
 
-  const shouldShowDBConnectionStep = usageReason !== "embedding";
-  const shouldShowLicenseStep =
-    isEEBuild() && (!isPaidPlan || hasAddedPaidPlanInPreviousStep);
+    // note: when hosting is true, we should be on cloud and therefore not show
+    // the token step. There is an edge case that it's probably not possible in
+    // real life: somebody submitting a key with the hosting feature in the
+    // token step. This happens in our e2e test where we use the NO_FEATURES
+    // token which actually has the hosting feature so I added the
+    // hasAddedPaidPlanInPreviousStep check
+    const isHosted =
+      tokenFeatures &&
+      tokenFeatures["hosting"] &&
+      !hasAddedPaidPlanInPreviousStep;
 
-  const steps: { key: SetupStep; isActiveStep: boolean }[] = [
-    { key: "welcome" as const },
-    { key: "language" as const },
-    { key: "user_info" as const },
-    { key: "usage_question" as const },
-    shouldShowDBConnectionStep && {
-      key: "db_connection" as const,
-    },
-    shouldShowLicenseStep && { key: "license_token" as const },
-    { key: "data_usage" as const },
-    { key: "completed" as const },
-  ]
-    .filter(isNotFalsy)
-    .map(({ key }) => ({
+    const shouldShowDataUsageStep = !isHosted;
+
+    const maybeAddStep = (step: SetupStep, condition: boolean): SetupStep[] =>
+      condition ? [step] : [];
+
+    const steps: SetupStep[] = [
+      "welcome",
+      "user_info",
+      ...maybeAddStep("usage_question", !isEmbeddingUseCase),
+      ...maybeAddStep(
+        "db_connection",
+        shouldShowDBConnectionStep && !isEmbeddingUseCase,
+      ),
+      ...maybeAddStep("license_token", shouldShowLicenseStep),
+      ...maybeAddStep("data_usage", shouldShowDataUsageStep),
+      "completed",
+    ];
+
+    return steps.map((key) => ({
       key,
       isActiveStep: activeStep === key,
     }));
-
-  return steps;
-};
+  },
+);
 
 export const getNextStep = (state: State) => {
   const steps = getSteps(state);
-  const activeStepIndex = steps.findIndex(step => step.isActiveStep);
+  const activeStepIndex = steps.findIndex((step) => step.isActiveStep);
   return steps[activeStepIndex + 1].key;
+};
+
+export const getShouldShowStepNumber = (state: State): boolean => {
+  const interactiveSteps = getSteps(state).filter(
+    (step) => step.key !== "welcome" && step.key !== "completed",
+  );
+
+  return interactiveSteps.length > 1;
 };

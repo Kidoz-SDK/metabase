@@ -4,11 +4,16 @@
   The shape returned by the pivot qp is not the same visually as what a pivot table looks like in the app.
   It's all of the same data, but some post-processing logic needs to run on the rows to be able to present them
   visually in the same way as in the app."
+  (:refer-clojure :exclude [mapv empty?])
   (:require
-   [clojure.math.combinatorics :as math.combo]
    [clojure.set :as set]
+   [metabase.models.visualization-settings :as mb.viz]
+   [metabase.pivot.core :as pivot]
    [metabase.util.malli :as mu]
-   [metabase.util.malli.registry :as mr]))
+   [metabase.util.malli.registry :as mr]
+   [metabase.util.performance :as perf :refer [mapv empty?]]))
+
+(set! *warn-on-reflection* true)
 
 ;; I'll do my best to concisely explain what's happening here. Some terms:
 ;;  - raw pivot rows -> the rows returned by the above 'pivot query processor machinery'.
@@ -17,7 +22,6 @@
 ;;  - pivot-measures -> vector of indices into raw pivot rows where the aggregated value comes from. This
 ;;    the values from these indices (often just 1 idx) are what end up in the table's 'cells' (the stuff making up the bulk of the table)
 
-
 ;; an example of what a raw pivot row might look like, with header shown for clarity:
 ;; {:Cat A "AA", :Cat B "BA", :Cat C "CA", :Cat D "DA", :pivot-grouping 0, :Sum of Measure 1}
 ;; [Cat A Cat B Cat C Cat D pivot-grouping Sum of Measure]
@@ -25,171 +29,173 @@
 
 ;; The 'pivot-grouping' is the giveaway. If you ever see that column, you know you're dealing with raw pivot rows.
 
-;; Most of the post processing functions use a 'pivot-spec' map.
 (mr/def ::pivot-spec
   [:map
    [:column-titles  [:sequential [:string]]]
    [:pivot-rows     [:sequential [:int {:min 0}]]]
    [:pivot-cols     [:sequential [:int {:min 0}]]]
+   [:pivot-grouping-key {:optional true}
+    [:int {:min 0}]]
    [:pivot-measures {:optional true}
     [:sequential [:int {:min 0}]]]])
 
-(defn- all-values-for
-  "Get all possible values for pivot-col/row 'k'.
-  `rows` are the raw pivot rows, `idx` is the column index to get values from.
-  `include-nil?` controls whether an extra `nil` value is added to the returned values.
-  This extra nil is needed for some combinations later on, but not others, hence the switch."
-  [rows idx include-nil?]
-  (let [all-vals (distinct (mapv #(get % idx) rows))]
-    (concat (vec (remove nil? all-vals)) (when include-nil? [nil]))))
+(def non-pivot-row-group
+  "Pivot query results have a 'pivot-grouping' column. Rows whose pivot-grouping value is 0 are expected results.
 
-(mu/defn ^:private pivot-row-titles
-  [{:keys [column-titles pivot-rows]} :- ::pivot-spec]
-  (mapv #(get column-titles %) pivot-rows))
+  Rows whose pivot-grouping values are greater than 0 represent subtotals, and should not be included in non-pivot
+  result outputs."
+  0)
 
-(mu/defn ^:private header-builder
-  "Construct the export-style pivot headers from the raw pivot rows, according to the indices specified in `pivot-spec`."
-  [rows {:keys [pivot-cols] :as pivot-spec} :- ::pivot-spec]
-  (let [row-titles       (pivot-row-titles pivot-spec)
-        ;; For each pivot column, get the possible values for that column
-        ;; Then, get the cartesian product of each to for all of the value groups
-        ;; Each group will have (count pivot-cols) entries and the values
-        ;; will be from the columns in the same order as presented in pivot-cols.
-        ;; So, if pivot-cols is [0 1], the first col-value-group will have [first-value-from-first-col first-value-from-second-col]
-        col-value-groups (apply math.combo/cartesian-product (map (fn [col-k]
-                                                                    (all-values-for rows col-k false))
-                                                                  pivot-cols))]
-    ;; Each Header (1 header row per pivot-col) will first start with the Pivot Row Titles. There will be (count pivot-rows) entries.
-    ;; Then, Get all of the nth entries in the col-value-gropus for the nth header, and then append "Row Totals" label.
-    (mapv
-     (fn [col-idx]
-       (vec (concat
-             row-titles
-             (map #(nth % col-idx) col-value-groups)
-             ["Row totals"])))
-     (range (count pivot-cols)))))
-
-(mu/defn ^:private col-grouper
-  "Map of raw pivot rows keyed by [pivot-cols]. Use it per row-group.
-  This constructs a map where you can use a pivot-cols-value tuple to find the row-builder
-  That is, suppose we have 2 pivot-cols, and valid values might be 'AA' and 'BA'. To get the
-  raw pivot row where each of those values matches, you can run this function to get `m` and then
-  use `(get m ['AA' 'BA'])` to get the row.
-
-  This is used inside `row-grouper` on a subset of the total list of raw pivot rows."
-  [rows {:keys [pivot-cols]} :- ::pivot-spec]
-  (let [cols-groups (group-by (apply juxt (map (fn [k] #(get % k)) pivot-cols)) rows)]
-    cols-groups))
-
-(mu/defn ^:private row-grouper
-  "Map of raw pivot rows keyed by [pivot-rows]. The logic for how the map is initially constructed is the same
-  as in `col-grouper`. Then, each map entry value (which is a subset of rows) is updated by running the `sub-rows-fn` on the subset.
-  This sub-rows-fn does the following:
-   - group the sub rows with `col-grouper`
-   - create the list of all possible pivot column value combinations and manually concat the 'nils group' too
-   - using the `cols-groups` map, get the `padded-sub-rows`
-   - Now, since we only need the values in the `pivot-measures` indices, transform the sub-rows by getting just those indices
-  Thus, the output of the `row-grouper` is a nested map allowing you to get a raw pivot row corresponding to any combination
-  of pivot-row values and pivot-col values by doing something like this:
-
-  `(get-in m [[row-idx1 row-idx2] [col-idx1 col-idx2]])`"
-  [rows {:keys [pivot-rows pivot-cols pivot-measures] :as pivot-spec} :- ::pivot-spec]
-  (let [rows-groups (group-by (apply juxt (map (fn [k] #(get % k)) pivot-rows)) rows)
-        sub-rows-fn (fn [sub-rows]
-                      (let [cols-groups     (col-grouper sub-rows pivot-spec)
-                            padded-sub-rows (vec
-                                             (mapcat
-                                              ;; if the particular values combination is not found, we want to pad that with nil
-                                              ;; so that subsequent cells are rendered in the correct place
-                                              ;; in other words, each padded-sub-row must be the same length
-                                              #(get cols-groups (vec %) [nil])
-                                              ;; this is a list of all possible pivot col value combinations. eg. ['AA' 'BA']
-                                              ;; concat the nils so that the [nil nil] combination shows up once, which is
-                                              ;; necessary to include the row totals and grand totals
-                                              (concat
-                                               (apply math.combo/cartesian-product (map #(all-values-for rows % false) pivot-cols))
-                                               [(vec (repeat (count pivot-cols) nil))])))]
-                        (vec (mapcat (fn [row]
-                                       (mapv #(get row %) pivot-measures))
-                                     padded-sub-rows))))]
-    (-> rows-groups
-        (update-vals sub-rows-fn))))
-
-(mu/defn ^:private totals-row-fn
-  "Given a work in progress pivot export row (NOT a raw pivot row), add Totals labels if appropriate."
-  [export-style-row {:keys [pivot-rows]} :- ::pivot-spec]
-  (let [n-row-cols       (count pivot-rows)
-        row-indices      (range n-row-cols)
-        row-vals         (take n-row-cols export-style-row)
-        totals-for-value (fn [idx v]
-                           (if (and ((set row-indices) idx)
-                                    (some? v))
-                             (format "Totals for %s" v)
-                             v))]
-    (cond
-      (every? nil? row-vals)
-      (assoc export-style-row 0 "Grand Totals")
-
-      (some nil? row-vals)
-      (vec (map-indexed totals-for-value export-style-row))
-
-      :else
-      export-style-row)))
-
-(defn- pivot-grouping-key
+(defn pivot-grouping-index
   "Get the index into the raw pivot rows for the 'pivot-grouping' column."
   [column-titles]
-  ;; a vector is kinda sorta a map of indices->values, so
-  ;; we can use map-invert to create the map
+  ;; A vector is kinda sorta a map of indices->values, so we can use map-invert to create the map
   (get (set/map-invert (vec column-titles)) "pivot-grouping"))
 
-(mu/defn ^:private pivot-measures
-  "Get the indices into the raw pivot rows corresponding to the pivot table's measure."
+(mu/defn- pivot-measures
+  "Get the indices into the raw pivot rows corresponding to the pivot table's measure(s)."
   [{:keys [pivot-rows pivot-cols column-titles]} :- ::pivot-spec]
   (-> (set/difference
        ;; every possible idx is just the range over the count of cols
        (set (range (count column-titles)))
        ;; we exclude indices already used in pivot rows and cols, and the pivot-grouping key
-       ;; recall that a raw pivot row will always contain this 'pivot-grouping' column, which we don't actually need to use.
-       (set (concat pivot-rows pivot-cols [(pivot-grouping-key column-titles)])))
+       ;;
+       ;; recall that a raw pivot row will always contain this 'pivot-grouping' column, which we don't actually need
+       ;; to use.
+       (set (concat pivot-rows pivot-cols [(pivot-grouping-index column-titles)])))
       sort
       vec))
 
-(mu/defn ^:private add-pivot-measures :- ::pivot-spec
-  [pivot-spec :- ::pivot-spec]
-  (assoc pivot-spec :pivot-measures (pivot-measures pivot-spec)))
+(mu/defn add-pivot-measures :- ::pivot-spec
+  "Given a pivot-spec map without the `:pivot-measures` key, determine what key(s) the measures will be and assoc that
+  value into `:pivot-measures`."
+  [{measure-indices :pivot-measures :as pivot-spec} :- ::pivot-spec]
+  (let [pivot-grouping-key (pivot-grouping-index (:column-titles pivot-spec))]
+    (cond-> pivot-spec
+      ;; if pivot-measures don't already exist (from the pivot qp), we add them ourselves, assuming lowest ID ->
+      ;; highest ID sort order
+      (not (seq measure-indices)) (assoc :pivot-measures (pivot-measures pivot-spec))
+      ;; otherwise, we modify indices to skip over whatever the pivot-grouping idx is, so we pull the correct values
+      ;; per row
+      (seq measure-indices)       (update :pivot-measures (fn [indices]
+                                                            (mapv (fn [idx]
+                                                                    (if (>= idx pivot-grouping-key)
+                                                                      (inc idx)
+                                                                      idx))
+                                                                  indices)))
+      true                       (assoc :pivot-grouping pivot-grouping-key))))
 
-(mu/defn ^:private row-builder
-  "Construct the export-style pivot rows from the raw pivot rows, according to the indices specified in `pivot-spec`.
+;; TODO: Better way to manage column settings similar to the FE?
+(defn- merge-column-settings
+  "Correlates column viz settings with columns by name in order to produce column settings closer
+  to what the FE gets."
+  [cols settings]
+  (let [col-settings (::mb.viz/column-settings settings)]
+    (map
+     (fn [col]
+       (merge
+        {:column col}
+        (get col-settings {::mb.viz/column-name (:name col)})))
+     cols)))
 
-  This function:
-   - creates the row-groups map using `row-grouper`. This already has the nearly complete rows.
-   - create the list of pivot row value combinations. We don't need the nils group this time; it would result in
-     a doubling of the Grand totals row
-     We DO want to generate tuples that can have 'nil' (eg. ['CA' nil]) so that Row totals rows will be grabbed from the map too.
-   - construct each row by concatenating the row values, since they're the labels for each pivot-row. Handily, the `ks` are exactly
-     these values, so we can just concat each k to its `row-groups` entry
-   - Run the `totals-row-fn` to add the Row totals and Grand totals labels in the right spots."
-  [rows {:keys [pivot-rows] :as pivot-spec} :- ::pivot-spec]
-  (let [row-groups (row-grouper rows pivot-spec)
-        ks         (mapv vec (concat
-                              (apply math.combo/cartesian-product (map #(all-values-for rows % true) pivot-rows))))]
-    (->> (map (fn [k] (vec (concat k (get row-groups k)))) ks)
-         (filter #(< (count pivot-rows) (count %)))
-         (map #(totals-row-fn % pivot-spec)))))
+(defn- build-top-headers
+  [top-header-items left-header-items row-indexes display-name-for-col]
+  (let [left-header-depth (->> left-header-items
+                               (map :maxDepthBelow)
+                               (reduce max 0)
+                               inc)
+        top-left-header   (sequence (comp (map display-name-for-col)
+                                          (take left-header-depth))
+                                    row-indexes)]
+    (if (empty? top-header-items)
+      [(vec top-left-header)]  ;; Return just the top-left header for empty input
+      (let [max-depth   (apply max (map :depth top-header-items))
+            left-width  (count top-left-header)
+            ;; Initialize rows - all rows except the last one are filled with nil
+            header-rows (-> (vec (repeat max-depth (vec (repeat left-width nil))))
+                            (conj (vec top-left-header)))]
+        ;; Fill in the header values for each item
+        (reduce
+         (fn [rows {:keys [depth value span]}]
+           (let [current-row (get rows depth)
+                 ;; Add the value and repeat it for the span
+                 new-row     (-> current-row
+                                 (conj value)
+                                 (into (repeat (dec span) value)))]
+             (assoc rows depth new-row)))
+         header-rows
+         top-header-items)))))
 
-(defn- clean-row
-  [row]
-  (mapv #(if (= "" %)
-           nil
-           %)
-        row))
+(defn- build-left-headers
+  [left-header-items]
+  (if (empty? left-header-items)
+    []
+    (let [max-depth        (apply max (map :depth left-header-items))
+          span-by-position (reduce (fn [acc {:keys [depth offset span]}]
+                                     (update acc depth
+                                             (fnil #(max % (+ offset span)) 0)))
+                                   {}
+                                   left-header-items)
+          result-height    (apply max (vals span-by-position))
+          column-count     (inc max-depth)]
+      ;; Fill in the header values
+      (reduce
+       (fn [grid {:keys [depth value span offset]}]
+         ;; For each row this header spans, set the value at the correct depth
+         (reduce (fn [g row-idx]
+                   (assoc-in g [row-idx depth] value))
+                 grid
+                 (range offset (+ offset span))))
+       ;; Start with an empty grid of appropriate dimensions
+       (vec (repeat result-height (vec (repeat column-count nil))))
+       left-header-items))))
 
-(mu/defn pivot-builder
-  "Create the rows for a pivot export from raw pivot rows `rows`."
-  [rows pivot-spec :- ::pivot-spec]
-  (let [rows       (mapv clean-row rows)
-        pivot-spec (add-pivot-measures pivot-spec)]
-    (vec (concat
-          (header-builder rows pivot-spec)
-          (row-builder rows pivot-spec)))))
+(defn- build-full-pivot
+  [get-row-section left-headers top-headers measure-count]
+  (let [row-count (count left-headers)
+        left-width (count (first left-headers))
+        col-count (- (count (first top-headers)) left-width)
+        result (perf/concat
+                top-headers
+                ;; For each row in left-headers...
+                (for [row-idx (range (max row-count 1))]
+                  (let [left-row (nth left-headers row-idx [])
+                        ;; ...get cell values for this row
+                        cell-values (mapcat (fn [col-idx]
+                                              (let [values (get-row-section col-idx row-idx)]
+                                                (map :value values)))
+                                            (range (/ col-count (max measure-count 1))))]
+                    ;; Combine left headers with cell values
+                    (into left-row cell-values))))]
+    (vec result)))
+
+(defn build-pivot-output
+  "Processes pivot data into the final pivot structure for exports. Calls into metabase.pivot.core, which is the
+  postprocessing code shared with the FE pivot table implementation."
+  [{:keys [data settings format-rows? pivot-export-options]} formatters]
+  (let [columns                  (pivot/columns-without-pivot-group (:cols data))
+        column-split             (:pivot_table.column_split settings)
+        row-indexes              (:pivot-rows pivot-export-options)
+        col-indexes              (:pivot-cols pivot-export-options)
+        val-indexes              (:pivot-measures pivot-export-options)
+        col-settings             (merge-column-settings columns settings)
+        {:keys [row-formatters
+                col-formatters
+                val-formatters]} formatters
+        {:keys [leftHeaderItems
+                topHeaderItems
+                getRowSection]}  (pivot/process-pivot-table data
+                                                            row-indexes
+                                                            col-indexes
+                                                            val-indexes
+                                                            columns
+                                                            col-formatters
+                                                            row-formatters
+                                                            val-formatters
+                                                            format-rows?
+                                                            settings
+                                                            col-settings)
+        display-name-for-col-idx #(pivot/display-name-for-col (nth columns %) (nth col-settings %) format-rows?)
+        top-headers              (build-top-headers topHeaderItems leftHeaderItems row-indexes display-name-for-col-idx)
+        left-headers             (build-left-headers leftHeaderItems)]
+    (build-full-pivot getRowSection left-headers top-headers (count (:values column-split)))))

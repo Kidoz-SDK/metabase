@@ -1,6 +1,6 @@
-import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { render, screen, waitFor } from "__support__/ui";
 import { createMockTimeline } from "metabase-types/api/mocks";
 
 import type { EditTimelineModalProps } from "./EditTimelineModal";
@@ -28,7 +28,6 @@ const getProps = (
   timeline: createMockTimeline(),
   onSubmit: jest.fn(),
   onArchive: jest.fn(),
-  onCancel: jest.fn(),
   onClose: jest.fn(),
   ...opts,
 });

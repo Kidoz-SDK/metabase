@@ -45,6 +45,7 @@ export const canUseCustomSource = (parameter: Parameter) => {
     case "string":
     case "location":
     case "category":
+    case "number":
       return true;
     default:
       return false;
@@ -93,8 +94,8 @@ export const canListParameterValues = (parameter: Parameter) => {
 export const canListFieldValues = (fields: Field[]) => {
   const hasFields = fields.length > 0;
   const hasFieldValues = fields
-    .filter(field => !field.isVirtual())
-    .every(field => field.has_field_values === "list");
+    .filter((field) => !field.isVirtual())
+    .every((field) => field.has_field_values === "list");
 
   return hasFields && hasFieldValues;
 };
@@ -123,11 +124,11 @@ export const canSearchFieldValues = (
   disablePKRemapping = false,
 ) => {
   const hasFields = fields.length > 0;
-  const canSearch = fields.every(field =>
+  const canSearch = fields.every((field) =>
     field.searchField(disablePKRemapping),
   );
   const hasFieldValues = fields.some(
-    field =>
+    (field) =>
       field.has_field_values === "search" ||
       (field.has_field_values === "list" && field.has_more_values === true),
   );

@@ -3,29 +3,26 @@
   [[metabase.driver.sql.parameters.substitute-test]]."
   (:require
    [clojure.test :refer :all]
+   [java-time.api :as t]
    [metabase.driver :as driver]
-   [metabase.driver.common.parameters :as params]
-   [metabase.driver.sql.parameters.substitution
-    :as sql.params.substitution]
+   ^{:clj-kondo/ignore [:deprecated-namespace]} [metabase.driver.common.parameters :as params]
+   [metabase.driver.sql.parameters.substitution :as sql.params.substitution]
    [metabase.driver.sql.query-processor :as sql.qp]
    [metabase.lib.metadata :as lib.metadata]
    [metabase.lib.test-metadata :as meta]
-   [metabase.query-processor.store :as qp.store]
+   ^{:clj-kondo/ignore [:deprecated-namespace]} [metabase.query-processor.store :as qp.store]
    [metabase.test :as mt]
-   [metabase.util.honey-sql-2 :as h2x])
-  (:import
-   (java.time LocalDate LocalDateTime)))
+   [metabase.util.honey-sql-2 :as h2x]))
 
 (set! *warn-on-reflection* true)
 
-(deftest ^:parallel field->clause-test
+(deftest ^:parallel field->field-filter-clause-test
   (is (=? [:field
            (meta/id :venues :id)
            {:base-type                                                           :type/BigInteger
-            :temporal-unit                                                       nil
             :metabase.query-processor.util.add-alias-info/source-table           (meta/id :venues)
             :metabase.driver.sql.parameters.substitution/compiling-field-filter? true}]
-          (#'sql.params.substitution/field->clause
+          (#'sql.params.substitution/field->field-filter-clause
            :h2
            (meta/field-metadata :venues :id)
            :number/=
@@ -98,37 +95,37 @@
     (mt/with-metadata-provider meta/metadata-provider
       (testing "date"
         (let [field-filter (params/map->FieldFilter
-                             {:field (lib.metadata/field (qp.store/metadata-provider) (meta/id :orders :created-at))
-                              :value {:type :date/all-options, :value "next3days"}})
-              expected-args [(LocalDate/of 2018 7 2)
-                             (LocalDate/of 2018 7 4)]]
+                            {:field (lib.metadata/field (qp.store/metadata-provider) (meta/id :orders :created-at))
+                             :value {:type :date/all-options, :value "next3days"}})
+              expected-args [(t/zoned-date-time 2018 7 2 0 0 0 0 (t/zone-id "UTC"))
+                             (t/zoned-date-time 2018 7 5 0 0 0 0 (t/zone-id "UTC"))]]
           (testing "default implementation"
             (driver/with-driver ::temporal-unit-alignment-original
               (is (= {:prepared-statement-args expected-args
                       ;; `sql.qp/date [driver :day]` was called due to `:day` returned from the multimethod by default
-                      :replacement-snippet "DAY(\"PUBLIC\".\"ORDERS\".\"CREATED_AT\") BETWEEN ? AND ?"}
+                      :replacement-snippet "\"PUBLIC\".\"ORDERS\".\"CREATED_AT\" >= ? AND \"PUBLIC\".\"ORDERS\".\"CREATED_AT\" < ?"}
                      (sql.params.substitution/->replacement-snippet-info ::temporal-unit-alignment-original field-filter)))))
           (testing "override"
             (driver/with-driver ::temporal-unit-alignment-override
               (is (= {:prepared-statement-args expected-args
                       ;; no extra `sql.qp/date` calls due to `nil` returned from the override
-                      :replacement-snippet "\"PUBLIC\".\"ORDERS\".\"CREATED_AT\" BETWEEN ? AND ?"}
+                      :replacement-snippet "\"PUBLIC\".\"ORDERS\".\"CREATED_AT\" >= ? AND \"PUBLIC\".\"ORDERS\".\"CREATED_AT\" < ?"}
                      (sql.params.substitution/->replacement-snippet-info ::temporal-unit-alignment-override field-filter)))))))
       (testing "datetime"
         (let [field-filter (params/map->FieldFilter
-                             {:field (lib.metadata/field (qp.store/metadata-provider) (meta/id :orders :created-at))
-                              :value {:type :date/all-options, :value "past30minutes"}})
-              expected-args [(LocalDateTime/of 2018 7 1 12 00 00)
-                             (LocalDateTime/of 2018 7 1 12 29 00)]]
+                            {:field (lib.metadata/field (qp.store/metadata-provider) (meta/id :orders :created-at))
+                             :value {:type :date/all-options, :value "past30minutes"}})
+              expected-args [(t/zoned-date-time 2018 7 1 12 0 0 0 (t/zone-id "UTC"))
+                             (t/zoned-date-time 2018 7 1 12 30 0 0 (t/zone-id "UTC"))]]
           (testing "default implementation"
             (driver/with-driver ::temporal-unit-alignment-original
               (is (= {:prepared-statement-args expected-args
                       ;; `sql.qp/date [driver :day]` was called due to `:day` returned from the multimethod by default
-                      :replacement-snippet "MINUTE(\"PUBLIC\".\"ORDERS\".\"CREATED_AT\") BETWEEN ? AND ?"}
+                      :replacement-snippet "\"PUBLIC\".\"ORDERS\".\"CREATED_AT\" >= ? AND \"PUBLIC\".\"ORDERS\".\"CREATED_AT\" < ?"}
                      (sql.params.substitution/->replacement-snippet-info ::temporal-unit-alignment-original field-filter)))))
           (testing "override"
             (driver/with-driver ::temporal-unit-alignment-override
               (is (= {:prepared-statement-args expected-args
                       ;; no extra `sql.qp/date` calls due to `nil` returned from the override
-                      :replacement-snippet "\"PUBLIC\".\"ORDERS\".\"CREATED_AT\" BETWEEN ? AND ?"}
+                      :replacement-snippet "\"PUBLIC\".\"ORDERS\".\"CREATED_AT\" >= ? AND \"PUBLIC\".\"ORDERS\".\"CREATED_AT\" < ?"}
                      (sql.params.substitution/->replacement-snippet-info ::temporal-unit-alignment-override field-filter))))))))))

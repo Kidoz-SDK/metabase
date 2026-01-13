@@ -1,29 +1,19 @@
+const { H } = cy;
 import { METABASE_SECRET_KEY } from "e2e/support/cypress_data";
+import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import {
-  ORDERS_QUESTION_ID,
   ORDERS_DASHBOARD_ID,
+  ORDERS_QUESTION_ID,
 } from "e2e/support/cypress_sample_instance_data";
-import {
-  restore,
-  visitQuestion,
-  visitDashboard,
-  modal,
-  visitIframe,
-  openStaticEmbeddingModal,
-} from "e2e/support/helpers";
 
-const embeddingPage = "/admin/settings/embedding-in-other-applications";
-const standalonePath =
-  "/admin/settings/embedding-in-other-applications/standalone";
-const upgradeUrl = "https://www.metabase.com/upgrade";
-const embeddingDescription =
-  "Embed dashboards, questions, or the entire Metabase app into your application. Integrate with your server code to create a secure environment, limited to specific users or organizations.";
+const standalonePath = "/admin/embedding/guest";
 
 // These tests will run on both OSS and EE instances. Both without a token!
 describe("scenarios > embedding > smoke tests", { tags: "@OSS" }, () => {
   beforeEach(() => {
-    restore();
+    H.restore();
     cy.signInAsAdmin();
+    H.updateSetting("show-sdk-embed-terms", false);
   });
 
   it("should not offer to share or embed models (metabase#20815)", () => {
@@ -34,10 +24,10 @@ describe("scenarios > embedding > smoke tests", { tags: "@OSS" }, () => {
     cy.visit(`/model/${ORDERS_QUESTION_ID}`);
     cy.wait("@dataset");
 
+    H.sharingMenuButton().should("not.exist");
+
     cy.findByTestId("view-footer").within(() => {
       cy.icon("download").should("exist");
-      cy.icon("bell").should("exist");
-      cy.icon("share").should("not.exist");
     });
   });
 
@@ -48,86 +38,29 @@ describe("scenarios > embedding > smoke tests", { tags: "@OSS" }, () => {
       resetEmbedding();
     });
 
-    it("should display the embedding page correctly", () => {
-      cy.visit("/admin/settings/setup");
-      sidebar().within(() => {
-        cy.findByRole("link", { name: "Embedding" }).click();
-      });
+    it("should show the sdk upsell link in oss", () => {
+      cy.visit("/admin/embedding");
 
-      cy.location("pathname").should("eq", embeddingPage);
-      cy.findByTestId("enable-embedding-setting").within(() => {
-        cy.findByText(embeddingDescription);
-
-        cy.findByLabelText("Enable Embedding").click({ force: true });
-      });
-      // The URL should stay the same
-      cy.location("pathname").should("eq", embeddingPage);
-
-      cy.findByTestId("enable-embedding-setting").within(() => {
-        cy.findByRole("checkbox").should("be.checked");
-      });
-
-      cy.log(
-        "With the embedding enabled, we should now see two new sections on the main page",
-      );
-      cy.log("The first section: 'Static embedding'");
-      cy.findByTestId("-static-embedding-setting").within(() => {
-        // FE unit tests are making sure this section doesn't exist when a valid token is provided,
-        // so we don't have to do it here usign a conditional logic
-        assertLinkMatchesUrl("upgrade to a paid plan", upgradeUrl);
-
-        cy.findByRole("link", { name: "Manage" })
-          .should("have.attr", "href")
-          .and("eq", standalonePath);
-        cy.findByText("Static embedding");
-        cy.findByText("Manage").click();
-        cy.location("pathname").should("eq", standalonePath);
-      });
-
-      cy.log("Standalone embeds page");
       mainPage().within(() => {
-        cy.findByTestId("embedding-secret-key-setting").within(() => {
-          cy.findByText("Embedding secret key");
-          cy.findByText(
-            "Standalone Embed Secret Key used to sign JSON Web Tokens for requests to /api/embed endpoints. This lets you create a secure environment limited to specific users or organizations.",
-          );
-          getTokenValue().should("have.length", 64);
-          cy.button("Regenerate key");
-        });
-
-        cy.findByTestId("-embedded-resources-setting").within(() => {
-          cy.findByText("Embedded Dashboards");
-          cy.findByText("No dashboards have been embedded yet.");
-
-          cy.findByText("Embedded Questions");
-          cy.findByText("No questions have been embedded yet.");
-        });
-      });
-
-      cy.go("back");
-      cy.location("pathname").should("eq", embeddingPage);
-
-      cy.log("The second section: 'Interactive embedding'");
-      cy.findByTestId("-interactive-embedding-setting").within(() => {
-        cy.findByText("Interactive embedding");
-
-        cy.findByRole("link", { name: "Learn More" })
+        cy.findByRole("link", { name: "Upgrade" })
           .should("have.attr", "href")
           .and(
             "eq",
-            "https://www.metabase.com/product/embedded-analytics?utm_source=oss&utm_media=embed-settings",
+            "https://www.metabase.com/upgrade?utm_source=product&utm_medium=upsell&utm_content=embedding-page&source_plan=oss&utm_users=10&utm_campaign=embedded-analytics-js",
           );
       });
     });
 
-    it("should not let you embed the question", () => {
-      visitQuestion(ORDERS_QUESTION_ID);
-      ensureEmbeddingIsDisabled();
-    });
+    it("should not let you use non-guest auth methods", () => {
+      H.visitQuestion(ORDERS_QUESTION_ID);
 
-    it("should not let you embed the dashboard", () => {
-      visitDashboard(ORDERS_DASHBOARD_ID);
-      ensureEmbeddingIsDisabled();
+      H.openEmbedJsModal();
+      H.embedModalEnableEmbedding();
+
+      H.embedModalContent().within(() => {
+        cy.findByLabelText("Guest").should("be.checked");
+        cy.findByLabelText("Metabase account (SSO)").should("be.disabled");
+      });
     });
   });
 
@@ -136,8 +69,11 @@ describe("scenarios > embedding > smoke tests", { tags: "@OSS" }, () => {
       question: ORDERS_QUESTION_ID,
       dashboard: ORDERS_DASHBOARD_ID,
     };
-    ["question", "dashboard"].forEach(object => {
+    ["question", "dashboard"].forEach((object) => {
       it(`should be able to publish/embed and then unpublish a ${object} without filters`, () => {
+        cy.request("PUT", "/api/setting/enable-embedding-static", {
+          value: true,
+        });
         const embeddableObject = object === "question" ? "card" : "dashboard";
         const objectName =
           object === "question" ? "Orders" : "Orders in a dashboard";
@@ -151,20 +87,30 @@ describe("scenarios > embedding > smoke tests", { tags: "@OSS" }, () => {
 
         visitAndEnableSharing(object);
 
-        modal().within(() => {
-          cy.findByRole("tab", { name: "Appearance" }).click();
+        H.modal().within(() => {
+          cy.findByRole("tab", { name: "Look and Feel" }).click();
 
-          cy.findByText("Background");
-          cy.findByText(
+          cy.findByText("Theme");
+          cy.findByLabelText(
             object === "dashboard" ? "Dashboard title" : "Question title",
           );
-          cy.findByText("Border");
+          cy.findByLabelText(
+            object === "dashboard" ? "Dashboard border" : "Question border",
+          );
           cy.findByText(
             (_, element) =>
               element.textContent ===
               "You can change the font with a paid plan.",
           );
-          cy.findByText("Download data").should("not.exist");
+
+          cy.findByText(
+            object === "dashboard"
+              ? "Results (csv, xlsx, json, png)"
+              : "Download (csv, xlsx, json, png)",
+          ).should("not.exist");
+          cy.findByRole("button", { name: "Export as PDF" }).should(
+            "not.exist",
+          );
 
           cy.findByRole("tab", { name: "Parameters" }).click();
 
@@ -181,17 +127,16 @@ describe("scenarios > embedding > smoke tests", { tags: "@OSS" }, () => {
           cy.wait("@embedObject");
         });
 
-        visitIframe();
+        H.visitIframe();
 
         cy.findByTestId("embed-frame").within(() => {
           cy.findByRole("heading", { name: objectName });
-          cy.get("[data-testid=cell-data]").contains("37.65");
+          cy.findAllByRole("gridcell").contains("37.65");
         });
 
         cy.findByRole("contentinfo").within(() => {
-          cy.findByRole("link")
-            .should("have.text", "Powered by Metabase")
-            .and("have.attr", "href")
+          cy.findByRole("link", { name: "Powered by Metabase" })
+            .should("have.attr", "href")
             .and("contain", "https://www.metabase.com/powered-by-metabase");
         });
 
@@ -215,7 +160,7 @@ describe("scenarios > embedding > smoke tests", { tags: "@OSS" }, () => {
         cy.log(`Unpublish ${object}`);
         visitAndEnableSharing(object, false);
 
-        modal().within(() => {
+        H.modal().within(() => {
           cy.findByText(
             `This ${object} is published and ready to be embedded.`,
           );
@@ -226,7 +171,7 @@ describe("scenarios > embedding > smoke tests", { tags: "@OSS" }, () => {
           cy.findByRole("tab", { name: "Parameters" }).click();
         });
 
-        visitIframe();
+        H.visitIframe();
 
         cy.findByTestId("embed-frame").findByText(
           "Embedding is not enabled for this object.",
@@ -242,19 +187,66 @@ describe("scenarios > embedding > smoke tests", { tags: "@OSS" }, () => {
       });
     });
 
+    it("should be able to publish/embed a dashboard with a dashboard question saved within it", () => {
+      H.createQuestion({
+        name: "Total Orders",
+        dashboard_id: ORDERS_DASHBOARD_ID,
+        database_id: SAMPLE_DATABASE.id,
+        query: {
+          "source-table": SAMPLE_DATABASE.ORDERS_ID,
+          aggregation: [["count"]],
+        },
+        display: "scalar",
+        enable_embedding: true,
+      });
+
+      cy.request("PUT", "/api/setting/enable-embedding-static", {
+        value: true,
+      });
+
+      cy.intercept("PUT", `/api/dashboard/${ORDERS_DASHBOARD_ID}`).as(
+        "embedObject",
+      );
+      cy.intercept("GET", "/api/dashboard/embeddable").as(
+        "currentlyEmbeddedObject",
+      );
+
+      visitAndEnableSharing("dashboard");
+
+      H.modal().within(() => {
+        cy.findByRole("tab", { name: "Look and Feel" }).click();
+        cy.button("Publish").click();
+
+        cy.wait("@embedObject");
+      });
+
+      H.visitIframe();
+      cy.url().should("contain", "/embed/dashboard/");
+
+      cy.findByTestId("embed-frame").within(() => {
+        cy.findByRole("heading", { name: "Orders in a dashboard" });
+        cy.findByText("Total Orders");
+        cy.findByText("18,760");
+      });
+    });
+
     it("should regenerate embedding token and invalidate previous embed url", () => {
+      cy.request("PUT", "/api/setting/enable-embedding-static", {
+        value: true,
+      });
+
       cy.request("PUT", `/api/card/${ORDERS_QUESTION_ID}`, {
         enable_embedding: true,
       });
-      visitAndEnableSharing("question");
+      visitAndEnableSharing("question", false);
 
-      modal().within(() => {
+      H.modal().within(() => {
         cy.findByRole("tab", { name: "Parameters" }).click();
 
         cy.findByText("Preview").click();
       });
 
-      cy.document().then(doc => {
+      cy.document().then((doc) => {
         const iframe = doc.querySelector("iframe");
 
         cy.signOut();
@@ -265,14 +257,13 @@ describe("scenarios > embedding > smoke tests", { tags: "@OSS" }, () => {
         cy.signInAsAdmin();
         cy.visit(standalonePath);
 
-        cy.findByLabelText("Embedding secret key").should(
-          "have.value",
-          METABASE_SECRET_KEY,
-        );
+        cy.findByTestId("embedding-secret-key-setting")
+          .findByRole("textbox")
+          .should("have.value", METABASE_SECRET_KEY);
 
         cy.button("Regenerate key").click();
 
-        modal().within(() => {
+        H.modal().within(() => {
           cy.intercept("GET", "/api/util/random_token").as("regenerateKey");
           cy.findByRole("heading", { name: "Regenerate embedding key?" });
           cy.findByText(
@@ -306,47 +297,29 @@ describe("scenarios > embedding > smoke tests", { tags: "@OSS" }, () => {
 });
 
 function resetEmbedding() {
-  cy.request("PUT", "/api/setting/enable-embedding", { value: false });
-  cy.request("PUT", "/api/setting/embedding-secret-key", {
-    value: null,
+  H.updateSetting("enable-embedding-static", false);
+  H.updateSetting("embedding-secret-key", null);
+}
+
+function visitAndEnableSharing(object, unpublishBeforeOpen = true) {
+  const { id, visitFunction } = {
+    question: {
+      id: ORDERS_QUESTION_ID,
+      visitFunction: H.visitQuestion,
+    },
+    dashboard: {
+      id: ORDERS_DASHBOARD_ID,
+      visitFunction: H.visitDashboard,
+    },
+  }[object];
+
+  visitFunction(id);
+
+  H.openLegacyStaticEmbeddingModal({
+    resource: object,
+    resourceId: id,
+    unpublishBeforeOpen,
   });
-}
-
-function getTokenValue() {
-  return cy.get("#setting-embedding-secret-key").invoke("val");
-}
-
-function assertLinkMatchesUrl(text, url) {
-  cy.findByRole("link", { name: text })
-    .should("have.attr", "href")
-    .and("contain", url);
-}
-
-function ensureEmbeddingIsDisabled() {
-  cy.icon("share").click();
-
-  cy.findByTestId("embed-menu-embed-modal-item").should("be.disabled");
-
-  cy.findByTestId("embed-menu-embed-modal-item").within(() => {
-    cy.findByText("Embedding is off").should("be.visible");
-    cy.findByText("Enable it in settings").should("be.visible");
-  });
-}
-
-function visitAndEnableSharing(object, acceptTerms = true) {
-  if (object === "question") {
-    visitQuestion(ORDERS_QUESTION_ID);
-  }
-
-  if (object === "dashboard") {
-    visitDashboard(ORDERS_DASHBOARD_ID);
-  }
-
-  openStaticEmbeddingModal({ acceptTerms });
-}
-
-function sidebar() {
-  return cy.findByTestId("admin-layout-sidebar");
 }
 
 function mainPage() {

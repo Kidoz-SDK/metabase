@@ -5,7 +5,7 @@ import type { ParameterWithTarget } from "metabase-lib/v1/parameters/types";
 import { getParameterValuesBySlug } from "metabase-lib/v1/parameters/utils/parameter-values";
 import { remapParameterValuesToTemplateTags } from "metabase-lib/v1/parameters/utils/template-tags";
 import { isTransientId } from "metabase-lib/v1/queries/utils/card";
-import type { ParameterId, ParameterValue } from "metabase-types/api";
+import type { ParameterId, ParameterValueOrArray } from "metabase-types/api";
 
 import type Question from "./Question";
 import type NativeQuery from "./queries/NativeQuery";
@@ -15,14 +15,12 @@ type UrlBuilderOpts = {
   query?: Record<string, any>;
   includeDisplayIsLocked?: boolean;
   creationType?: string;
-  clean?: boolean;
 };
 
 export function getUrl(
   question: Question,
   {
     originalQuestion,
-    clean = true,
     query,
     includeDisplayIsLocked,
     creationType,
@@ -36,7 +34,6 @@ export function getUrl(
   ) {
     return Urls.question(null, {
       hash: question._serializeForUrl({
-        clean,
         includeDisplayIsLocked,
         creationType,
       }),
@@ -49,26 +46,36 @@ export function getUrl(
 
 export function getUrlWithParameters(
   question: Question,
+  originalQuestion: Question,
   parameters: ParameterWithTarget[],
-  parameterValues: Record<ParameterId, ParameterValue>,
-  { objectId, clean }: { objectId?: string | number; clean?: boolean } = {},
+  parameterValues: Record<
+    ParameterId,
+    ParameterValueOrArray | undefined | null
+  >,
+  { objectId }: { objectId?: string | number } = {},
 ): string {
   const includeDisplayIsLocked = true;
-  const { isEditable } = Lib.queryDisplayInfo(question.query());
+  if (parameters.length === 0 && objectId == null) {
+    return getUrl(question, { includeDisplayIsLocked });
+  }
 
-  const { isNative } = Lib.queryDisplayInfo(question.query());
-
+  const { isNative, isEditable } = Lib.queryDisplayInfo(question.query());
   if (!isNative) {
     let questionWithParameters = question.setParameters(parameters);
 
     if (isEditable) {
+      // treat the dataset/model question like it is already composed so that we can apply
+      // dataset/model-specific metadata to the underlying dimension options
+      const needsComposing = question.type() !== "question";
+      questionWithParameters = needsComposing
+        ? question.composeQuestionAdhoc().setParameters(parameters)
+        : questionWithParameters;
       questionWithParameters = questionWithParameters
         .setParameterValues(parameterValues)
-        ._convertParametersToMbql();
+        ._convertParametersToMbql({ isComposed: needsComposing });
 
       return getUrl(questionWithParameters, {
-        clean,
-        originalQuestion: question,
+        originalQuestion,
         includeDisplayIsLocked,
         query: objectId === undefined ? {} : { objectId },
       });
@@ -76,15 +83,13 @@ export function getUrlWithParameters(
 
     const query = getParameterValuesBySlug(parameters, parameterValues);
     return getUrl(questionWithParameters.markDirty(), {
-      clean,
       query,
       includeDisplayIsLocked,
     });
   }
 
-  const query = question.legacyQuery() as NativeQuery;
+  const query = question.legacyNativeQuery() as NativeQuery;
   return getUrl(question, {
-    clean,
     query: remapParameterValuesToTemplateTags(
       query.templateTags(),
       parameters,
@@ -99,7 +104,7 @@ export function getAutomaticDashboardUrl(
   questionWithFilters: Question,
 ) {
   const questionId = question.id();
-  const filterQuery = questionWithFilters.datasetQuery();
+  const filterQuery = Lib.toLegacyQuery(questionWithFilters.query());
   const filter = filterQuery.type === "query" ? filterQuery.query.filter : null;
   const cellQuery = filter
     ? `/cell/${utf8_to_b64url(JSON.stringify(filter))}`
@@ -120,7 +125,7 @@ export function getComparisonDashboardUrl(
 ) {
   const questionId = question.id();
   const tableId = question.legacyQueryTableId();
-  const filterQuery = questionWithFilters.datasetQuery();
+  const filterQuery = Lib.toLegacyQuery(questionWithFilters.query());
   const filter = filterQuery.type === "query" ? filterQuery.query.filter : null;
   const cellQuery = filter
     ? `/cell/${utf8_to_b64url(JSON.stringify(filter))}`

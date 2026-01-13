@@ -1,4 +1,3 @@
-/* eslint-disable react/prop-types */
 import { t } from "ttag";
 
 import { getTranslatedEntityName } from "metabase/common/utils/model-names";
@@ -17,7 +16,7 @@ export const TypeFilterDisplay: SearchFilterDropdown<"type">["DisplayComponent"]
       titleText = value.length + t` types selected`;
     }
     return (
-      <Text c="inherit" weight={700} truncate>
+      <Text c="inherit" fw={700} truncate>
         {titleText}
       </Text>
     );

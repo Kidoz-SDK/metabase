@@ -1,61 +1,43 @@
 import { useFormikContext } from "formik";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
+import { match } from "ts-pattern";
 import { c, t } from "ttag";
 
 import { IconInButton } from "metabase/admin/performance/components/StrategyForm.styled";
+import { useInvalidateTarget } from "metabase/admin/performance/hooks/useInvalidateTarget";
 import { useIsFormPending } from "metabase/admin/performance/hooks/useIsFormPending";
-import {
-  isErrorWithMessage,
-  resolveSmoothly,
-} from "metabase/admin/performance/utils";
+import type { ModelWithClearableCache } from "metabase/admin/performance/types";
+import { useConfirmation } from "metabase/common/hooks/use-confirmation";
 import { Form, FormProvider } from "metabase/forms";
-import { useConfirmation } from "metabase/hooks/use-confirmation";
-import { color } from "metabase/lib/colors";
-import { useDispatch } from "metabase/lib/redux";
 import type { InvalidateNowButtonProps } from "metabase/plugins";
-import { addUndo } from "metabase/redux/undo";
-import { CacheConfigApi } from "metabase/services";
 import { Group, Icon, Loader, Text } from "metabase/ui";
 
 import { StyledInvalidateNowButton } from "./InvalidateNowButton.styled";
 
+/** Button that clears the cache of a particular object (the "target") */
 export const InvalidateNowButton = ({
   targetId,
   targetModel,
   targetName,
 }: InvalidateNowButtonProps) => {
-  const dispatch = useDispatch();
-
-  const invalidateTarget = useCallback(async () => {
-    try {
-      const invalidate = CacheConfigApi.invalidate(
-        { include: "overrides", [targetModel]: targetId },
-        { hasBody: false },
-      );
-      await resolveSmoothly(invalidate);
-    } catch (e) {
-      if (isErrorWithMessage(e)) {
-        dispatch(
-          addUndo({
-            icon: "warning",
-            message: e.data.message,
-            toastColor: "error",
-            dismissIconColor: "white",
-          }),
-        );
-      }
-      throw e;
-    }
-  }, [dispatch, targetId, targetModel]);
-
+  const invalidateTarget = useInvalidateTarget(targetId, targetModel);
   return (
     <FormProvider initialValues={{}} onSubmit={invalidateTarget}>
-      <InvalidateNowFormBody targetName={targetName} />
+      <InvalidateNowFormBody
+        targetModel={targetModel}
+        targetName={targetName}
+      />
     </FormProvider>
   );
 };
 
-const InvalidateNowFormBody = ({ targetName }: { targetName?: string }) => {
+const InvalidateNowFormBody = ({
+  targetName,
+  targetModel,
+}: {
+  targetName?: string;
+  targetModel: ModelWithClearableCache;
+}) => {
   const { show: askConfirmation, modalContent: confirmationModal } =
     useConfirmation();
   const { submitForm } = useFormikContext();
@@ -64,43 +46,53 @@ const InvalidateNowFormBody = ({ targetName }: { targetName?: string }) => {
   const confirmInvalidation = useCallback(
     () =>
       askConfirmation({
-        title: t`Invalidate all cached results for ${
-          targetName || t`this object`
-        }?`,
+        title: targetName
+          ? t`Clear all cached results for ${targetName}?`
+          : t`Clear all cached results for this object?`,
         message: "",
-        confirmButtonText: t`Invalidate`,
+        confirmButtonText: t`Clear cache`,
         onConfirm: submitForm,
       }),
     [askConfirmation, targetName, submitForm],
+  );
+
+  const buttonText = useMemo(
+    () =>
+      match(targetModel)
+        .with("dashboard", () => t`Clear cache for this dashboard`)
+        .with("question", () => t`Clear cache for this question`)
+        .with("database", () => t`Clear cache for this database`)
+        .exhaustive(),
+    [targetModel],
   );
 
   return (
     <>
       <Form>
         <StyledInvalidateNowButton
-          onClick={e => {
+          onClick={(e) => {
             confirmInvalidation();
             e.preventDefault();
             return false;
           }}
           disabled={wasFormRecentlyPending}
           label={
-            <Group spacing="sm">
-              <Icon color={color("danger")} name="trash" />
-              <Text>{t`Clear cache`}</Text>
+            <Group gap="sm">
+              <Icon c="danger" name="trash" />
+              <Text>{buttonText}</Text>
             </Group>
           }
           activeLabel={
-            <Group spacing="sm">
+            <Group gap="sm">
               <Loader size="1rem" />
               <Text>{c("Shown when a cache is being cleared")
                 .t`Clearing cache… `}</Text>
             </Group>
           }
           successLabel={
-            <Group spacing="sm">
-              <IconInButton name="check" color={color("success")} />
-              <Text>{t`Done`}</Text>
+            <Group gap="sm">
+              <IconInButton name="check" c={"success"} />
+              <Text>{t`Cache cleared`}</Text>
             </Group>
           }
           failedLabel={

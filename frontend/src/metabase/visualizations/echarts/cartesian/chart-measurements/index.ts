@@ -1,33 +1,65 @@
+import _ from "underscore";
+
 import { isNotNull } from "metabase/lib/types";
 import { X_AXIS_DATA_KEY } from "metabase/visualizations/echarts/cartesian/constants/dataset";
 import { CHART_STYLE } from "metabase/visualizations/echarts/cartesian/constants/style";
 import type {
   AxisFormatter,
-  CartesianChartModel,
+  BaseCartesianChartModel,
   ChartDataset,
   NumericAxisScaleTransforms,
+  StackModel,
   XAxisModel,
   YAxisModel,
 } from "metabase/visualizations/echarts/cartesian/model/types";
 import type {
   ComputedVisualizationSettings,
+  Padding,
   RenderingContext,
 } from "metabase/visualizations/types";
 
-import { isNumericAxis, isTimeSeriesAxis } from "../model/guards";
+import {
+  isCategoryAxis,
+  isNumericAxis,
+  isTimeSeriesAxis,
+} from "../model/guards";
 
 import type {
   ChartBoundsCoords,
   ChartMeasurements,
-  Padding,
   TicksDimensions,
 } from "./types";
 
-const roundToHundredth = (value: number) => Math.ceil(value * 100) / 100;
+const getEvenlySpacedIndices = (
+  length: number,
+  indicesCount: number,
+): number[] => {
+  if (length === 0) {
+    return [];
+  }
+
+  if (length < indicesCount) {
+    return _.range(length);
+  }
+
+  const result = new Set([0]);
+  const lastIndex = length - 1;
+
+  if (indicesCount > 2) {
+    const step = lastIndex / (indicesCount - 1);
+    for (let i = 1; i < indicesCount - 1; i++) {
+      result.add(Math.round(i * step));
+    }
+  }
+
+  result.add(lastIndex);
+
+  return Array.from(result);
+};
 
 const getValuesToMeasure = (min: number, max: number): number[] => {
   if (min === max) {
-    return [min, max];
+    return [min];
   }
 
   const stepsCount = 4;
@@ -41,11 +73,35 @@ const getValuesToMeasure = (min: number, max: number): number[] => {
   return [...middleValues, min, max];
 };
 
+/**
+ * For log scales, ECharts places ticks at regular intervals in transformed space.
+ * These intervals can be at integer positions (giving 1, 10, 100...) or half-integer
+ * positions (giving 3.16, 31.6...). This function generates both to ensure we
+ * measure the widest possible tick label.
+ */
+const getLogScaleTickValues = (
+  transformedMin: number,
+  transformedMax: number,
+  fromEChartsAxisValue: (value: number) => number,
+): number[] => {
+  const tickValues: number[] = [];
+
+  const step = 0.5;
+  const startTick = Math.floor(transformedMin * 2) / 2;
+  const endTick = Math.ceil(transformedMax * 2) / 2;
+
+  for (let tick = startTick; tick <= endTick; tick += step) {
+    tickValues.push(fromEChartsAxisValue(tick));
+  }
+
+  return tickValues;
+};
+
 const getYAxisTicksWidth = (
   axisModel: YAxisModel,
   yAxisScaleTransforms: NumericAxisScaleTransforms,
   settings: ComputedVisualizationSettings,
-  { measureText, fontFamily }: RenderingContext,
+  { measureText, fontFamily, theme }: RenderingContext,
 ): number => {
   if (!settings["graph.y_axis.axis_enabled"]) {
     return 0;
@@ -54,9 +110,11 @@ const getYAxisTicksWidth = (
   const fontStyle = {
     ...CHART_STYLE.axisTicks,
     family: fontFamily,
+    size: theme.cartesian.label.fontSize,
   };
+
   // extents need to be untransformed to get the value of the tick label
-  const [min, max] = axisModel.extent.map(extent =>
+  const [min, max] = axisModel.extent.map((extent) =>
     yAxisScaleTransforms.fromEChartsAxisValue(extent),
   );
 
@@ -65,6 +123,17 @@ const getYAxisTicksWidth = (
   const valuesToMeasure = isFormattingAutoOrCompact
     ? getValuesToMeasure(min, max)
     : [min, max];
+
+  if (settings["graph.y_axis.scale"] === "log") {
+    const [transformedMin, transformedMax] = axisModel.extent;
+    valuesToMeasure.push(
+      ...getLogScaleTickValues(
+        transformedMin,
+        transformedMax,
+        yAxisScaleTransforms.fromEChartsAxisValue,
+      ),
+    );
+  }
 
   if (!settings["graph.y_axis.auto_range"]) {
     const customRangeValues = [
@@ -88,17 +157,16 @@ const getYAxisTicksWidth = (
   // Note: This may not accurately reflect ECharts' internal logic for tick
   // formatting.
   const areDecimalTicksExpected = axisModel.extent.every(
-    value => value > -5 && value < 5,
+    (value) => value > -5 && value < 5,
   );
 
-  const measuredValues = valuesToMeasure.map(rawValue => {
+  const measuredValues = valuesToMeasure.map((rawValue) => {
     const isPercent =
       settings.column?.(axisModel.column).number_style === "percent";
 
     let value = rawValue;
-    if (isPercent) {
-      value = roundToHundredth(rawValue);
-    } else if (!areDecimalTicksExpected) {
+
+    if (!isPercent && !areDecimalTicksExpected) {
       value = Math.round(rawValue);
     }
 
@@ -113,24 +181,27 @@ const getXAxisTicksWidth = (
   dataset: ChartDataset,
   axisEnabledSetting: ComputedVisualizationSettings["graph.x_axis.axis_enabled"],
   axisModel: XAxisModel,
-  { measureText, fontFamily }: RenderingContext,
+  { theme, measureText, fontFamily }: RenderingContext,
 ) => {
+  const { fontSize } = theme.cartesian.label;
+
   if (!axisEnabledSetting) {
     return { firstXTickWidth: 0, lastXTickWidth: 0 };
   }
   if (axisEnabledSetting === "rotate-90") {
     return {
-      firstXTickWidth: CHART_STYLE.axisTicks.size,
-      lastXTickWidth: CHART_STYLE.axisTicks.size,
+      firstXTickWidth: fontSize,
+      lastXTickWidth: fontSize,
     };
   }
 
   const fontStyle = {
     ...CHART_STYLE.axisTicks,
+    size: fontSize,
     family: fontFamily,
   };
 
-  const valuesToMeasure = [0, dataset.length - 1].map(index => {
+  const valuesToMeasure = [0, dataset.length - 1].map((index) => {
     if (isNumericAxis(axisModel)) {
       // extents need to be untransformed to get the value of the tick label
       return axisModel.fromEChartsAxisValue(
@@ -140,7 +211,7 @@ const getXAxisTicksWidth = (
     return dataset[index][X_AXIS_DATA_KEY];
   });
 
-  const [firstXTickWidth, lastXTickWidth] = valuesToMeasure.map(value =>
+  const [firstXTickWidth, lastXTickWidth] = valuesToMeasure.map((value) =>
     measureText(axisModel.formatter(value), fontStyle),
   );
 
@@ -157,13 +228,16 @@ const getXAxisTicksWidth = (
 const getXAxisTicksHeight = (
   maxXTickWidth: number,
   axisEnabledSetting: ComputedVisualizationSettings["graph.x_axis.axis_enabled"],
+  { theme }: RenderingContext,
 ) => {
+  const { fontSize } = theme.cartesian.label;
+
   if (!axisEnabledSetting) {
     return 0;
   }
 
   if (axisEnabledSetting === true || axisEnabledSetting === "compact") {
-    return CHART_STYLE.axisTicks.size;
+    return fontSize;
   }
 
   if (axisEnabledSetting === "rotate-90") {
@@ -178,7 +252,7 @@ const getXAxisTicksHeight = (
     `Unexpected "graph.x_axis.axis_enabled" value ${axisEnabledSetting}`,
   );
 
-  return CHART_STYLE.axisTicks.size + CHART_STYLE.axisNameMargin;
+  return fontSize + CHART_STYLE.axisNameMargin;
 };
 
 const X_LABEL_HEIGHT_RATIO_THRESHOLD = 0.7; // x-axis labels cannot be taller than 70% of chart height
@@ -200,13 +274,15 @@ const X_LABEL_ROTATE_45_THRESHOLD_FACTOR = 2.1;
 const X_LABEL_ROTATE_90_THRESHOLD_FACTOR = 1.2;
 
 const getAutoAxisEnabledSetting = (
-  chartModel: CartesianChartModel,
+  chartModel: BaseCartesianChartModel,
   settings: ComputedVisualizationSettings,
   boundaryWidth: number,
   maxXTickWidth: number,
   outerHeight: number,
   renderingContext: RenderingContext,
 ): ComputedVisualizationSettings["graph.x_axis.axis_enabled"] => {
+  const { fontSize } = renderingContext.theme.cartesian.label;
+
   const shouldAutoSelectSetting =
     settings["graph.x_axis.axis_enabled"] === true &&
     (settings["graph.x_axis.scale"] === "ordinal" ||
@@ -228,19 +304,13 @@ const getAutoAxisEnabledSetting = (
     return true;
   }
 
-  if (
-    dimensionWidth >=
-    CHART_STYLE.axisTicks.size * X_LABEL_ROTATE_45_THRESHOLD_FACTOR
-  ) {
+  if (dimensionWidth >= fontSize * X_LABEL_ROTATE_45_THRESHOLD_FACTOR) {
     return checkHeight(maxXTickWidth, outerHeight, "rotate-45")
       ? "rotate-45"
       : false;
   }
 
-  if (
-    dimensionWidth >=
-    CHART_STYLE.axisTicks.size * X_LABEL_ROTATE_90_THRESHOLD_FACTOR
-  ) {
+  if (dimensionWidth >= fontSize * X_LABEL_ROTATE_90_THRESHOLD_FACTOR) {
     return checkHeight(maxXTickWidth, outerHeight, "rotate-90")
       ? "rotate-90"
       : false;
@@ -249,8 +319,71 @@ const getAutoAxisEnabledSetting = (
   return false;
 };
 
+const X_TICKS_TO_MEASURE_COUNT = 50;
+
+// Formatting and measuring every x-axis value can be expensive on datasets with thousands of values,
+// therefore we want to reduce the number of measured ticks based on the x-axis column type and a single dimension width.
+const getXTicksToMeasure = (
+  chartModel: BaseCartesianChartModel,
+  dimensionWidth: number,
+  renderingContext: RenderingContext,
+) => {
+  const { fontSize } = renderingContext.theme.cartesian.label;
+
+  // On continuous axes, we measure a limited number of evenly spaced ticks, including the start and end points.
+  if (
+    isNumericAxis(chartModel.xAxisModel) ||
+    isTimeSeriesAxis(chartModel.xAxisModel)
+  ) {
+    return getEvenlySpacedIndices(
+      chartModel.dataset.length,
+      X_TICKS_TO_MEASURE_COUNT,
+    ).map((datumIndex) => chartModel.dataset[datumIndex][X_AXIS_DATA_KEY]);
+  }
+
+  // On category scales, when the dimension width is smaller than the tick font size,
+  // meaning that even with 90-degree rotation the ticks will not fit,
+  // we select the top N ticks based on character length for formatting and measurement.
+  if (isCategoryAxis(chartModel.xAxisModel) && dimensionWidth <= fontSize) {
+    return chartModel.dataset
+      .map((datum) => datum[X_AXIS_DATA_KEY])
+      .sort((a, b) => String(b).length - String(a).length)
+      .slice(0, X_TICKS_TO_MEASURE_COUNT);
+  }
+
+  return chartModel.dataset.map((datum) => datum[X_AXIS_DATA_KEY]);
+};
+
+const getMaxXTickWidth = (
+  chartModel: BaseCartesianChartModel,
+  dimensionWidth: number,
+  renderingContext: RenderingContext,
+) => {
+  const valueToMeasure = getXTicksToMeasure(
+    chartModel,
+    dimensionWidth,
+    renderingContext,
+  );
+
+  const { fontSize } = renderingContext.theme.cartesian.label;
+  const fontStyle = {
+    ...CHART_STYLE.axisTicks,
+    size: fontSize,
+    family: renderingContext.fontFamily,
+  };
+
+  return Math.max(
+    ...valueToMeasure.map((value) =>
+      renderingContext.measureText(
+        chartModel.xAxisModel.formatter(value),
+        fontStyle,
+      ),
+    ),
+  );
+};
+
 const getTicksDimensions = (
-  chartModel: CartesianChartModel,
+  chartModel: BaseCartesianChartModel,
   chartWidth: number,
   outerHeight: number,
   settings: ComputedVisualizationSettings,
@@ -296,18 +429,12 @@ const getTicksDimensions = (
   const hasBottomAxis = !!axisEnabledSetting;
 
   if (hasBottomAxis) {
-    const fontStyle = {
-      ...CHART_STYLE.axisTicks,
-      family: renderingContext.fontFamily,
-    };
+    const dimensionWidth = getDimensionWidth(chartModel, currentBoundaryWidth);
 
-    const maxXTickWidth = Math.max(
-      ...chartModel.dataset.map(datum =>
-        renderingContext.measureText(
-          chartModel.xAxisModel.formatter(datum[X_AXIS_DATA_KEY]),
-          fontStyle,
-        ),
-      ),
+    const maxXTickWidth = getMaxXTickWidth(
+      chartModel,
+      dimensionWidth,
+      renderingContext,
     );
 
     axisEnabledSetting = getAutoAxisEnabledSetting(
@@ -329,7 +456,7 @@ const getTicksDimensions = (
     ticksDimensions.lastXTickWidth = lastXTickWidth;
 
     ticksDimensions.xTicksHeight =
-      getXAxisTicksHeight(maxXTickWidth, axisEnabledSetting) +
+      getXAxisTicksHeight(maxXTickWidth, axisEnabledSetting, renderingContext) +
       CHART_STYLE.axisTicksMarginX +
       (isTimeSeries && hasTimelineEvents
         ? CHART_STYLE.timelineEvents.height
@@ -348,12 +475,18 @@ const getTicksDimensions = (
 const TICK_OVERFLOW_BUFFER = 4;
 
 export const getChartPadding = (
-  chartModel: CartesianChartModel,
+  chartModel: BaseCartesianChartModel,
   settings: ComputedVisualizationSettings,
   ticksDimensions: TicksDimensions,
   axisEnabledSetting: ComputedVisualizationSettings["graph.x_axis.axis_enabled"],
   chartWidth: number,
+  { theme }: RenderingContext,
 ): Padding => {
+  const { fontSize } = theme.cartesian.label;
+
+  const axisNameFontSize = fontSize;
+  const seriesLabelFontSize = fontSize;
+
   const padding: Padding = {
     top: CHART_STYLE.padding.y,
     left: CHART_STYLE.padding.x,
@@ -368,8 +501,7 @@ export const getChartPadding = (
     settings["graph.show_values"] ||
     (settings["graph.show_goal"] && settings["graph.goal_label"])
   ) {
-    padding.top +=
-      CHART_STYLE.seriesLabels.size + CHART_STYLE.seriesLabels.offset;
+    padding.top += seriesLabelFontSize + CHART_STYLE.seriesLabels.offset;
   }
 
   // 2. Bottom Padding
@@ -378,14 +510,12 @@ export const getChartPadding = (
 
   const hasXAxisName = settings["graph.x_axis.labels_enabled"];
   if (hasXAxisName) {
-    padding.bottom +=
-      CHART_STYLE.axisName.size / 2 + CHART_STYLE.axisNameMargin;
+    padding.bottom += axisNameFontSize / 2 + CHART_STYLE.axisNameMargin;
   }
 
   // 3. Side (Left and Right) Padding
 
-  const yAxisNameTotalWidth =
-    CHART_STYLE.axisName.size + CHART_STYLE.axisNameMargin;
+  const yAxisNameTotalWidth = axisNameFontSize + CHART_STYLE.axisNameMargin;
 
   padding.left += ticksDimensions.yTicksWidthLeft;
   if (chartModel.leftAxisModel?.label) {
@@ -403,7 +533,7 @@ export const getChartPadding = (
 
   // We handle non-categorical scatter plots differently, because echarts places
   // the tick labels on the very edge of the x-axis for scatter plots only.
-  const isScatterPlot = chartModel.seriesModels.some(seriesModel => {
+  const isScatterPlot = chartModel.seriesModels.some((seriesModel) => {
     const seriesSettings = settings.series(
       seriesModel.legacySeriesSettingsObjectKey,
     );
@@ -478,7 +608,7 @@ export const getChartBounds = (
 };
 
 const getDimensionWidth = (
-  chartModel: CartesianChartModel,
+  chartModel: BaseCartesianChartModel,
   boundaryWidth: number,
 ) => {
   const { xAxisModel } = chartModel;
@@ -496,10 +626,13 @@ const areHorizontalXAxisTicksOverlapping = (
   dataset: ChartDataset,
   dimensionWidth: number,
   formatter: AxisFormatter,
-  { measureText, fontFamily }: RenderingContext,
+  { theme, measureText, fontFamily }: RenderingContext,
 ) => {
+  const { fontSize } = theme.cartesian.label;
+
   const fontStyle = {
     ...CHART_STYLE.axisTicks,
+    size: fontSize,
     family: fontFamily,
   };
 
@@ -524,8 +657,102 @@ const areHorizontalXAxisTicksOverlapping = (
   });
 };
 
+const countFittingLabels = (
+  chartModel: BaseCartesianChartModel,
+  barStack: StackModel,
+  barWidth: number,
+  renderingContext: RenderingContext,
+) => {
+  return barStack.seriesKeys.reduce(
+    (fitCounts, seriesKey) => {
+      const formatter = chartModel.seriesLabelsFormatters?.[seriesKey];
+      if (!formatter) {
+        return fitCounts;
+      }
+
+      const seriesFitCounts = chartModel.dataset.reduce(
+        (fitCounts, datum) => {
+          const value = datum[seriesKey];
+
+          // Nulls and zeros should not be considered because they can't have labels
+          if (value == null || value === 0) {
+            return fitCounts;
+          }
+
+          const valueWidth = renderingContext.measureText(formatter(value), {
+            weight: CHART_STYLE.seriesLabels.weight,
+            size: CHART_STYLE.seriesLabels.size,
+            family: renderingContext.fontFamily,
+          });
+
+          const canFitHorizontally =
+            valueWidth + 2 * CHART_STYLE.seriesLabels.stackedPadding < barWidth;
+
+          if (canFitHorizontally) {
+            fitCounts.horizontalFitCount += 1;
+          }
+          fitCounts.valuesCount += 1;
+
+          return fitCounts;
+        },
+        { horizontalFitCount: 0, valuesCount: 0 },
+      );
+
+      fitCounts.valuesCount += seriesFitCounts.valuesCount;
+      fitCounts.horizontalFitCount += seriesFitCounts.horizontalFitCount;
+
+      return fitCounts;
+    },
+    { horizontalFitCount: 0, valuesCount: 0 },
+  );
+};
+
+const BAR_WIDTH_PRECISION = 0.85;
+const HORIZONTAL_LABELS_COUNT_THRESHOLD = 0.8;
+
+const getStackedBarTicksRotation = (
+  chartModel: BaseCartesianChartModel,
+  boundaryWidth: number,
+  renderingContext: RenderingContext,
+) => {
+  const barStack = chartModel.stackModels.find(
+    (stackModel) => stackModel.display === "bar",
+  );
+
+  if (!barStack) {
+    return;
+  }
+
+  const barWidth =
+    getDimensionWidth(chartModel, boundaryWidth) *
+    CHART_STYLE.series.barWidth *
+    BAR_WIDTH_PRECISION;
+
+  if (barWidth < CHART_STYLE.seriesLabels.size) {
+    return;
+  }
+
+  const labelsFit = countFittingLabels(
+    chartModel,
+    barStack,
+    barWidth,
+    renderingContext,
+  );
+
+  if (labelsFit.valuesCount === 0) {
+    return;
+  }
+
+  // We prefer horizontal labels as they are easier to read.
+  // If we can't display a sufficient number of horizontal labels, we will try rendering them rotated.
+  return labelsFit.horizontalFitCount / labelsFit.valuesCount >=
+    HORIZONTAL_LABELS_COUNT_THRESHOLD
+    ? "horizontal"
+    : "vertical";
+};
+
 export const getChartMeasurements = (
-  chartModel: CartesianChartModel,
+  chartModel: BaseCartesianChartModel,
   settings: ComputedVisualizationSettings,
   hasTimelineEvents: boolean,
   width: number,
@@ -546,6 +773,7 @@ export const getChartMeasurements = (
     ticksDimensions,
     axisEnabledSetting,
     width,
+    renderingContext,
   );
   const bounds = getChartBounds(width, height, padding, ticksDimensions);
 
@@ -556,6 +784,12 @@ export const getChartMeasurements = (
     ticksDimensions.yTicksWidthLeft -
     ticksDimensions.yTicksWidthRight;
 
+  const stackedBarTicksRotation = getStackedBarTicksRotation(
+    chartModel,
+    boundaryWidth,
+    renderingContext,
+  );
+
   return {
     ticksDimensions,
     padding,
@@ -563,5 +797,6 @@ export const getChartMeasurements = (
     boundaryWidth,
     outerHeight: height,
     axisEnabledSetting,
+    stackedBarTicksRotation,
   };
 };

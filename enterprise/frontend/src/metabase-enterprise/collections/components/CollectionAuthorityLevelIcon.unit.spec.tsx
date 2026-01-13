@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { render, screen } from "__support__/ui";
 import { createMockCollection } from "metabase-types/api/mocks";
 
 import { CollectionAuthorityLevelIcon } from "./CollectionAuthorityLevelIcon";
@@ -41,7 +41,7 @@ describe("CollectionAuthorityLevelIcon", () => {
     }
 
     function queryOfficialIcon() {
-      return screen.getByLabelText("badge icon");
+      return screen.getByLabelText("official_collection icon");
     }
 
     it(`renders correctly`, () => {
@@ -52,7 +52,7 @@ describe("CollectionAuthorityLevelIcon", () => {
     it(`displays a tooltip by default`, async () => {
       renderOfficialCollection();
       await userEvent.hover(queryOfficialIcon());
-      expect(screen.getByRole("tooltip")).toHaveTextContent(
+      expect(await screen.findByRole("tooltip")).toHaveTextContent(
         "Official collection",
       );
     });
@@ -60,7 +60,7 @@ describe("CollectionAuthorityLevelIcon", () => {
     it(`can display different tooltip`, async () => {
       renderOfficialCollection({ tooltip: "belonging" });
       await userEvent.hover(queryOfficialIcon());
-      expect(screen.getByRole("tooltip")).toHaveTextContent(
+      expect(await screen.findByRole("tooltip")).toHaveTextContent(
         "Belongs to an Official collection",
       );
     });
@@ -68,7 +68,7 @@ describe("CollectionAuthorityLevelIcon", () => {
     it(`can display custom tooltip text`, async () => {
       renderOfficialCollection({ tooltip: "Hello" });
       await userEvent.hover(queryOfficialIcon());
-      expect(screen.getByRole("tooltip")).toHaveTextContent("Hello");
+      expect(await screen.findByRole("tooltip")).toHaveTextContent("Hello");
     });
 
     it(`can hide tooltip`, async () => {

@@ -1,17 +1,20 @@
-import { connect } from "react-redux";
-import { t, jt } from "ttag";
+import { c, t } from "ttag";
 import _ from "underscore";
 
-import { MoveModal } from "metabase/containers/MoveModal";
-import Collection, { ROOT_COLLECTION } from "metabase/entities/collections";
-import Dashboards from "metabase/entities/dashboards";
-import { color } from "metabase/lib/colors";
+import { useGetCollectionQuery } from "metabase/api";
+import Link from "metabase/common/components/Link";
+import { MoveModal } from "metabase/common/components/MoveModal";
+import type { CollectionPickerItem } from "metabase/common/components/Pickers/CollectionPicker";
+import { ROOT_COLLECTION } from "metabase/entities/collections";
+import { Dashboards } from "metabase/entities/dashboards";
+import { connect } from "metabase/lib/redux";
 import * as Urls from "metabase/lib/urls";
-import { Icon } from "metabase/ui";
-import type { Dashboard, CollectionId, DashboardId } from "metabase-types/api";
+import { Flex, Icon } from "metabase/ui";
+import { color } from "metabase/ui/utils/colors";
+import type { CollectionId, Dashboard, DashboardId } from "metabase-types/api";
 import type { State } from "metabase-types/store";
 
-import { ToastRoot } from "./DashboardMoveModal.styled";
+import S from "./DashboardMoveModal.module.css";
 
 const mapDispatchToProps = {
   setDashboardCollection: Dashboards.actions.setCollection,
@@ -30,12 +33,17 @@ function DashboardMoveModal({
     options: any,
   ) => void;
 }) {
+  const recentsAndSearchFilter = (item: CollectionPickerItem) =>
+    item.model === "collection" && item.id === dashboard.collection_id;
+
   return (
     <MoveModal
       title={t`Move dashboard to…`}
       onClose={onClose}
       initialCollectionId={dashboard.collection_id ?? "root"}
-      onMove={async destination => {
+      canMoveToDashboard={false}
+      entityType="dashboard"
+      onMove={async (destination) => {
         await setDashboardCollection({ id: dashboard.id }, destination, {
           notify: {
             message: (
@@ -47,6 +55,7 @@ function DashboardMoveModal({
         });
         onClose();
       }}
+      recentAndSearchFilter={recentsAndSearchFilter}
     />
   );
 }
@@ -55,18 +64,33 @@ const DashboardMoveToast = ({
   collectionId,
 }: {
   collectionId: CollectionId;
-}) => (
-  <ToastRoot>
-    <Icon name="collection" className="mr1" color="white" />
-    {jt`Dashboard moved to ${(
-      <Collection.Link
-        id={collectionId}
-        className="ml1"
-        color={color("brand")}
+}) => {
+  const { data: collection } = useGetCollectionQuery({ id: collectionId });
+
+  return (
+    <Flex align="center">
+      <Icon
+        name="collection"
+        style={{ marginInlineEnd: "0.25rem" }}
+        c="text-white"
       />
-    )}`}
-  </ToastRoot>
-);
+      {c("{0} is a location where the dashboard was moved to")
+        .jt`Dashboard moved to ${
+        collection ? (
+          <Link
+            key="link"
+            className={S.CollectionLink}
+            to={Urls.collection(collection)}
+            style={{ marginInlineStart: ".25em" }}
+            color={color("brand")}
+          >
+            {collection.name}
+          </Link>
+        ) : null
+      }`}
+    </Flex>
+  );
+};
 
 export const DashboardMoveModalConnected = _.compose(
   connect(null, mapDispatchToProps),

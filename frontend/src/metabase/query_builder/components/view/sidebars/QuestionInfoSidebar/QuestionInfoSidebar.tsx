@@ -1,21 +1,32 @@
-import { useState } from "react";
+import { useHotkeys } from "@mantine/hooks";
+import { useMemo, useState } from "react";
+import { useMount } from "react-use";
 import { t } from "ttag";
 
-import EditableText from "metabase/core/components/EditableText";
-import Link from "metabase/core/components/Link";
+import { isInstanceAnalyticsCollection } from "metabase/collections/utils";
+import { EntityIdCard } from "metabase/common/components/EntityIdCard";
+import Link from "metabase/common/components/Link";
+import {
+  Sidesheet,
+  SidesheetCard,
+  SidesheetCardTitle,
+  SidesheetTabPanelContainer,
+} from "metabase/common/components/Sidesheet";
+import { InsightsTabOrLink } from "metabase/common/components/Sidesheet/components/InsightsTabOrLink";
+import { SidesheetEditableDescription } from "metabase/common/components/Sidesheet/components/SidesheetEditableDescription";
+import SidesheetStyles from "metabase/common/components/Sidesheet/sidesheet.module.css";
+import { InsightsUpsellTab } from "metabase/dashboard/components/DashboardInfoSidebar/components/InsightsUpsellTab";
+import { useDispatch } from "metabase/lib/redux";
 import * as Urls from "metabase/lib/urls";
-import { PLUGIN_CACHING, PLUGIN_MODERATION } from "metabase/plugins";
+import { PLUGIN_MODERATION } from "metabase/plugins";
+import { onCloseQuestionInfo } from "metabase/query_builder/actions";
 import { QuestionActivityTimeline } from "metabase/query_builder/components/QuestionActivityTimeline";
-import { Stack } from "metabase/ui";
+import { Flex, Icon, Stack, Tabs } from "metabase/ui";
 import type Question from "metabase-lib/v1/Question";
 
-import ModelCacheManagementSection from "../ModelCacheManagementSection";
-
-import {
-  ContentSection,
-  HeaderContainer,
-  Root,
-} from "./QuestionInfoSidebar.styled";
+import { QuestionDetails } from "./QuestionDetails";
+import { QuestionRelationshipsTab } from "./components/QuestionRelationshipsTab";
+import { SidesheetCardWithFields } from "./components/SidesheetCardWithFields";
 
 interface QuestionInfoSidebarProps {
   question: Question;
@@ -28,8 +39,6 @@ export const QuestionInfoSidebar = ({
 }: QuestionInfoSidebarProps) => {
   const description = question.description();
   const canWrite = question.canWrite() && !question.isArchived();
-  const isPersisted = question.isPersisted();
-  const hasCacheSection = PLUGIN_CACHING.hasQuestionCacheSection(question);
 
   const handleSave = (description: string | null) => {
     if (question.description() !== description) {
@@ -37,68 +46,92 @@ export const QuestionInfoSidebar = ({
     }
   };
 
-  const [page, setPage] = useState<"default" | "caching">("default");
+  const isIAQuestion = useMemo(
+    () => isInstanceAnalyticsCollection(question.collection()),
+    [question],
+  );
+
+  const dispatch = useDispatch();
+  const handleClose = () => dispatch(onCloseQuestionInfo());
+
+  useHotkeys([["]", handleClose]]);
+
+  const [isOpen, setIsOpen] = useState(false);
+
+  useMount(() => {
+    // this component is not rendered until it is "open"
+    // but we want to set isOpen after it mounts to get
+    // pretty animations
+    setIsOpen(true);
+  });
 
   return (
-    <>
-      {page === "default" && (
-        <Root>
-          <ContentSection>
-            <HeaderContainer>
-              <h3>{t`About`}</h3>
-              {question.type() === "model" && !question.isArchived() && (
-                <Link
-                  variant="brand"
-                  to={Urls.modelDetail(question.card())}
-                >{t`Model details`}</Link>
-              )}
-            </HeaderContainer>
-            <EditableText
-              initialValue={description}
-              placeholder={
-                !description && !canWrite
-                  ? t`No description`
-                  : t`Add description`
-              }
-              isOptional
-              isMultiline
-              isMarkdown
-              isDisabled={!canWrite}
-              onChange={handleSave}
-            />
-            <PLUGIN_MODERATION.QuestionModerationSection question={question} />
-          </ContentSection>
-
-          {question.type() === "model" && isPersisted && (
-            <ContentSection extraPadding>
-              <ModelCacheManagementSection model={question} />
-            </ContentSection>
+    <Sidesheet
+      title={t`Info`}
+      onClose={handleClose}
+      isOpen={isOpen}
+      removeBodyPadding
+      data-testid="question-info-sidebar"
+      size="md"
+    >
+      <Tabs
+        defaultValue="overview"
+        className={SidesheetStyles.FlexScrollContainer}
+      >
+        <Tabs.List mx="xl">
+          <Tabs.Tab value="overview">{t`Overview`}</Tabs.Tab>
+          {!isIAQuestion && <Tabs.Tab value="history">{t`History`}</Tabs.Tab>}
+          <Tabs.Tab value="relationships">{t`Relationships`}</Tabs.Tab>
+          {question.type() === "model" && !question.isArchived() && (
+            <Link to={Urls.modelDetail(question.card())}>
+              <Flex gap="xs" className={SidesheetStyles.TabSibling}>
+                <Icon name="external" />
+                {t`Actions`}
+              </Flex>
+            </Link>
           )}
+          <InsightsTabOrLink question={question} />
+        </Tabs.List>
 
-          {hasCacheSection && (
-            <ContentSection extraPadding>
-              <Stack spacing="0.5rem">
-                <PLUGIN_CACHING.SidebarCacheSection
-                  model="question"
-                  item={question}
-                  setPage={setPage}
-                />
-              </Stack>
-            </ContentSection>
-          )}
-          <ContentSection extraPadding>
-            <QuestionActivityTimeline question={question} />
-          </ContentSection>
-        </Root>
-      )}
-      {page === "caching" && (
-        <PLUGIN_CACHING.SidebarCacheForm
-          item={question}
-          model="question"
-          setPage={setPage}
-          pt="md"
-        />
-      )}
-    </>
+        <SidesheetTabPanelContainer>
+          <Tabs.Panel value="overview">
+            <Stack gap="lg">
+              <SidesheetCard pb="md">
+                <Stack gap={0}>
+                  <SidesheetCardTitle>{t`Description`}</SidesheetCardTitle>
+
+                  <Stack gap="sm">
+                    <SidesheetEditableDescription
+                      description={description}
+                      onChange={handleSave}
+                      canWrite={canWrite}
+                    />
+                    <PLUGIN_MODERATION.ModerationReviewTextForQuestion
+                      question={question}
+                    />
+                  </Stack>
+                </Stack>
+              </SidesheetCard>
+              <SidesheetCard>
+                <QuestionDetails question={question} />
+              </SidesheetCard>
+              <SidesheetCardWithFields question={question} />
+              <EntityIdCard entityId={question._card.entity_id} />
+            </Stack>
+          </Tabs.Panel>
+          <Tabs.Panel value="relationships">
+            <QuestionRelationshipsTab question={question} />
+          </Tabs.Panel>
+          <Tabs.Panel value="history">
+            <SidesheetCard>
+              <QuestionActivityTimeline question={question} />
+            </SidesheetCard>
+          </Tabs.Panel>
+          <Tabs.Panel value="insights">
+            <InsightsUpsellTab model={question.type()} />
+          </Tabs.Panel>
+        </SidesheetTabPanelContainer>
+      </Tabs>
+    </Sidesheet>
   );
 };

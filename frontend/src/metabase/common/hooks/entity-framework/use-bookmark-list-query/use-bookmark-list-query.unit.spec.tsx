@@ -8,7 +8,7 @@ import {
   waitForLoaderToBeRemoved,
   within,
 } from "__support__/ui";
-import LoadingAndErrorWrapper from "metabase/components/LoadingAndErrorWrapper";
+import { LoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper";
 import { createMockBookmark } from "metabase-types/api/mocks";
 
 import { useBookmarkListQuery } from "./use-bookmark-list-query";
@@ -24,7 +24,7 @@ const TestComponent = () => {
 
   return (
     <div>
-      {data.map(bookmark => (
+      {data.map((bookmark) => (
         <div key={bookmark.id}>{bookmark.name}</div>
       ))}
       <div data-testid="metadata">
@@ -48,7 +48,7 @@ describe("useBookmarkListQuery", () => {
   it("should be initially loading", () => {
     setup();
 
-    expect(screen.getByTestId("loading-spinner")).toBeInTheDocument();
+    expect(screen.getByTestId("loading-indicator")).toBeInTheDocument();
   });
 
   it("should display error", async () => {

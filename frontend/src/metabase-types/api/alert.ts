@@ -1,7 +1,8 @@
 import type { CardId } from "./card";
 import type { CollectionId } from "./collection";
-import type { DashboardId, DashCardId } from "./dashboard";
-import type { Channel } from "./notifications";
+import type { DashCardId, DashboardId } from "./dashboard";
+import type { BaseEntityId } from "./entity-id";
+import type { Channel } from "./notification-channels";
 import type { Parameter } from "./parameters";
 import type { UserId, UserInfo } from "./user";
 
@@ -28,7 +29,7 @@ export interface Alert {
   can_write: boolean;
   archived: boolean;
 
-  entity_id: string;
+  entity_id: BaseEntityId;
 
   creator_id: UserId;
   creator: UserInfo;
@@ -43,31 +44,4 @@ export interface AlertCard {
   include_xls: boolean;
   format_rows?: boolean;
   dashboard_card_id?: DashCardId;
-}
-
-export interface ListAlertsRequest {
-  user_id?: UserId;
-  archived?: boolean;
-}
-
-export interface ListCardAlertsRequest {
-  id: CardId;
-  archived?: boolean;
-}
-
-export interface CreateAlertRequest {
-  card: AlertCard;
-  alert_condition: AlertCondition;
-  alert_first_only: boolean;
-  alert_above_goal: boolean;
-  channels: Channel[];
-}
-
-export interface UpdateAlertRequest {
-  id: AlertId;
-  card?: AlertCard;
-  alert_condition?: AlertCondition;
-  alert_first_only?: boolean;
-  alert_above_goal?: boolean;
-  channels?: Channel[];
 }

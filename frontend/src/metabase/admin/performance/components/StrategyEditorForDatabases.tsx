@@ -1,36 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
-import type { InjectedRouter, Route } from "react-router";
-import { withRouter } from "react-router";
 import { t } from "ttag";
 import { findWhere } from "underscore";
 
+import { SettingsPageWrapper } from "metabase/admin/components/SettingsSection";
+import { UpsellCacheConfig } from "metabase/admin/upsells";
 import { useListDatabasesQuery } from "metabase/api";
-import { DelayedLoadingAndErrorWrapper } from "metabase/components/LoadingAndErrorWrapper/DelayedLoadingAndErrorWrapper";
+import { DelayedLoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper/DelayedLoadingAndErrorWrapper";
 import { PLUGIN_CACHING } from "metabase/plugins";
-import { Stack } from "metabase/ui";
+import { Flex } from "metabase/ui";
 import type { CacheableModel } from "metabase-types/api";
-import { DurationUnit } from "metabase-types/api";
+import { CacheDurationUnit } from "metabase-types/api";
 
+import { rootId } from "../constants/simple";
 import { useCacheConfigs } from "../hooks/useCacheConfigs";
 import { useConfirmIfFormIsDirty } from "../hooks/useConfirmIfFormIsDirty";
 import { useSaveStrategy } from "../hooks/useSaveStrategy";
-import type { UpdateTargetId } from "../strategies";
-import { rootId } from "../strategies";
+import type { UpdateTargetId } from "../types";
 
-import {
-  Panel,
-  TabWrapper,
-  RoundedBox,
-} from "./StrategyEditorForDatabases.styled";
+import { Panel, RoundedBox } from "./StrategyEditorForDatabases.styled";
 import { StrategyForm } from "./StrategyForm";
 
-const StrategyEditorForDatabases_Base = ({
-  router,
-  route,
-}: {
-  router: InjectedRouter;
-  route?: Route;
-}) => {
+export const StrategyEditorForDatabases: React.FC = () => {
   const { canOverrideRootStrategy } = PLUGIN_CACHING;
 
   const [
@@ -69,7 +59,7 @@ const StrategyEditorForDatabases_Base = ({
   const savedStrategy = targetConfig?.strategy;
 
   if (savedStrategy?.type === "duration") {
-    savedStrategy.unit = DurationUnit.Hours;
+    savedStrategy.unit = CacheDurationUnit.Hours;
   }
 
   const {
@@ -77,7 +67,7 @@ const StrategyEditorForDatabases_Base = ({
     confirmationModal,
     isStrategyFormDirty,
     setIsStrategyFormDirty,
-  } = useConfirmIfFormIsDirty(router, route);
+  } = useConfirmIfFormIsDirty();
 
   /** Update the targetId (the id of the currently edited model) but confirm if the form is unsaved */
   const updateTargetId: UpdateTargetId = (newTargetId, isFormDirty) => {
@@ -93,7 +83,7 @@ const StrategyEditorForDatabases_Base = ({
     }
   }, [canOverrideRootStrategy, targetId]);
 
-  const targetDatabase = databases.find(db => db.id === targetId);
+  const targetDatabase = databases.find((db) => db.id === targetId);
 
   const shouldAllowInvalidation = useMemo(() => {
     if (
@@ -126,46 +116,48 @@ const StrategyEditorForDatabases_Base = ({
   }
 
   return (
-    <TabWrapper role="region" aria-label={t`Data caching settings`}>
-      <Stack spacing="xl" lh="1.5rem" maw="32rem" mb="1.5rem">
-        <aside>
+    <SettingsPageWrapper
+      title={t`Database caching`}
+      aria-label={t`Data caching settings`}
+      description={
+        <>
           {t`Speed up queries by caching their results.`}
           <PLUGIN_CACHING.GranularControlsExplanation />
-        </aside>
-      </Stack>
+        </>
+      }
+      h="calc(100vh - 7rem)"
+    >
       {confirmationModal}
-      <RoundedBox twoColumns={canOverrideRootStrategy}>
-        {canOverrideRootStrategy && (
-          <PLUGIN_CACHING.StrategyFormLauncherPanel
-            configs={configs}
-            setConfigs={setConfigs}
-            targetId={targetId}
-            updateTargetId={updateTargetId}
-            databases={databases}
-            isStrategyFormDirty={isStrategyFormDirty}
-            shouldShowResetButton={shouldShowResetButton}
-          />
-        )}
-        <Panel hasLeftBorder={canOverrideRootStrategy}>
-          {targetId !== null && (
-            <StrategyForm
+      <Flex gap="xl" style={{ overflow: "hidden" }}>
+        <RoundedBox twoColumns={canOverrideRootStrategy}>
+          {canOverrideRootStrategy && (
+            <PLUGIN_CACHING.StrategyFormLauncherPanel
+              configs={configs}
+              setConfigs={setConfigs}
               targetId={targetId}
-              targetModel="database"
-              targetName={targetDatabase?.name || t`Untitled database`}
-              setIsDirty={setIsStrategyFormDirty}
-              saveStrategy={saveStrategy}
-              savedStrategy={savedStrategy}
-              shouldAllowInvalidation={shouldAllowInvalidation}
-              formStyle={{ overflow: "auto" }}
-              shouldShowName={targetId !== rootId}
+              updateTargetId={updateTargetId}
+              databases={databases}
+              isStrategyFormDirty={isStrategyFormDirty}
+              shouldShowResetButton={shouldShowResetButton}
             />
           )}
-        </Panel>
-      </RoundedBox>
-    </TabWrapper>
+          <Panel hasLeftBorder={canOverrideRootStrategy}>
+            {targetId !== null && (
+              <StrategyForm
+                targetId={targetId}
+                targetModel={targetId === rootId ? "root" : "database"}
+                targetName={targetDatabase?.name || t`Untitled database`}
+                setIsDirty={setIsStrategyFormDirty}
+                saveStrategy={saveStrategy}
+                savedStrategy={savedStrategy}
+                shouldAllowInvalidation={shouldAllowInvalidation}
+                shouldShowName={targetId !== rootId}
+              />
+            )}
+          </Panel>
+        </RoundedBox>
+        <UpsellCacheConfig location="performance-data_cache" />
+      </Flex>
+    </SettingsPageWrapper>
   );
 };
-
-export const StrategyEditorForDatabases = withRouter(
-  StrategyEditorForDatabases_Base,
-);

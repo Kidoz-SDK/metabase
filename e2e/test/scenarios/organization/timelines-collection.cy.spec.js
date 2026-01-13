@@ -1,22 +1,15 @@
+const { H } = cy;
 import { USERS } from "e2e/support/cypress_data";
 import {
-  describeWithSnowplow,
-  enableTracking,
-  expectGoodSnowplowEvents,
-  expectNoBadSnowplowEvents,
-  resetSnowplow,
-  restore,
-  getFullName,
-  popover,
-  modal,
-  entityPickerModal,
-} from "e2e/support/helpers";
+  ADMIN_PERSONAL_COLLECTION_ID,
+  FIRST_COLLECTION_ID,
+} from "e2e/support/cypress_sample_instance_data";
 
 const { admin } = USERS;
 
 describe("scenarios > organization > timelines > collection", () => {
   beforeEach(() => {
-    restore();
+    H.restore();
     cy.intercept("PUT", "/api/collection/*").as("updateCollection");
     cy.intercept("POST", "/api/timeline").as("createTimeline");
     cy.intercept("PUT", "/api/timeline/*").as("updateTimeline");
@@ -24,6 +17,7 @@ describe("scenarios > organization > timelines > collection", () => {
     cy.intercept("POST", "/api/timeline-event").as("createEvent");
     cy.intercept("PUT", "/api/timeline-event/*").as("updateEvent");
     cy.intercept("DELETE", "/api/timeline-event/*").as("deleteEvent");
+    cy.intercept("GET", "/api/timeline/*").as("getTimeline");
   });
 
   describe("as admin", () => {
@@ -31,60 +25,76 @@ describe("scenarios > organization > timelines > collection", () => {
       cy.signInAsAdmin();
     });
 
-    it("should create the first event and timeline", () => {
+    it("should create and edit an event with a date", () => {
       cy.visit("/collection/root");
-      cy.icon("calendar").click();
+      cy.findByTestId("collection-menu").icon("calendar").click();
 
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Add an event").click();
-      cy.findByLabelText("Event name").type("RC1");
-      cy.findByLabelText("Date").type("10/20/2026");
+      cy.button("Create event").click();
+      cy.findByTestId("event-form").within(() => {
+        cy.findByLabelText("Event name").type("RC1");
+
+        cy.findByText(/via markdown/).should("be.visible");
+        cy.findByLabelText("Description").type("*1.0-rc1* release");
+
+        cy.findByLabelText("Date").clear().type("10/20/2026");
+
+        cy.button("Create").click();
+        cy.wait("@createEvent");
+      });
+
+      cy.findByTestId("event-list").within(() => {
+        cy.findByText("RC1").should("be.visible");
+        cy.findByText("October 20, 2026").should("be.visible");
+        cy.icon("star").should("be.visible");
+      });
+
+      cy.button("Create event").click();
+
+      cy.findByTestId("event-form").within(() => {
+        cy.findByLabelText("Event name").type("RC2");
+        cy.findByLabelText("Date").clear().type("5/12/2027");
+        cy.findByText("Event name").click(); // blur
+        cy.findByLabelText("Icon").click();
+      });
+
+      H.popover().findByText(/Cake/).click();
       cy.button("Create").click();
       cy.wait("@createEvent");
 
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("RC1").should("be.visible");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("October 20, 2026").should("be.visible");
-      cy.icon("star").should("be.visible");
+      cy.findByTestId("event-list").within(() => {
+        cy.findByText("RC2").should("be.visible");
+        cy.findByText("May 12, 2027").should("be.visible");
+        cy.icon("cake").should("be.visible");
+        cy.findByText("1.0-rc1").should("be.visible");
+      });
 
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Add an event").click();
-      cy.findByLabelText("Event name").type("RC2");
-      cy.findByLabelText("Date").type("5/12/2027");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Star").click();
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Cake").click();
-      cy.button("Create").click();
-      cy.wait("@createEvent");
+      openMenu("RC1");
+      H.popover().findByText("Edit event").click();
+      cy.findByLabelText("Event name").clear().type("RC33");
+      cy.button("Update").click();
+      cy.wait("@updateEvent");
 
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("RC2").should("be.visible");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("May 12, 2027").should("be.visible");
-      cy.icon("cake").should("be.visible");
+      cy.findByTestId("event-list").findByText("RC33").should("be.visible");
     });
 
     it("should create an event in a personal collection", () => {
-      cy.visit("/collection/root");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Your personal collection").click();
-      cy.icon("calendar").click();
+      cy.visit(`/collection/${ADMIN_PERSONAL_COLLECTION_ID}`);
+      cy.findByTestId("collection-menu").icon("calendar").click();
 
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Add an event").click();
-      cy.findByLabelText("Event name").type("RC1");
-      cy.findByLabelText("Date").type("10/20/2026");
-      cy.button("Create").click();
-      cy.wait("@createEvent");
+      cy.button("Create event").click();
 
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("RC1").should("be.visible");
+      cy.findByTestId("event-form").within(() => {
+        cy.findByLabelText("Event name").type("RC1");
+        cy.findByLabelText("Date").clear().type("10/20/2026");
+        cy.button("Create").click();
+        cy.wait("@createEvent");
+      });
+
+      cy.findByTestId("event-list").findByText("RC1").should("be.visible");
     });
 
     it("should search for events", () => {
-      cy.createTimelineWithEvents({
+      H.createTimelineWithEvents({
         events: [
           { name: "RC1" },
           { name: "RC2" },
@@ -96,164 +106,76 @@ describe("scenarios > organization > timelines > collection", () => {
       cy.visit("/collection/root/timelines");
 
       cy.findByPlaceholderText("Search for an event").type("V1");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("v1.0").should("be.visible");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("v1.1").should("be.visible");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("RC1").should("not.exist");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("RC2").should("not.exist");
-    });
-
-    it("should create an event with date", () => {
-      cy.visit("/collection/root");
-
-      cy.icon("calendar").click();
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Add an event").click();
-
-      cy.findByLabelText("Event name").type("RC1");
-
-      modal().within(() => {
-        cy.findByRole("button", { name: "calendar icon" }).click();
+      cy.findByTestId("event-list").within(() => {
+        cy.findByText("v1.0").should("be.visible");
+        cy.findByText("v1.1").should("be.visible");
+        cy.findByText("RC1").should("not.exist");
+        cy.findByText("RC2").should("not.exist");
       });
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("15").click();
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Done").click();
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Create").click();
-      cy.wait("@createEvent");
-
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Our analytics events").should("be.visible");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("RC1").should("be.visible");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("AM").should("not.exist");
-    });
-
-    it("should create an event with description", () => {
-      cy.visit("/collection/root");
-
-      cy.icon("calendar").click();
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Add an event").click();
-
-      cy.findByLabelText("Event name").type("RC1");
-      cy.findByLabelText("Date").type("5/12/2027");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Markdown supported").should("be.visible");
-      cy.findByLabelText("Description").type("*1.0-rc1* release");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Create").click();
-      cy.wait("@createEvent");
-
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Our analytics events").should("be.visible");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("RC1").should("be.visible");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("1.0-rc1").should("be.visible");
     });
 
     it("should create an event with date and time", () => {
-      cy.visit("/collection/root");
+      cy.visit("/collection/root/timelines");
 
-      cy.icon("calendar").click();
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Add an event").click();
-
+      cy.button("Create event").click();
       cy.findByLabelText("Event name").type("RC1");
 
-      modal().within(() => {
-        cy.findByRole("button", { name: "calendar icon" }).click();
-      });
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("15").click();
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Add time").click();
-      cy.findByLabelText("Hours").clear().type("10");
-      cy.findByLabelText("Minutes").clear().type("20");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Done").click();
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Create").click();
-      cy.wait("@createEvent");
+      cy.findByTestId("event-form").within(() => {
+        // adding the time first reproduces metabase#62999
+        cy.button("Add time").click();
+        cy.findByLabelText("Time").type("10:20");
 
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Our analytics events").should("be.visible");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("RC1").should("be.visible");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText(/10:20 AM/).should("be.visible");
+        cy.findByLabelText("Date").clear().type("10/20/2026");
+        cy.findByText("Create").click();
+        cy.wait("@createEvent");
+      });
+
+      H.modal().findByText("Our analytics events").should("be.visible");
+      cy.findByTestId("event-list").within(() => {
+        cy.findByText("RC1").should("be.visible");
+        cy.findByText(/10:20 AM/).should("be.visible");
+      });
     });
 
     it("should create an event with date and time at midnight", () => {
-      cy.visit("/collection/root");
-
-      cy.icon("calendar").click();
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Add an event").click();
-
-      cy.findByLabelText("Event name").type("RC1");
-
-      modal().within(() => {
-        cy.findByRole("button", { name: "calendar icon" }).click();
-      });
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("15").click();
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Add time").click();
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Done").click();
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Create").click();
-      cy.wait("@createEvent");
-
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Our analytics events").should("be.visible");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("RC1").should("be.visible");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText(/12:00 AM/).should("be.visible");
-    });
-
-    it("should edit an event", () => {
-      cy.createTimelineWithEvents({ events: [{ name: "RC1" }] });
       cy.visit("/collection/root/timelines");
 
-      openMenu("RC1");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Edit event").click();
-      cy.findByLabelText("Event name").clear().type("RC2");
-      cy.button("Update").click();
-      cy.wait("@updateEvent");
+      cy.button("Create event").click();
+      cy.findByLabelText("Event name").type("RC1");
 
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("RC2").should("be.visible");
+      cy.findByTestId("event-form").within(() => {
+        cy.findByLabelText("Date").clear().type("10/20/2026");
+        cy.button("Add time").click();
+        cy.findByLabelText("Time").type("00:00");
+        cy.findByText("Create").click();
+        cy.wait("@createEvent");
+      });
+
+      H.modal().findByText("Our analytics events").should("be.visible");
+      cy.findByTestId("event-list").within(() => {
+        cy.findByText("RC1").should("be.visible");
+        cy.findByText(/12:00 AM/).should("be.visible");
+      });
     });
 
     it("should move an event", () => {
-      cy.createTimelineWithEvents({
+      H.createTimelineWithEvents({
         timeline: { name: "Releases" },
         events: [{ name: "RC1" }],
       });
-      cy.createTimelineWithEvents({
+      H.createTimelineWithEvents({
         timeline: { name: "Metrics" },
         events: [{ name: "RC2" }],
       });
 
       cy.visit("/collection/root/timelines");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Metrics").click();
+      H.modal().findByText("Metrics").click();
       openMenu("RC2");
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText("Move event").click();
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText("Releases").click();
-      modal().button("Move").click();
+      H.modal().button("Move").click();
       cy.wait("@updateEvent");
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText("RC2").should("not.exist");
@@ -268,24 +190,23 @@ describe("scenarios > organization > timelines > collection", () => {
     });
 
     it("should move an event and undo", () => {
-      cy.createTimelineWithEvents({
+      H.createTimelineWithEvents({
         timeline: { name: "Releases" },
         events: [{ name: "RC1" }],
       });
-      cy.createTimelineWithEvents({
+      H.createTimelineWithEvents({
         timeline: { name: "Metrics" },
         events: [{ name: "RC2" }],
       });
 
       cy.visit("/collection/root/timelines");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Metrics").click();
+      H.modal().findByText("Metrics").click();
       openMenu("RC2");
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText("Move event").click();
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText("Releases").click();
-      modal().button("Move").click();
+      H.modal().button("Move").click();
       cy.wait("@updateEvent");
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText("RC2").should("not.exist");
@@ -298,7 +219,7 @@ describe("scenarios > organization > timelines > collection", () => {
     });
 
     it("should archive an event when editing this event", () => {
-      cy.createTimelineWithEvents({
+      H.createTimelineWithEvents({
         timeline: { name: "Releases" },
         events: [{ name: "RC1" }, { name: "RC2" }],
       });
@@ -319,7 +240,7 @@ describe("scenarios > organization > timelines > collection", () => {
     });
 
     it("should archive an event from the timeline and undo", () => {
-      cy.createTimelineWithEvents({
+      H.createTimelineWithEvents({
         timeline: { name: "Releases" },
         events: [{ name: "RC1" }, { name: "RC2" }],
       });
@@ -341,7 +262,7 @@ describe("scenarios > organization > timelines > collection", () => {
     });
 
     it("should unarchive an event from the archive and undo", () => {
-      cy.createTimelineWithEvents({
+      H.createTimelineWithEvents({
         timeline: { name: "Releases" },
         events: [{ name: "RC1", archived: true }],
       });
@@ -369,7 +290,7 @@ describe("scenarios > organization > timelines > collection", () => {
     });
 
     it("should delete an event", () => {
-      cy.createTimelineWithEvents({
+      H.createTimelineWithEvents({
         timeline: { name: "Releases" },
         events: [{ name: "RC1", archived: true }],
       });
@@ -392,22 +313,20 @@ describe("scenarios > organization > timelines > collection", () => {
     });
 
     it("should allow navigating back to the list of timelines", () => {
-      cy.createTimeline({ name: "Releases" });
-      cy.createTimeline({ name: "Metrics" });
+      H.createTimeline({ name: "Releases" });
+      H.createTimeline({ name: "Metrics" });
 
       cy.visit("/collection/root/timelines/1");
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText("Releases");
 
       cy.icon("chevronleft").click();
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Releases");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Metrics");
+      H.modal().findByText("Releases");
+      H.modal().findByText("Metrics");
     });
 
     it("should not allow navigating back when there is only one timeline in a collection", () => {
-      cy.createTimeline({ name: "Releases" });
+      H.createTimeline({ name: "Releases" });
 
       cy.visit("/collection/root/timelines/1");
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
@@ -416,7 +335,7 @@ describe("scenarios > organization > timelines > collection", () => {
     });
 
     it("should create an additional timeline", () => {
-      cy.createTimelineWithEvents({
+      H.createTimelineWithEvents({
         timeline: { name: "Releases" },
         events: [{ name: "RC1" }],
       });
@@ -433,11 +352,11 @@ describe("scenarios > organization > timelines > collection", () => {
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText("Launches").should("be.visible");
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Add an event").should("be.visible");
+      cy.findByText("Create event").should("be.visible");
     });
 
     it("should edit a timeline", () => {
-      cy.createTimelineWithEvents({
+      H.createTimelineWithEvents({
         timeline: { name: "Releases" },
         events: [{ name: "RC1" }],
       });
@@ -456,16 +375,16 @@ describe("scenarios > organization > timelines > collection", () => {
     });
 
     it("should move a timeline", () => {
-      cy.createTimelineWithEvents({
+      H.createTimelineWithEvents({
         timeline: { name: "Events", default: true },
         events: [{ name: "RC1" }],
       });
 
       cy.visit("/collection/root/timelines");
       openMenu("Our analytics events");
-      popover().findByText("Move timeline").click();
+      H.popover().findByText("Move timeline").click();
 
-      entityPickerModal().within(() => {
+      H.entityPickerModal().within(() => {
         cy.findByRole("tab", { name: /Collections/ }).click();
         cy.findByText("Bobby Tables's Personal Collection").click();
         cy.button("Move").click();
@@ -475,13 +394,13 @@ describe("scenarios > organization > timelines > collection", () => {
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText("Our analytics events").should("be.visible");
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText(`${getFullName(admin)}'s Personal Collection`).should(
+      cy.findByText(`${H.getFullName(admin)}'s Personal Collection`).should(
         "be.visible",
       );
     });
 
     it("should archive a timeline and undo", () => {
-      cy.createTimelineWithEvents({
+      H.createTimelineWithEvents({
         timeline: { name: "Releases" },
         events: [{ name: "RC1" }, { name: "RC2" }],
       });
@@ -496,7 +415,7 @@ describe("scenarios > organization > timelines > collection", () => {
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText("Our analytics events").should("be.visible");
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Add an event").should("be.visible");
+      cy.findByText("Create event").should("be.visible");
 
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText("Undo").click();
@@ -510,12 +429,12 @@ describe("scenarios > organization > timelines > collection", () => {
     });
 
     it("should support markdown in timeline description", () => {
-      cy.createTimeline({
+      H.createTimeline({
         name: "Releases",
         description: "[Release notes](https://metabase.test)",
       });
 
-      cy.createTimeline({
+      H.createTimeline({
         name: "Holidays",
         description: "[Holiday list](https://metabase.test)",
       });
@@ -528,7 +447,7 @@ describe("scenarios > organization > timelines > collection", () => {
     });
 
     it("should support markdown in event description", () => {
-      cy.createTimelineWithEvents({
+      H.createTimelineWithEvents({
         timeline: {
           name: "Releases",
         },
@@ -546,7 +465,7 @@ describe("scenarios > organization > timelines > collection", () => {
     });
 
     it("should archive and unarchive a timeline", () => {
-      cy.createTimelineWithEvents({
+      H.createTimelineWithEvents({
         timeline: { name: "Releases" },
         events: [{ name: "RC1" }, { name: "RC2" }],
       });
@@ -569,13 +488,13 @@ describe("scenarios > organization > timelines > collection", () => {
       cy.wait("@updateTimeline");
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText("No timelines found");
-      modal().icon("chevronleft").click();
+      H.modal().icon("chevronleft").click();
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText("Releases");
     });
 
     it("should archive and delete a timeline", () => {
-      cy.createTimelineWithEvents({
+      H.createTimelineWithEvents({
         timeline: { name: "Releases" },
         events: [{ name: "RC1" }, { name: "RC2" }],
       });
@@ -600,19 +519,16 @@ describe("scenarios > organization > timelines > collection", () => {
       cy.wait("@deleteTimeline");
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText("No timelines found");
-      modal().icon("chevronleft").click();
+      H.modal().icon("chevronleft").click();
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText("Our analytics events");
     });
 
     it("should preserve collection names for default timelines", () => {
-      cy.visit("/");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("First collection").click();
+      cy.visit(`/collection/${FIRST_COLLECTION_ID}/timelines`);
 
-      cy.icon("calendar").click();
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Add an event").click();
+      cy.findByText("Create event").click();
       cy.findByLabelText("Event name").type("RC1");
       cy.findByLabelText("Date").type("10/20/2026");
       cy.button("Create").click();
@@ -639,7 +555,7 @@ describe("scenarios > organization > timelines > collection", () => {
     });
 
     it("should use custom date formatting settings", () => {
-      cy.createTimelineWithEvents({
+      H.createTimelineWithEvents({
         events: [{ name: "RC1", timestamp: "2022-10-12T18:15:30Z" }],
       });
       setFormattingSettings({
@@ -660,24 +576,24 @@ describe("scenarios > organization > timelines > collection", () => {
     });
 
     it("should use custom time formatting settings", () => {
-      cy.createTimelineWithEvents({
-        events: [{ name: "RC1", timestamp: "2022-10-12T18:15:30Z" }],
+      H.createTimelineWithEvents({
+        events: [
+          {
+            name: "RC1",
+            timestamp: "2022-10-12T18:15:30Z",
+            time_matters: true,
+          },
+        ],
       });
       setFormattingSettings({
         "type/Temporal": { time_style: "HH:mm" },
       });
       cy.visit("/collection/root/timelines");
+      cy.wait("@getTimeline");
 
-      openMenu("RC1");
-      // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Edit event").click();
-      modal().within(() => {
-        cy.findByRole("button", { name: "calendar icon" }).click();
-      });
-      popover().within(() => {
-        cy.findByText("Add time").click();
-        cy.findByText("AM").should("not.exist");
-      });
+      cy.findByTestId("event-list")
+        .findByText("October 12, 2022, 18:15")
+        .should("be.visible");
     });
   });
 
@@ -690,12 +606,12 @@ describe("scenarios > organization > timelines > collection", () => {
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText("Our analytics events").should("be.visible");
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Add an event").should("not.exist");
+      cy.findByText("Create event").should("not.exist");
     });
 
     it("should not allow creating new events in existing timelines", () => {
       cy.signInAsAdmin();
-      cy.createTimelineWithEvents({
+      H.createTimelineWithEvents({
         timeline: { name: "Releases" },
         events: [{ name: "RC1" }],
       });
@@ -707,49 +623,81 @@ describe("scenarios > organization > timelines > collection", () => {
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
       cy.findByText("Releases").should("be.visible");
       // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-      cy.findByText("Add an event").should("not.exist");
+      cy.findByText("Create event").should("not.exist");
     });
   });
 });
 
-describeWithSnowplow("scenarios > collections > timelines", () => {
+describe("scenarios > collections > timelines", () => {
   beforeEach(() => {
-    restore();
-    resetSnowplow();
+    H.restore();
+    H.resetSnowplow();
     cy.signInAsAdmin();
-    enableTracking();
+    H.enableTracking();
   });
 
   afterEach(() => {
-    expectNoBadSnowplowEvents();
+    H.expectNoBadSnowplowEvents();
   });
 
   it("should send snowplow events when creating a timeline event", () => {
-    // 1 - new_instance_created
-    // 2 - pageview
     cy.visit("/collection/root");
+    H.expectSnowplowEvent({
+      eventType: "page_view",
+      event: {
+        page_urlpath: "/collection/root",
+      },
+    });
 
-    // 3 - pageview
     cy.icon("calendar").click();
+    H.expectSnowplowEvent({
+      eventType: "page_view",
+      event: {
+        page_urlpath: "/collection/root/timelines",
+      },
+    });
 
     // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
-    cy.findByText("Add an event").click();
+    cy.findByText("Create event").click();
     cy.findByLabelText("Event name").type("Event");
     cy.findByLabelText("Date").type("10/20/2026");
+    H.expectSnowplowEvent({
+      eventType: "page_view",
+      event: {
+        page_urlpath: "/collection/root/timelines/new/events/new",
+      },
+    });
 
-    // 4 - new_event_created
-    // 5 - pageview
     cy.button("Create").click();
+    H.expectSnowplowEvent({
+      event: {
+        unstruct_event: {
+          data: {
+            data: {
+              event: "new_event_created",
+            },
+          },
+        },
+      },
+    });
 
-    expectGoodSnowplowEvents(5);
+    H.expectSnowplowEvent(
+      {
+        eventType: "page_view",
+        event: {
+          page_urlpath: "/collection/root/timelines",
+        },
+      },
+      2,
+    ); // we viewed this page twice
   });
 });
 
-const openMenu = name => {
+const openMenu = (name) => {
   return cy.findByText(name).parent().parent().icon("ellipsis").click();
 };
 
-const setFormattingSettings = settings => {
+const setFormattingSettings = (settings) => {
   cy.request("PUT", "api/setting/custom-formatting", {
     value: settings,
   });

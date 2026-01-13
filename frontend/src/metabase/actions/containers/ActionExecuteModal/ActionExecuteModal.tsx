@@ -1,11 +1,11 @@
 import type { FormikHelpers } from "formik";
 import { useCallback } from "react";
 
-import { useActionQuery } from "metabase/common/hooks";
-import LoadingAndErrorWrapper from "metabase/components/LoadingAndErrorWrapper";
-import ModalContent from "metabase/components/ModalContent";
+import { skipToken, useGetActionQuery } from "metabase/api";
+import { LoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper";
 import { useDispatch } from "metabase/lib/redux";
 import { checkNotNull } from "metabase/lib/types";
+import { Modal } from "metabase/ui";
 import type {
   ParametersForActionExecution,
   WritebackActionId,
@@ -16,15 +16,17 @@ import { useActionInitialValues } from "../../hooks/use-action-initial-values";
 import ActionParametersInputForm from "../ActionParametersInputForm";
 
 export interface ActionExecuteModalProps {
+  opened: boolean;
   actionId: WritebackActionId | undefined;
   initialValues?: ParametersForActionExecution;
   fetchInitialValues?: () => Promise<ParametersForActionExecution>;
   shouldPrefetch?: boolean;
-  onClose?: () => void;
+  onClose: () => void;
   onSuccess?: () => void;
 }
 
 export const ActionExecuteModal = ({
+  opened,
   actionId,
   initialValues: initialValuesProp,
   fetchInitialValues,
@@ -38,7 +40,9 @@ export const ActionExecuteModal = ({
     error: errorAction,
     isLoading: isLoadingAction,
     data: action,
-  } = useActionQuery({ id: actionId });
+  } = useGetActionQuery(
+    actionId != null && opened ? { id: actionId } : skipToken,
+  );
 
   const {
     error: errorInitialValues,
@@ -82,26 +86,24 @@ export const ActionExecuteModal = ({
   const isLoading =
     isLoadingAction || (isLoadingInitialValues && !hasPrefetchedValues);
 
-  if (error || isLoading) {
-    return <LoadingAndErrorWrapper error={error} loading={isLoading} />;
-  }
-
-  const loadedAction = checkNotNull(action);
-
   return (
-    <ModalContent
-      data-testid="action-execute-modal"
-      title={loadedAction.name}
+    <Modal
+      opened={opened}
       onClose={onClose}
+      title={action?.name}
+      data-testid="action-execute-modal"
     >
-      <ActionParametersInputForm
-        action={loadedAction}
-        initialValues={initialValues}
-        prefetchesInitialValues
-        onCancel={onClose}
-        onSubmit={handleSubmit}
-        onSubmitSuccess={handleSubmitSuccess}
-      />
-    </ModalContent>
+      {error || isLoading || !action ? (
+        <LoadingAndErrorWrapper error={error} loading={isLoading} />
+      ) : (
+        <ActionParametersInputForm
+          action={action}
+          initialValues={initialValues}
+          onCancel={onClose}
+          onSubmit={handleSubmit}
+          onSubmitSuccess={handleSubmitSuccess}
+        />
+      )}
+    </Modal>
   );
 };

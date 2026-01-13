@@ -1,24 +1,23 @@
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
 
-import InputBlurChange from "metabase/components/InputBlurChange";
-import Input from "metabase/core/components/Input";
-import { color } from "metabase/lib/colors";
-import { Icon } from "metabase/ui";
+import Input from "metabase/common/components/Input";
+import { Icon, TextInputBlurChange } from "metabase/ui";
 
 export const OptionsIcon = styled(Icon)`
-  color: ${color("text-medium")};
+  color: var(--mb-color-text-medium);
   cursor: pointer;
 
   &:hover {
-    color: ${color("brand")};
+    color: var(--mb-color-brand);
   }
 `;
 
-export const SeriesNameInput = styled(InputBlurChange)`
+export const SeriesNameInput = styled(TextInputBlurChange)`
   width: auto;
 
-  ${({ subtitle }) =>
-    subtitle &&
+  ${({ description }) =>
+    description &&
     `
     ${Input.Field} {
       padding-top: 1rem;

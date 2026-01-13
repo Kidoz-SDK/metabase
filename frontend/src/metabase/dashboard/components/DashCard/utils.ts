@@ -1,24 +1,13 @@
-import _ from "underscore";
-
-import {
-  getVirtualCardType,
-  isActionDashCard,
-  isNativeDashCard,
-  isQuestionDashCard,
-  isVirtualDashCard,
-} from "metabase/dashboard/utils";
-import type { ParameterMappingOption as ParameterMappingOption } from "metabase/parameters/utils/mapping-options";
-import * as Lib from "metabase-lib";
-import type Question from "metabase-lib/v1/Question";
-import { normalize } from "metabase-lib/v1/queries/utils/normalize";
+import { getVirtualCardType } from "metabase/dashboard/utils";
 import type {
   BaseDashboardCard,
-  DashboardCard,
-  ParameterTarget,
-  QuestionDashboardCard,
+  Series,
+  VisualizerColumnValueSource,
+  VisualizerDataSourceId,
+  VisualizerVizDefinition,
 } from "metabase-types/api";
 
-const VIZ_WITH_CUSTOM_MAPPING_UI = ["placeholder", "link"];
+const VIZ_WITH_CUSTOM_MAPPING_UI = ["heading", "placeholder"];
 
 export function shouldShowParameterMapper({
   dashcard,
@@ -34,67 +23,46 @@ export function shouldShowParameterMapper({
   );
 }
 
-export function getMappingOptionByTarget<T extends DashboardCard>(
-  mappingOptions: ParameterMappingOption[],
-  dashcard: T,
-  target?: ParameterTarget | null,
-  question?: T extends QuestionDashboardCard ? Question : undefined,
-): ParameterMappingOption | undefined {
-  if (!target) {
-    return;
+export function getMissingColumnsFromVisualizationSettings(options: {
+  visualizerEntity: VisualizerVizDefinition | undefined;
+  rawSeries: Series;
+}) {
+  const { visualizerEntity, rawSeries } = options;
+
+  if (!visualizerEntity || !rawSeries?.length) {
+    return [];
   }
 
-  const isAction = isActionDashCard(dashcard);
+  const { columnValuesMapping } = visualizerEntity;
 
-  // action has it's own settings, no need to get mapping options
-  if (isAction) {
-    return;
-  }
+  const colsForCards: Record<VisualizerDataSourceId, Set<string>> = {};
+  rawSeries.forEach((series) => {
+    const cardId: VisualizerDataSourceId = `card:${series.card.id}`;
+    if (!colsForCards[cardId]) {
+      colsForCards[cardId] = new Set();
+    }
+    series.data?.cols.forEach((col) => {
+      colsForCards[cardId].add(col.name);
+    });
+  });
 
-  const isVirtual = isVirtualDashCard(dashcard);
-  const isNative = isQuestionDashCard(dashcard)
-    ? isNativeDashCard(dashcard)
-    : false;
+  const missingCols: VisualizerColumnValueSource[][] = [];
+  Object.entries(columnValuesMapping).forEach(([_columnRef, columns]) => {
+    const missing = columns.filter((column) => {
+      if (typeof column === "string") {
+        return false; // This is a data source name reference, not a column
+      }
 
-  if (isVirtual || isAction || isNative) {
-    const normalizedTarget = normalize(target);
+      return (
+        !colsForCards[column.sourceId] ||
+        !colsForCards[column.sourceId].has(column.originalName)
+      );
+    });
 
-    return mappingOptions.find(mappingOption =>
-      _.isEqual(normalize(mappingOption.target), normalizedTarget),
-    );
-  }
+    if (missing.length > 0) {
+      missingCols.push(missing);
+    }
+  });
 
-  if (!question) {
-    return;
-  }
-
-  const stageIndex = -1;
-  const query = question.query();
-  const columns = Lib.visibleColumns(query, stageIndex);
-  const normalizedTarget = normalize(target[1]);
-
-  const [columnByTargetIndex] = Lib.findColumnIndexesFromLegacyRefs(
-    query,
-    stageIndex,
-    columns,
-    [normalizedTarget],
-  );
-
-  // target not found - no need to look further
-  if (columnByTargetIndex === -1) {
-    return;
-  }
-
-  const mappingColumnIndexes = Lib.findColumnIndexesFromLegacyRefs(
-    query,
-    stageIndex,
-    columns,
-    mappingOptions.map(({ target }) => normalize(target[1])),
-  );
-
-  const mappingIndex = mappingColumnIndexes.indexOf(columnByTargetIndex);
-
-  if (mappingIndex >= 0) {
-    return mappingOptions[mappingIndex];
-  }
+  return missingCols;
 }

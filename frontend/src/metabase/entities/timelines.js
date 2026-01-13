@@ -2,7 +2,14 @@ import { updateIn } from "icepick";
 import { t } from "ttag";
 import _ from "underscore";
 
-import { timelineApi, timelineEventApi } from "metabase/api";
+import {
+  skipToken,
+  timelineApi,
+  timelineEventApi,
+  useGetTimelineQuery,
+  useListCollectionTimelinesQuery,
+  useListTimelinesQuery,
+} from "metabase/api";
 import { canonicalCollectionId } from "metabase/collections/utils";
 import {
   createEntity,
@@ -12,16 +19,23 @@ import {
 import { getDefaultTimeline, getTimelineName } from "metabase/lib/timelines";
 import { TimelineSchema } from "metabase/schema";
 
-import TimelineEvents from "./timeline-events";
+import { TimelineEvents } from "./timeline-events";
 
 /**
  * @deprecated use "metabase/api" instead
  */
-const Timelines = createEntity({
+export const Timelines = createEntity({
   name: "timelines",
   nameOne: "timeline",
   path: "/api/timeline",
   schema: TimelineSchema,
+
+  rtk: {
+    getUseGetQuery: () => ({
+      useGetQuery: useGetTimelineQuery,
+    }),
+    useListQuery,
+  },
 
   api: {
     list: ({ collectionId, ...params } = {}, dispatch) =>
@@ -59,7 +73,7 @@ const Timelines = createEntity({
   },
 
   actions: {
-    createWithEvent: (event, collection) => async dispatch => {
+    createWithEvent: (event, collection) => async (dispatch) => {
       const timeline = await entityCompatibleQuery(
         getDefaultTimeline(collection),
         dispatch,
@@ -110,7 +124,7 @@ const Timelines = createEntity({
     if (action.type === TimelineEvents.actionTypes.UPDATE && !action.error) {
       const event = TimelineEvents.HACK_getObjectFromAction(action);
 
-      return _.mapObject(state, timeline => {
+      return _.mapObject(state, (timeline) => {
         const hasEvent = timeline.events?.includes(event.id);
         const hasTimeline = event.timeline_id === timeline.id;
 
@@ -129,7 +143,7 @@ const Timelines = createEntity({
     if (action.type === TimelineEvents.actionTypes.DELETE && !action.error) {
       const eventId = action.payload.result;
 
-      return _.mapObject(state, timeline => {
+      return _.mapObject(state, (timeline) => {
         return updateIn(timeline, ["events"], (eventIds = []) => {
           return _.without(eventIds, eventId);
         });
@@ -140,4 +154,16 @@ const Timelines = createEntity({
   },
 });
 
-export default Timelines;
+function useListQuery({ collectionId, ...params } = {}, options) {
+  const collectionTimelines = useListCollectionTimelinesQuery(
+    collectionId ? { id: collectionId, ...params } : skipToken,
+    options,
+  );
+
+  const timelines = useListTimelinesQuery(
+    collectionId ? skipToken : params,
+    options,
+  );
+
+  return collectionId ? collectionTimelines : timelines;
+}

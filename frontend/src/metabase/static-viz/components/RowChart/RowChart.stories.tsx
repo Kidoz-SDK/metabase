@@ -1,18 +1,40 @@
-import type { ComponentStory } from "@storybook/react";
+import type { StoryFn } from "@storybook/react";
 
 import { color } from "metabase/lib/colors";
-import { MULTIPLE_SERIES } from "metabase/static-viz/components/RowChart/stories-data";
+import {
+  METRIC_COLUMN_WITH_SCALING,
+  MULTIPLE_SERIES,
+} from "metabase/static-viz/components/RowChart/stories-data";
 
-import RowChart from "./RowChart";
+import {
+  type StaticChartProps,
+  StaticVisualization,
+} from "../StaticVisualization";
 
 export default {
-  title: "static-viz/RowChart",
-  component: RowChart,
+  title: "Viz/Static Viz/RowChart",
+  component: StaticVisualization,
 };
 
-const Template: ComponentStory<typeof RowChart> = args => {
-  return <RowChart {...args} />;
+const Template: StoryFn<StaticChartProps> = (args) => {
+  return <StaticVisualization {...args} />;
 };
 
-export const Default = Template.bind({});
-Default.args = { ...MULTIPLE_SERIES, getColor: color };
+export const Default = {
+  render: Template,
+  args: { ...MULTIPLE_SERIES, getColor: color },
+};
+
+export const MetricColumnWithScaling = {
+  render: Template,
+
+  args: {
+    ...METRIC_COLUMN_WITH_SCALING,
+    getColor: color,
+  },
+};
+
+export const Watermark = {
+  render: Template,
+  args: { ...MULTIPLE_SERIES, getColor: color, hasDevWatermark: true },
+};

@@ -18,10 +18,13 @@
   In the future, we plan to add more classifiers, including ML ones that run offline."
   (:require
    [clojure.data :as data]
-   [metabase.analyze :as analyze]
+   [metabase.analyze.core :as analyze]
    [metabase.lib.metadata :as lib.metadata]
+   [metabase.lib.schema.metadata.fingerprint :as lib.schema.metadata.fingerprint]
    [metabase.models.interface :as mi]
-   [metabase.query-processor.store :as qp.store]
+   ;; legacy usage -- don't do things like this going forward
+   ^{:clj-kondo/ignore [:deprecated-namespace :discouraged-namespace]} [metabase.query-processor.store :as qp.store]
+   [metabase.sync.analyze.fingerprint :as sync.fingerprint]
    [metabase.sync.interface :as i]
    [metabase.sync.util :as sync-util]
    [metabase.util :as u]
@@ -37,15 +40,15 @@
   "Columns of Field or Table that classifiers are allowed to be set."
   [model]
   (case model
-   :model/Field #{:semantic_type :preview_display :has_field_values}
-   :model/Table #{:entity_type}))
+    :model/Field #{:semantic_type :preview_display :has_field_values}
+    :model/Table #{:entity_type}))
 
 (def ^:private FieldOrTableInstance
   [:or
    i/FieldInstance
    i/TableInstance])
 
-(mu/defn ^:private save-model-updates!
+(mu/defn- save-model-updates!
   "Save the updates in `updated-model` (can be either a `Field` or `Table`)."
   [original-model :- FieldOrTableInstance
    updated-model  :- FieldOrTableInstance]
@@ -65,45 +68,68 @@
                   values-to-set)
       true)))
 
-(mu/defn ^:private classify!
-  "Run various classifiers on `field` and its `fingerprint`, and save any detected changes."
-  ([field :- i/FieldInstance]
-   (classify! field (or (:fingerprint field)
-                        (when (qp.store/initialized?)
-                          (:fingerprint (lib.metadata/field (qp.store/metadata-provider) (u/the-id field))))
-                        (t2/select-one-fn :fingerprint :model/Field :id (u/the-id field)))))
+(mu/defn- classify!
+  "Run various classifiers on `field` and its `fingerprint`, and save any detected changes.
+   Returns updated `field`"
+  ([field :- i/FieldInstance opts]
+   (classify! field opts
+              (or (:fingerprint field)
+                  (when (qp.store/initialized?)
+                    (:fingerprint (lib.metadata/field (qp.store/metadata-provider) (u/the-id field))))
+                  (t2/select-one-fn :fingerprint :model/Field :id (u/the-id field)))))
 
   ([field       :- i/FieldInstance
-    fingerprint :- [:maybe analyze/Fingerprint]]
+    {:keys [exists-name]}
+    fingerprint :- [:maybe ::lib.schema.metadata.fingerprint/fingerprint]]
    (sync-util/with-error-handling (format "Error classifying %s" (sync-util/name-for-logging field))
-     (let [updated-field (analyze/run-classifiers field fingerprint)]
+     (let [classified (analyze/run-classifiers field fingerprint)
+           would-be-name? (= (:semantic_type classified) :type/Name)
+           ;; if it would be name and table already has a name field, don't classify as name (SEM-414)
+           updated-field (if (and would-be-name? exists-name)
+                           (assoc classified :semantic_type (:semantic_type field))
+                           classified)]
        (when-not (= field updated-field)
-         (save-model-updates! field updated-field))))))
-
+         (save-model-updates! field updated-field))
+       updated-field))))
 
 ;;; +------------------------------------------------------------------------------------------------------------------+
 ;;; |                                        CLASSIFYING ALL FIELDS IN A TABLE                                         |
 ;;; +------------------------------------------------------------------------------------------------------------------+
 
-(mu/defn ^:private fields-to-classify :- [:maybe [:sequential i/FieldInstance]]
+(mu/defn- fields-to-classify :- [:maybe [:sequential i/FieldInstance]]
   "Return a sequences of Fields belonging to `table` for which we should attempt to determine semantic type. This
   should include Fields that have the latest fingerprint, but have not yet *completed* analysis."
   [table :- i/TableInstance]
-  (seq (t2/select :model/Field
-         :table_id            (u/the-id table)
-         :fingerprint_version i/*latest-fingerprint-version*
-         :last_analyzed       nil)))
+  (seq (apply t2/select :model/Field
+              :table_id (u/the-id table)
+              :active true
+              :visibility_type [:not-in ["sensitive" "retired"]]
+              (reduce concat [] (sync.fingerprint/incomplete-analysis-kvs)))))
 
 (mu/defn classify-fields!
   "Run various classifiers on the appropriate `fields` in a `table` that have not been previously analyzed. These do
   things like inferring (and setting) the semantic types and preview display status for Fields belonging to `table`."
   [table :- i/TableInstance]
-  (when-let [fields (fields-to-classify table)]
-    {:fields-classified (count fields)
-     :fields-failed     (->> fields
-                             (map classify!)
-                             (filter (partial instance? Exception))
-                             count)}))
+  (let [table-id (:id table)]
+    (when-let [fields (fields-to-classify table)]
+      (let [existing-name-field (t2/count :model/Field
+                                          :table_id table-id
+                                          :active true
+                                          :visibility_type [:not-in ["sensitive" "retired"]]
+                                          :semantic_type :type/Name)
+            {:keys [fields-failed]}
+            (reduce (fn [state field]
+                      (let [result (classify! field state)]
+                        (cond-> state
+                          (instance? Exception result)
+                          (update :fields-failed inc)
+
+                          (= :type/Name (:semantic_type result))
+                          (assoc :exists-name true))))
+                    {:fields-failed 0 :exists-name (pos? existing-name-field)}
+                    fields)]
+        {:fields-classified (count fields)
+         :fields-failed fields-failed}))))
 
 (mu/defn ^:always-validate classify-table!
   "Run various classifiers on the `table`. These do things like inferring (and setting) entitiy type of `table`."
@@ -117,27 +143,27 @@
 
 (mu/defn classify-tables-for-db!
   "Classify all tables found in a given database"
-  [_database :- i/DatabaseInstance
-   tables    :- [:maybe [:sequential i/TableInstance]]
+  [database :- i/DatabaseInstance
    log-progress-fn]
-  {:total-tables      (count tables)
-   :tables-classified (sync-util/sum-numbers (fn [table]
-                                               (let [result (classify-table! table)]
-                                                 (log-progress-fn "classify-tables" table)
-                                                 (if result
-                                                   1
-                                                   0)))
-                                             tables)})
+  (let [tables (sync-util/reducible-sync-tables database)]
+    (reduce (fn [acc table]
+              (let [result (classify-table! table)]
+                (log-progress-fn "classify-tables" table)
+                (-> acc
+                    (update :total-tables inc)
+                    (cond-> result (update :tables-classified inc)))))
+            {:tables-classified 0, :total-tables 0}
+            tables)))
 
 (mu/defn classify-fields-for-db!
   "Classify all fields found in a given database"
-  [_database :- i/DatabaseInstance
-   tables    :- [:maybe [:sequential i/TableInstance]]
+  [database :- i/DatabaseInstance
    log-progress-fn]
-  (apply merge-with +
-         {:fields-classified 0, :fields-failed 0}
-         (map (fn [table]
-                (let [result (classify-fields! table)]
-                  (log-progress-fn "classify-fields" table)
-                  result))
-              tables)))
+  (let [tables (sync-util/reducible-sync-tables database)]
+    (transduce (map (fn [table]
+                      (let [result (classify-fields! table)]
+                        (log-progress-fn "classify-fields" table)
+                        result)))
+               (partial merge-with +)
+               {:fields-classified 0, :fields-failed 0}
+               tables)))

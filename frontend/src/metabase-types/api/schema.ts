@@ -1,10 +1,11 @@
 import type { WritebackAction } from "./actions";
-import type { Alert } from "./alert";
 import type { Card, CardId } from "./card";
 import type { Collection, CollectionId, CollectionItemId } from "./collection";
 import type { Dashboard } from "./dashboard";
 import type { Database, DatabaseId } from "./database";
+import type { Document } from "./document";
 import type { Field, FieldDimension, FieldId } from "./field";
+import type { Measure, MeasureId } from "./measure";
 import type { Segment, SegmentId } from "./segment";
 import type { NativeQuerySnippet } from "./snippets";
 import type {
@@ -16,12 +17,10 @@ import type {
   TableId,
 } from "./table";
 import type { Timeline, TimelineEventId } from "./timeline";
-import type { User } from "./user";
 
 export type NormalizedWritebackAction = WritebackAction;
-export type NormalizedAlert = Alert;
 export type NormalizedDashboard = Dashboard;
-export type NormalizedUser = User;
+export type NormalizedDocument = Document;
 export type NormalizedCard = Card;
 export type NormalizedNativeQuerySnippet = NativeQuerySnippet;
 
@@ -39,15 +38,17 @@ export interface NormalizedSchema extends Omit<Schema, "database" | "tables"> {
 export interface NormalizedTable
   extends Omit<
     Table,
-    "db" | "fields" | "fks" | "segments" | "metrics" | "schema"
+    "db" | "fields" | "fks" | "segments" | "measures" | "metrics" | "schema"
   > {
   db?: DatabaseId;
   fields?: FieldId[];
   fks?: NormalizedForeignKey[];
   segments?: SegmentId[];
+  measures?: MeasureId[];
   metrics?: CardId[];
   schema?: SchemaId;
   schema_name?: SchemaName;
+  original_fields?: Field[];
 }
 
 export interface NormalizedForeignKey
@@ -71,6 +72,10 @@ export interface NormalizedField
 }
 
 export interface NormalizedSegment extends Omit<Segment, "table"> {
+  table?: TableId;
+}
+
+export interface NormalizedMeasure extends Omit<Measure, "table"> {
   table?: TableId;
 }
 

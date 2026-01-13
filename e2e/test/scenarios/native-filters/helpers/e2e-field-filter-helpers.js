@@ -1,4 +1,4 @@
-import { filterWidget, popover } from "e2e/support/helpers";
+import { filterWidget, popover, selectDropdown } from "e2e/support/helpers";
 
 // FILTER WIDGET TYPE
 
@@ -13,7 +13,7 @@ export function setWidgetType(type) {
     .findByTestId("filter-widget-type-select")
     .click();
 
-  popover().findByText(type).click();
+  selectDropdown().findByText(type).click();
 }
 
 // FIELD FILTER STRING FILTERS
@@ -28,15 +28,11 @@ export function addWidgetStringFilter(
   { buttonLabel = "Add filter" } = {},
 ) {
   setWidgetStringFilter(value);
-  cy.button(buttonLabel).click();
-}
-
-export function clearWidgetValue() {
-  filterWidget().icon("close").click();
+  cy.button(buttonLabel).click({ force: true });
 }
 
 export function setWidgetStringFilter(value) {
-  popover().find("input").first().type(`${value}{enter}`);
+  popover().first().find("input").not("[type=hidden]").first().type(`${value}`);
 }
 
 /**
@@ -47,15 +43,20 @@ export function setWidgetStringFilter(value) {
 
 export function selectFilterValueFromList(
   value,
-  { addFilter = true, buttonLabel = "Add filter" } = {},
+  { addFilter = true, buttonLabel = "Add filter", search = false } = {},
 ) {
-  popover().within(() => {
-    cy.findByText(value).click();
+  popover()
+    .first()
+    .within(() => {
+      if (search) {
+        cy.findByPlaceholderText("Search the list").type(`${value}{enter}`);
+      }
+      cy.findByText(value).click();
 
-    if (addFilter) {
-      cy.button(buttonLabel).click();
-    }
-  });
+      if (addFilter) {
+        cy.button(buttonLabel).click();
+      }
+    });
 }
 
 /**
@@ -68,10 +69,10 @@ export function selectFilterValueFromList(
 export function applyFilterByType(
   filter,
   value,
-  { buttonLabel = "Add filter" } = {},
+  { buttonLabel = "Add filter", search = false } = {},
 ) {
   if (["Is", "Is not"].includes(filter)) {
-    selectFilterValueFromList(value, { buttonLabel });
+    selectFilterValueFromList(value, { buttonLabel, search });
   } else {
     addWidgetStringFilter(value, { buttonLabel });
   }
@@ -82,8 +83,8 @@ export function applyFilterByType(
  *
  * @param {string} value
  */
-export function addDefaultStringFilter(value) {
-  enterDefaultValue(value, "Add filter");
+export function addDefaultStringFilter(value, buttonLabel = "Update filter") {
+  enterDefaultValue(value, buttonLabel);
 }
 
 // FIELD FILTER NUMBER FILTERS
@@ -108,10 +109,13 @@ export function addWidgetNumberFilter(
  * @param {array|string} value
  * @return {function}
  */
-export function addDefaultNumberFilter(value) {
-  return isBetweenFilter(value)
-    ? addBetweenFilter(value)
-    : enterDefaultValue(value);
+export function addDefaultNumberFilter(value, buttonLabel = "Add filter") {
+  if (isBetweenFilter(value)) {
+    cy.findByText("Enter a default value…").click();
+    addBetweenFilter(value, buttonLabel);
+  } else {
+    enterDefaultValue(value, buttonLabel);
+  }
 }
 
 // UI PATTERNS
@@ -157,9 +161,10 @@ export function closeEntryForm() {
  */
 function addBetweenFilter([low, high] = [], buttonLabel = "Add filter") {
   popover().within(() => {
-    cy.get("input").first().type(`${low}{enter}`);
+    cy.get("input").first().type(`${low}`);
 
-    cy.get("input").last().type(`${high}{enter}`);
+    // eslint-disable-next-line no-unsafe-element-filtering
+    cy.get("input").last().type(`${high}`);
   });
 
   cy.button(buttonLabel).click();
@@ -170,7 +175,7 @@ function addBetweenFilter([low, high] = [], buttonLabel = "Add filter") {
  * @param {string} value
  */
 function addSimpleNumberFilter(value, buttonLabel = "Add filter") {
-  cy.findByPlaceholderText("Enter a number").type(`${value}{enter}`);
+  cy.findByPlaceholderText("Enter a number").type(`${value}`);
   cy.button(buttonLabel).click();
 }
 
@@ -180,7 +185,7 @@ function addSimpleNumberFilter(value, buttonLabel = "Add filter") {
  */
 function enterDefaultValue(value, buttonLabel = "Add filter") {
   cy.findByText("Enter a default value…").click();
-  cy.findByPlaceholderText("Enter a default value…").type(`${value}{enter}`);
+  cy.findByPlaceholderText("Enter a default value…").type(`${value}`).blur();
   cy.button(buttonLabel).click();
 }
 
@@ -188,7 +193,11 @@ function enterDefaultValue(value, buttonLabel = "Add filter") {
  * @param {string} searchTerm
  * @param {string} result
  */
-export function pickDefaultValue(searchTerm, result) {
+export function pickDefaultValue(
+  searchTerm,
+  result,
+  buttonLabel = "Add filter",
+) {
   cy.findByText("Enter a default value…").click();
   cy.findByPlaceholderText("Enter a default value…").type(searchTerm);
 
@@ -200,9 +209,9 @@ export function pickDefaultValue(searchTerm, result) {
   // is to make sure the string is "visible" before acting on it.
   // This seems to help with the flakiness.
   //
-  cy.findByTestId(`${result}-filter-value`).should("be.visible").click();
+  cy.findByLabelText(result).should("be.visible").click();
 
-  cy.button("Add filter").click();
+  cy.button(buttonLabel).click();
 }
 
 /**

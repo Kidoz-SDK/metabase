@@ -1,9 +1,7 @@
-import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { renderWithProviders } from "__support__/ui";
-import { color } from "metabase/lib/colors";
-import type { ParameterValueOrArray } from "metabase-types/api";
+import { renderWithProviders, screen } from "__support__/ui";
+import type { ParameterValuesMap } from "metabase-types/api";
 import { createMockDashboardState } from "metabase-types/store/mocks";
 
 import { Text } from "../Text";
@@ -26,7 +24,7 @@ const defaultProps = {
 
 interface SetupOpts {
   settings?: Settings;
-  parameterValues?: Record<string, ParameterValueOrArray>;
+  parameterValues?: ParameterValuesMap;
 }
 
 const setup = ({ parameterValues, ...options }: SetupOpts = {}) => {
@@ -112,8 +110,8 @@ describe("Text", () => {
           "You can use Markdown here, and include variables {{like_this}}",
         );
         expect(screen.getByTestId("editing-dashboard-text-container"))
-          .toHaveStyle(`border: 1px solid ${color("brand")};
-                        color: ${color("text-light")};`);
+          .toHaveStyle(`border: 1px solid var(--mb-color-brand);
+                        color: var(--mb-color-text-light);`);
       });
 
       it("should preview with text when it has content", () => {

@@ -2,11 +2,15 @@ import { waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import fetchMock from "fetch-mock";
 
-import { setupEnterprisePlugins } from "__support__/enterprise";
+import {
+  setupEnterpriseOnlyPlugin,
+  setupEnterprisePlugins,
+} from "__support__/enterprise";
 import {
   setupPropertiesEndpoints,
   setupSettingsEndpoints,
 } from "__support__/server-mocks";
+import { mockSettings } from "__support__/settings";
 import { renderWithProviders, screen } from "__support__/ui";
 import type {
   SettingDefinition,
@@ -18,7 +22,6 @@ import {
   createMockTokenFeatures,
 } from "metabase-types/api/mocks";
 import {
-  createMockSettingsState,
   createMockSetupState,
   createMockState,
 } from "metabase-types/store/mocks";
@@ -29,13 +32,13 @@ import type { SetupStep } from "../types";
 export interface SetupOpts {
   step?: SetupStep;
   tokenFeatures?: TokenFeatures;
-  hasEnterprisePlugins?: boolean;
+  enterprisePlugins?: Parameters<typeof setupEnterpriseOnlyPlugin>[0][] | "*";
   settingOverrides?: SettingDefinition[];
 }
 
 export async function setup({
   tokenFeatures = createMockTokenFeatures(),
-  hasEnterprisePlugins = false,
+  enterprisePlugins,
   settingOverrides = [],
 }: SetupOpts = {}) {
   localStorage.clear();
@@ -45,17 +48,23 @@ export async function setup({
     setup: createMockSetupState({
       step: "welcome",
     }),
-    settings: createMockSettingsState({
-      "token-features": tokenFeatures,
-      "available-locales": [["en", "English"]],
-    }),
+    settings: mockSettings(
+      createMockSettings({
+        "token-features": tokenFeatures,
+        "available-locales": [["en", "English"]],
+      }),
+    ),
   });
 
-  if (hasEnterprisePlugins) {
-    setupEnterprisePlugins();
+  if (enterprisePlugins) {
+    if (enterprisePlugins === "*") {
+      setupEnterprisePlugins();
+    } else {
+      enterprisePlugins.forEach(setupEnterpriseOnlyPlugin);
+    }
   }
 
-  fetchMock.post("path:/api/util/password_check", { valid: true });
+  fetchMock.post("path:/api/session/password-check", { valid: true });
   fetchMock.post("path:/api/setup", {});
   fetchMock.put("path:/api/setting/anon-tracking-enabled", 200);
   setupPropertiesEndpoints(
@@ -147,12 +156,16 @@ export const expectSectionsToHaveLabelsInOrder = ({
 };
 
 export const getLastSettingsPutPayload = async () => {
-  const lastSettingsCall = fetchMock.lastCall("path:/api/setting", {
+  const settingsCalls = fetchMock.callHistory.calls("path:/api/setting", {
     method: "PUT",
   });
+  const lastSettingsCall = settingsCalls[settingsCalls.length - 1];
 
   expect(lastSettingsCall).toBeTruthy();
-  expect(lastSettingsCall![1]).toBeTruthy();
+  expect(lastSettingsCall.options?.body).toBeTruthy();
 
-  return JSON.parse((await lastSettingsCall![1]!.body!) as string);
+  return JSON.parse((await lastSettingsCall.options!.body!) as string);
 };
+
+export const skipTokenStep = async (name = "Skip") =>
+  await userEvent.click(screen.getByRole("button", { name }));

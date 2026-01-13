@@ -1,41 +1,43 @@
-import { assoc, dissoc, assocIn } from "icepick";
+import { assoc, dissoc } from "icepick";
 import { parse } from "url";
 
 import { createMockMetadata } from "__support__/metadata";
 import { deserializeCardFromUrl } from "metabase/lib/card";
+import * as Lib from "metabase-lib";
 import Question from "metabase-lib/v1/Question";
 import NativeQuery from "metabase-lib/v1/queries/NativeQuery";
-import StructuredQuery from "metabase-lib/v1/queries/StructuredQuery";
 import * as ML_Urls from "metabase-lib/v1/urls";
 import {
   createMockColumn,
   createMockDatasetData,
 } from "metabase-types/api/mocks";
 import {
-  createOrdersTable,
-  createPeopleTable,
-  createProductsTable,
-  createReviewsTable,
-  createSampleDatabase,
-  createOrdersIdField,
-  createOrdersUserIdField,
-  createOrdersProductIdField,
-  createOrdersSubtotalField,
-  createOrdersTaxField,
-  createOrdersTotalField,
-  createOrdersDiscountField,
-  createOrdersCreatedAtField,
-  createOrdersQuantityField,
   ORDERS,
   ORDERS_ID,
   PRODUCTS,
   PRODUCTS_ID,
   SAMPLE_DB_ID,
+  createOrdersCreatedAtField,
+  createOrdersDiscountField,
+  createOrdersIdField,
+  createOrdersProductIdField,
+  createOrdersQuantityField,
+  createOrdersSubtotalField,
+  createOrdersTable,
+  createOrdersTaxField,
+  createOrdersTotalField,
+  createOrdersUserIdField,
+  createPeopleTable,
+  createProductsTable,
+  createReviewsTable,
+  createSampleDatabase,
 } from "metabase-types/api/mocks/presets";
 
 const metadata = createMockMetadata({
   databases: [createSampleDatabase()],
 });
+
+const metadataProvider = Lib.metadataProvider(SAMPLE_DB_ID, metadata);
 
 const metadata_without_order_pk = createMockMetadata({
   databases: [
@@ -272,12 +274,15 @@ describe("Question", () => {
       it("has an id", () => {
         expect(orders_raw_question.id()).toBe(orders_raw_card.id);
       });
+
       it("has a name", () => {
         expect(orders_raw_question.displayName()).toBe(orders_raw_card.name);
       });
+
       it("is runnable", () => {
         expect(orders_raw_question.canRun()).toBe(true);
       });
+
       it("has correct display settings", () => {
         expect(orders_raw_question.display()).toBe("table");
       });
@@ -286,17 +291,8 @@ describe("Question", () => {
     describe("Question.create(...)", () => {
       const question = Question.create({
         metadata,
-        databaseId: SAMPLE_DB_ID,
-        tableId: ORDERS_ID,
-      });
-
-      it("contains an empty structured query", () => {
-        expect(
-          question.legacyQuery({ useStructuredQuery: true }).constructor,
-        ).toBe(StructuredQuery);
-        expect(
-          question.legacyQuery({ useStructuredQuery: true }).constructor,
-        ).toBe(StructuredQuery);
+        DEPRECATED_RAW_MBQL_databaseId: SAMPLE_DB_ID,
+        DEPRECATED_RAW_MBQL_tableId: ORDERS_ID,
       });
 
       it("defaults to table display", () => {
@@ -311,18 +307,22 @@ describe("Question", () => {
         expect(orders_raw_question.canRun()).toBe(true);
       });
     });
+
     describe("canWrite()", () => {
       it("You should be able to write to a question you have permissions to", () => {
         expect(orders_raw_question.canWrite()).toBe(true);
       });
+
       it("You should not be able to write to a question you don't have permissions to", () => {
         expect(orders_count_by_id_question.canWrite()).toBe(false);
       });
     });
+
     describe("isSaved()", () => {
       it("A newly created query doesn't have an id and shouldn't be marked as isSaved()", () => {
         expect(base_question.isSaved()).toBe(false);
       });
+
       it("A saved question does have an id and should be marked as isSaved()", () => {
         expect(orders_raw_question.isSaved()).toBe(true);
       });
@@ -330,43 +330,36 @@ describe("Question", () => {
   });
 
   describe("At the heart of a question is an MBQL query.", () => {
-    describe("legacyQuery()", () => {
+    describe("legacyNativeQuery()", () => {
       it("returns a correct class instance for structured query", () => {
-        // This is a bit wack, and the repetitive naming is pretty confusing.
-        const query = orders_raw_question.legacyQuery({
-          useStructuredQuery: true,
-        });
-        expect(query instanceof StructuredQuery).toBe(true);
+        expect(orders_raw_question.legacyNativeQuery()).toBeUndefined();
       });
+
       it("returns a correct class instance for native query", () => {
-        const query = native_orders_count_question.legacyQuery({
-          useStructuredQuery: true,
-        });
+        const query = native_orders_count_question.legacyNativeQuery();
         expect(query instanceof NativeQuery).toBe(true);
       });
     });
+
     describe("setQuery(query)", () => {
       it("updates the dataset_query of card", () => {
-        const rawQuery = native_orders_count_question.legacyQuery({
-          useStructuredQuery: true,
-        });
+        const rawQuery = native_orders_count_question.legacyNativeQuery();
         const newRawQuestion = orders_raw_question.setLegacyQuery(rawQuery);
-        expect(
-          newRawQuestion.legacyQuery({ useStructuredQuery: true }) instanceof
-            NativeQuery,
-        ).toBe(true);
+        expect(newRawQuestion.legacyNativeQuery() instanceof NativeQuery).toBe(
+          true,
+        );
       });
     });
+
     describe("setDatasetQuery(datasetQuery)", () => {
       it("updates the dataset_query of card", () => {
         const rawQuestion = orders_raw_question.setDatasetQuery(
           native_orders_count_question.datasetQuery(),
         );
 
-        expect(
-          rawQuestion.legacyQuery({ useStructuredQuery: true }) instanceof
-            NativeQuery,
-        ).toBe(true);
+        expect(rawQuestion.legacyNativeQuery() instanceof NativeQuery).toBe(
+          true,
+        );
       });
     });
   });
@@ -379,6 +372,7 @@ describe("Question", () => {
         expect(newQuestion.id()).toBeUndefined();
         expect(newQuestion.displayName()).toBeUndefined();
       });
+
       it("does not change the original", () => {
         expect(orders_raw_question.id()).toBeDefined();
         expect(orders_raw_question.displayName()).toBeDefined();
@@ -395,6 +389,7 @@ describe("Question", () => {
         expect(tableQuestion.display()).toBe("table");
       });
     });
+
     describe("setDisplay(display)", () => {
       it("sets the card's visualization type", () => {
         // Not sure I'm a huge fan of magic strings here.
@@ -403,6 +398,7 @@ describe("Question", () => {
         expect(orders_raw_question.display()).not.toBe("scalar");
       });
     });
+
     describe("setDefaultDisplay", () => {
       it("sets display to 'scalar' for order count", () => {
         const question = orders_count_question.setDefaultDisplay();
@@ -555,6 +551,7 @@ describe("Question", () => {
         const newQuestion = orders_raw_question.withoutNameAndId();
         expect(newQuestion.isDirtyComparedTo(orders_raw_question)).toBe(true);
       });
+
       it("Changing vis settings makes the question dirty", () => {
         const underlyingDataQuestion = orders_count_question.setSettings({
           "table.pivot": false,
@@ -563,12 +560,36 @@ describe("Question", () => {
           underlyingDataQuestion.isDirtyComparedTo(orders_count_question),
         ).toBe(true);
       });
+
+      it("questions that differ only by randomized idents are considered equal", () => {
+        const question1 = Question.create({
+          DEPRECATED_RAW_MBQL_databaseId: SAMPLE_DB_ID,
+          DEPRECATED_RAW_MBQL_tableId: ORDERS_ID,
+        });
+        const question2 = Question.create({
+          DEPRECATED_RAW_MBQL_databaseId: SAMPLE_DB_ID,
+          DEPRECATED_RAW_MBQL_tableId: ORDERS_ID,
+        });
+        expect(question1.isDirtyComparedTo(question2)).toBe(false);
+      });
+
+      it("questions that differ by query only are not considered equal", () => {
+        const question1 = Question.create({
+          DEPRECATED_RAW_MBQL_databaseId: SAMPLE_DB_ID,
+          DEPRECATED_RAW_MBQL_tableId: PRODUCTS_ID,
+        });
+        const question2 = Question.create({
+          DEPRECATED_RAW_MBQL_databaseId: SAMPLE_DB_ID,
+          DEPRECATED_RAW_MBQL_tableId: ORDERS_ID,
+        });
+        expect(question1.isDirtyComparedTo(question2)).toBe(true);
+      });
     });
   });
 
   describe("URLs", () => {
     const adhocUrl =
-      "/question#eyJkYXRhc2V0X3F1ZXJ5Ijp7ImRhdGFiYXNlIjoxLCJxdWVyeSI6eyJzb3VyY2UtdGFibGUiOjJ9LCJ0eXBlIjoicXVlcnkifSwiZGlzcGxheSI6InRhYmxlIiwibmFtZSI6IlJhdyBvcmRlcnMgZGF0YSIsInZpc3VhbGl6YXRpb25fc2V0dGluZ3MiOnt9fQ==";
+      "/question#eyJkYXRhc2V0X3F1ZXJ5Ijp7ImRhdGFiYXNlIjoxLCJsaWIvdHlwZSI6Im1icWwvcXVlcnkiLCJzdGFnZXMiOlt7ImxpYi90eXBlIjoibWJxbC5zdGFnZS9tYnFsIiwic291cmNlLXRhYmxlIjoyfV19LCJkaXNwbGF5IjoidGFibGUiLCJuYW1lIjoiUmF3IG9yZGVycyBkYXRhIiwidmlzdWFsaXphdGlvbl9zZXR0aW5ncyI6e319";
 
     // Covered a lot in query_builder/actions.spec.js, just very basic cases here
     // (currently getUrl has logic that is strongly tied to the logic query builder Redux actions)
@@ -580,6 +601,7 @@ describe("Question", () => {
         );
         expect(ML_Urls.getUrl(question)).toBe("/question/1-raw-orders-data");
       });
+
       it("returns a URL with hash for an unsaved question", () => {
         const question = new Question(dissoc(orders_raw_card, "id"), metadata);
         expect(ML_Urls.getUrl(question)).toBe(adhocUrl);
@@ -593,208 +615,6 @@ describe("Question", () => {
       );
 
       expect(ML_Urls.getUrl(question)).toBe(adhocUrl);
-    });
-  });
-
-  describe("Question.prototype.syncColumnsAndSettings", () => {
-    let question;
-    const cols = [
-      {
-        display_name: "num",
-        source: "native",
-        field_ref: [
-          "field",
-          "num",
-          {
-            "base-type": "type/Float",
-          },
-        ],
-        name: "num",
-        base_type: "type/Float",
-      },
-      {
-        display_name: "text",
-        source: "native",
-        field_ref: [
-          "field",
-          "text",
-          {
-            "base-type": "type/Text",
-          },
-        ],
-        name: "text",
-        base_type: "type/Text",
-      },
-    ];
-
-    const vizSettingCols = [
-      {
-        name: "num",
-        fieldRef: ["field", "num", { "base-type": "type/Float" }],
-        enabled: true,
-      },
-      {
-        name: "text",
-        fieldRef: ["field", "text", { "base-type": "type/Text" }],
-        enabled: true,
-      },
-    ];
-
-    beforeEach(() => {
-      question = native_orders_count_question.clone();
-      question.settings = jest.fn(() => ({}));
-      question.setSettings = jest.fn();
-    });
-
-    describe("when columns have not been defined", () => {
-      it("should do nothing when given no cols", () => {
-        question.syncColumnsAndSettings({});
-        question.syncColumnsAndSettings({ data: { cols: [] } });
-        question.syncColumnsAndSettings({ data: { cols } });
-
-        expect(question.setSettings).not.toHaveBeenCalled();
-      });
-
-      it("should do nothing when given cols", () => {
-        question.syncColumnsAndSettings({ data: { cols } });
-
-        expect(question.setSettings).not.toHaveBeenCalled();
-      });
-    });
-
-    describe("after vizSetting columns have been defined", () => {
-      beforeEach(() => {
-        question.settings.mockImplementation(() => ({
-          "table.columns": vizSettingCols,
-        }));
-      });
-
-      // Adding a column with same name is covered as well, as name is generated at FE and it will
-      // be unique (e.g. foo -> foo_2)
-      it("should handle the addition and removal of columns", () => {
-        question.syncColumnsAndSettings({
-          data: {
-            cols: [
-              ...cols.slice(1),
-              {
-                display_name: "foo",
-                source: "native",
-                field_ref: [
-                  "field",
-                  "foo",
-                  {
-                    "base-type": "type/Float",
-                  },
-                ],
-                name: "foo",
-                base_type: "type/Float",
-              },
-            ],
-          },
-        });
-
-        expect(question.setSettings).toHaveBeenCalledWith({
-          "table.columns": [
-            ...vizSettingCols.slice(1),
-            {
-              name: "foo",
-              key: '["name","foo"]',
-              fieldRef: [
-                "field",
-                "foo",
-                {
-                  "base-type": "type/Float",
-                },
-              ],
-              enabled: true,
-            },
-          ],
-        });
-      });
-
-      it("should handle the mutation of extraneous column props", () => {
-        const updatedColumn = {
-          display_name: "num with mutated display_name",
-          source: "native",
-          field_ref: [
-            "field",
-            "foo",
-            {
-              "base-type": "type/Float",
-            },
-          ],
-          name: "foo",
-          base_type: "type/Float",
-        };
-        question.syncColumnsAndSettings({
-          data: {
-            cols: [updatedColumn, ...cols.slice(1)],
-          },
-        });
-
-        expect(question.setSettings).toHaveBeenCalledWith({
-          "table.columns": [
-            ...vizSettingCols.slice(1),
-            {
-              enabled: true,
-              fieldRef: [
-                "field",
-                "foo",
-                {
-                  "base-type": "type/Float",
-                },
-              ],
-              key: '["name","foo"]',
-              name: "foo",
-            },
-          ],
-        });
-      });
-
-      it("should handle the mutation of a field_ref on an existing column", () => {
-        question.syncColumnsAndSettings({
-          data: {
-            cols: [
-              {
-                display_name: "foo",
-                source: "native",
-                field_ref: [
-                  "field",
-                  "foo",
-                  {
-                    "base-type": "type/Integer",
-                  },
-                ],
-                name: "foo",
-                base_type: "type/Integer",
-              },
-              ...cols.slice(1),
-            ],
-          },
-        });
-
-        expect(question.setSettings).toHaveBeenCalledWith({
-          "table.columns": [
-            ...vizSettingCols.slice(1),
-            {
-              name: "foo",
-              fieldRef: ["field", "foo", { "base-type": "type/Integer" }],
-              key: '["name","foo"]',
-              enabled: true,
-            },
-          ],
-        });
-      });
-
-      it("shouldn't update settings if order of columns has changed", () => {
-        question.syncColumnsAndSettings({
-          data: {
-            cols: [cols[1], cols[0]],
-          },
-        });
-
-        expect(question.setSettings).not.toHaveBeenCalled();
-      });
     });
   });
 
@@ -894,6 +714,7 @@ describe("Question", () => {
               id: PRODUCTS.CATEGORY,
             }),
           ],
+          isMultiSelect: true,
           hasVariableTemplateTagTarget: false,
           id: "bbb",
           name: "Foo",
@@ -904,12 +725,13 @@ describe("Question", () => {
         },
         {
           default: undefined,
+          isMultiSelect: false,
           hasVariableTemplateTagTarget: true,
           id: "aaa",
           name: "Bar",
           slug: "bar",
           target: ["variable", ["template-tag", "bar"]],
-          type: "category",
+          type: "string/=",
           value: null,
         },
       ]);
@@ -961,9 +783,11 @@ describe("Question", () => {
 
   describe("Question.prototype.convertParametersToMbql", () => {
     it("should do nothing to a native question", () => {
-      expect(native_orders_count_question._convertParametersToMbql()).toBe(
-        native_orders_count_question,
-      );
+      expect(
+        native_orders_count_question._convertParametersToMbql({
+          isComposed: false,
+        }),
+      ).toBe(native_orders_count_question);
     });
 
     it("should convert a question with parameters into a new question with filters", () => {
@@ -988,21 +812,12 @@ describe("Question", () => {
           foo_id: "abc",
         });
 
-      const questionWithFilters = question._convertParametersToMbql();
+      const questionWithFilters = question._convertParametersToMbql({
+        isComposed: false,
+      });
 
-      expect(questionWithFilters.datasetQuery().query.filter).toEqual([
-        "starts-with",
-        [
-          "field",
-          PRODUCTS.CATEGORY,
-          {
-            "base-type": "type/Text",
-            "source-field": ORDERS.PRODUCT_ID,
-          },
-        ],
-        "abc",
-        { "case-sensitive": false },
-      ]);
+      expect(Lib.stageCount(questionWithFilters.query())).toBe(1);
+      expect(Lib.filters(questionWithFilters.query())).toHaveLength(1);
     });
   });
 
@@ -1024,7 +839,7 @@ describe("Question", () => {
         id: 3,
         slug: "param_date",
         type: "date/month",
-        target: ["dimension", ["field", 3, null]],
+        target: ["dimension", ["field", PRODUCTS.CREATED_AT, null]],
       },
       {
         id: 4,
@@ -1042,17 +857,20 @@ describe("Question", () => {
 
     const card = {
       id: 1,
-      dataset_query: {
-        type: "query",
-        query: {
-          "source-table": 1,
-        },
-        database: 1,
-      },
+      dataset_query: Lib.toJsQuery(
+        Lib.fromJsQuery(metadataProvider, {
+          type: "query",
+          query: {
+            "source-table": PRODUCTS_ID,
+          },
+          database: SAMPLE_DB_ID,
+        }),
+      ),
     };
 
     describe("with structured card", () => {
       const question = new Question(card, metadata);
+      const originalQuestion = question;
 
       it("should return question URL with no parameters", () => {
         const parameters = [];
@@ -1060,6 +878,7 @@ describe("Question", () => {
 
         const url = ML_Urls.getUrlWithParameters(
           question,
+          originalQuestion,
           parameters,
           parameterValues,
         );
@@ -1072,76 +891,66 @@ describe("Question", () => {
       });
 
       it("should return question URL with string MBQL filter added", () => {
-        const url = ML_Urls.getUrlWithParameters(question, parameters, {
-          1: "bar",
-        });
+        const url = ML_Urls.getUrlWithParameters(
+          question,
+          originalQuestion,
+          parameters,
+          {
+            1: "bar",
+          },
+        );
 
-        const deserializedCard = {
-          ...assocIn(
-            dissoc(card, "id"),
-            ["dataset_query", "query", "filter"],
-            ["=", ["field", 1, { "base-type": "type/Text" }], "bar"],
-          ),
-          original_card_id: card.id,
-        };
-
-        expect(parseUrl(url)).toEqual({
-          pathname: "/question",
-          query: {},
-          card: deserializedCard,
-        });
+        const parsedUrl = parseUrl(url);
+        const parsedQuestion = new Question(
+          parsedUrl.card,
+          question.metadata(),
+        );
+        expect(parsedUrl.pathname).toEqual("/question");
+        expect(parsedUrl.query).toEqual({});
+        expect(Lib.filters(parsedQuestion.query(), -1)).toHaveLength(1);
       });
 
       it("should return question URL with number MBQL filter added", () => {
-        const url = ML_Urls.getUrlWithParameters(question, parameters, {
-          5: 123,
-        });
-
-        expect(parseUrl(url)).toEqual({
-          pathname: "/question",
-          query: {},
-          card: {
-            ...assocIn(
-              dissoc(card, "id"),
-              ["dataset_query", "query", "filter"],
-              ["=", ["field", 2, { "base-type": "type/Float" }], 123],
-            ),
-            original_card_id: card.id,
+        const url = ML_Urls.getUrlWithParameters(
+          question,
+          originalQuestion,
+          parameters,
+          {
+            5: 123,
           },
-        });
+        );
+
+        const parsedUrl = parseUrl(url);
+        const parsedQuestion = new Question(
+          parsedUrl.card,
+          question.metadata(),
+        );
+        expect(Lib.filters(parsedQuestion.query(), -1)).toHaveLength(1);
       });
 
       it("should return question URL with date MBQL filter added", () => {
-        const url = ML_Urls.getUrlWithParameters(question, parameters, {
-          3: "2017-05",
-        });
-
-        expect(parseUrl(url)).toEqual({
-          pathname: "/question",
-          query: {},
-          card: {
-            ...assocIn(
-              dissoc(card, "id"),
-              ["dataset_query", "query", "filter"],
-              [
-                "=",
-                [
-                  "field",
-                  3,
-                  { "base-type": "type/BigInteger", "temporal-unit": "month" },
-                ],
-                "2017-05-01",
-              ],
-            ),
-            original_card_id: card.id,
+        const url = ML_Urls.getUrlWithParameters(
+          question,
+          originalQuestion,
+          parameters,
+          {
+            3: "2017-05",
           },
-        });
+        );
+
+        const parsedUrl = parseUrl(url);
+        const parsedQuestion = new Question(
+          parsedUrl.card,
+          question.metadata(),
+        );
+        expect(Lib.filters(parsedQuestion.query(), -1)).toHaveLength(1);
       });
 
       it("should include objectId in a URL", () => {
         const OBJECT_ID = "5";
         const url = ML_Urls.getUrlWithParameters(
           question,
+          originalQuestion,
           parameters,
           { 1: "bar" },
           { objectId: OBJECT_ID },
@@ -1157,11 +966,17 @@ describe("Question", () => {
 
     describe("with structured question & no permissions", () => {
       const question = new Question(card);
+      const originalQuestion = question;
 
       it("should return a card with attached parameters and parameter values as query params", () => {
-        const url = ML_Urls.getUrlWithParameters(question, parameters, {
-          1: "bar",
-        });
+        const url = ML_Urls.getUrlWithParameters(
+          question,
+          originalQuestion,
+          parameters,
+          {
+            1: "bar",
+          },
+        );
 
         const deserializedCard = {
           ...card,
@@ -1186,6 +1001,7 @@ describe("Question", () => {
       it("should not include objectId in a URL", () => {
         const url = ML_Urls.getUrlWithParameters(
           question,
+          originalQuestion,
           parameters,
           { 1: "bar" },
           { objectId: 5 },
@@ -1199,6 +1015,7 @@ describe("Question", () => {
       const cardWithTextFilter = {
         id: 1,
         dataset_query: {
+          database: SAMPLE_DB_ID,
           type: "native",
           native: {
             "template-tags": {
@@ -1222,6 +1039,7 @@ describe("Question", () => {
       const cardWithFieldFilter = {
         id: 2,
         dataset_query: {
+          database: SAMPLE_DB_ID,
           type: "native",
           native: {
             "template-tags": {
@@ -1232,9 +1050,15 @@ describe("Question", () => {
       };
 
       const question = new Question(cardWithTextFilter, metadata);
+      const originalQuestion = question;
 
       it("should return question URL when there are no parameters", () => {
-        const url = ML_Urls.getUrlWithParameters(question, [], {});
+        const url = ML_Urls.getUrlWithParameters(
+          question,
+          originalQuestion,
+          [],
+          {},
+        );
         expect(parseUrl(url)).toEqual({
           pathname: "/question/1",
           query: {},
@@ -1245,6 +1069,7 @@ describe("Question", () => {
       it("should return question URL with query string parameter when there is a value for a parameter mapped to the question's variable", () => {
         const url = ML_Urls.getUrlWithParameters(
           question,
+          originalQuestion,
           parametersForNativeQ,
           {
             1: "bar",
@@ -1262,6 +1087,7 @@ describe("Question", () => {
         const question = new Question(cardWithFieldFilter, metadata);
         const url = ML_Urls.getUrlWithParameters(
           question,
+          originalQuestion,
           parametersForNativeQ,
           {
             5: "111",
@@ -1278,6 +1104,7 @@ describe("Question", () => {
       it("should not include objectId in a URL", () => {
         const url = ML_Urls.getUrlWithParameters(
           question,
+          originalQuestion,
           parametersForNativeQ,
           {
             1: "bar",
@@ -1394,6 +1221,8 @@ describe("Question", () => {
   describe("Question.generateQueryDescription", () => {
     it("should work with multiple aggregations", () => {
       const question = base_question.setDatasetQuery({
+        type: "query",
+        database: SAMPLE_DB_ID,
         query: {
           "source-table": ORDERS_ID,
           aggregation: [["count"], ["sum", ["field", ORDERS.TOTAL, null]]],
@@ -1406,6 +1235,8 @@ describe("Question", () => {
 
     it("should work with named aggregations", () => {
       const question = base_question.setDatasetQuery({
+        type: "query",
+        database: SAMPLE_DB_ID,
         query: {
           "source-table": ORDERS_ID,
           aggregation: [

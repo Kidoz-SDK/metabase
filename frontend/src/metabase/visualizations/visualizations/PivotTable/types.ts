@@ -1,16 +1,22 @@
-import type {
-  DatasetColumn,
-  FieldReference,
-  AggregateFieldReference,
-} from "metabase-types/api";
+import type { ClickObjectDataRow, ClickObjectDimension } from "metabase-lib";
+import type { DatasetColumn } from "metabase-types/api";
 
-export type PivotSetting = {
-  columns: FieldReference[];
-  rows: FieldReference[];
-  values: AggregateFieldReference[];
+type PivotTableClickDimension = ClickObjectDimension & {
+  colIdx?: number;
 };
 
-export type PivotTableClicked = { value: string; column: DatasetColumn };
+type PivotTableClickDataRow = ClickObjectDataRow & {
+  colIdx?: number;
+};
+
+export type PivotTableClicked = {
+  value: string;
+  colIdx?: number;
+  column?: DatasetColumn;
+  data?: PivotTableClickDataRow[];
+  dimensions?: PivotTableClickDimension[];
+};
+
 export interface HeaderItem {
   clicked: PivotTableClicked;
 

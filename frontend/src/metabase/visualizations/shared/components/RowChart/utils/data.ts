@@ -1,6 +1,6 @@
-import d3 from "d3";
-import type { Series as D3Series } from "d3-shape";
-import { stack, stackOffsetDiverging, stackOffsetExpand } from "d3-shape";
+import type { Series as D3Series } from "d3";
+import * as d3 from "d3";
+import { stack, stackOffsetDiverging, stackOffsetExpand } from "d3";
 import _ from "underscore";
 
 import { formatNullable } from "metabase/lib/formatting/nullable";
@@ -57,8 +57,8 @@ export const calculateNonStackedBars = <TDatum>(
 const patchD3StackDataForLogScale = <TDatum>(
   stackedSeries: D3Series<TDatum, string>[],
 ) => {
-  stackedSeries.forEach(series => {
-    series.forEach(datum => {
+  stackedSeries.forEach((series) => {
+    series.forEach((datum) => {
       datum.forEach((value, index) => {
         if (value === 0) {
           datum[index] = 1;
@@ -84,7 +84,7 @@ export const calculateStackedBars = <TDatum>(
   );
 
   const d3Stack = stack<TDatum>()
-    .keys(multipleSeries.map(s => s.seriesKey))
+    .keys(multipleSeries.map((s) => s.seriesKey))
     .value((datum, seriesKey) => seriesByKey[seriesKey].xAccessor(datum) ?? 0)
     .offset(StackOffsetFn[stackOffset ?? "diverging"]);
 
@@ -96,7 +96,7 @@ export const calculateStackedBars = <TDatum>(
 
   const getDatumExtent = _.memoize(
     (stackedSeries: D3Series<TDatum, string>[], datumIndex: number) => {
-      return d3.extent(stackedSeries.flatMap(series => series[datumIndex]));
+      return d3.extent(stackedSeries.flatMap((series) => series[datumIndex]));
     },
     (_series, datumIndex) => datumIndex,
   );

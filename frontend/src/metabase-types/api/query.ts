@@ -1,10 +1,11 @@
+import type { UiParameter } from "metabase-lib/v1/parameters/types";
 import type {
+  CardId,
   DatabaseId,
   FieldId,
-  TableId,
   SegmentId,
+  TableId,
   TemplateTags,
-  CardId,
 } from "metabase-types/api";
 
 export interface NativeQuery {
@@ -19,6 +20,7 @@ export interface StructuredDatasetQuery {
 
   // Database is null when missing data permissions to the database
   database: DatabaseId | null;
+  parameters?: UiParameter[];
 }
 
 export interface NativeDatasetQuery {
@@ -27,10 +29,19 @@ export interface NativeDatasetQuery {
 
   // Database is null when missing data permissions to the database
   database: DatabaseId | null;
-  parameters?: unknown[];
+  parameters?: UiParameter[];
 }
 
-export type DatasetQuery = StructuredDatasetQuery | NativeDatasetQuery;
+export type DatasetQuery = OpaqueDatasetQuery | LegacyDatasetQuery;
+
+export type LegacyDatasetQuery = StructuredDatasetQuery | NativeDatasetQuery;
+
+declare const OpaqueDatasetQuerySymbol: unique symbol;
+export type OpaqueDatasetQuery = unknown & {
+  // TODO (AlexP 10/09/25) -- replace usages of this field with Lib.databaseID and drop it from here
+  database: DatabaseId | null;
+  _opaque: typeof OpaqueDatasetQuerySymbol;
+};
 
 interface PublicStructuredDatasetQuery {
   type: "query";
@@ -43,9 +54,11 @@ interface PublicNativeDatasetQuery {
   };
 }
 
-export type PublicDatasetQuery =
+export type LegacyPublicDatasetQuery =
   | PublicStructuredDatasetQuery
   | PublicNativeDatasetQuery;
+
+export type PublicDatasetQuery = OpaqueDatasetQuery | LegacyPublicDatasetQuery;
 
 export const dateTimeAbsoluteUnits = [
   "minute",
@@ -73,8 +86,8 @@ export const dateTimeUnits = [
   ...dateTimeRelativeUnits,
 ] as const;
 
-export type DateTimeAbsoluteUnit = typeof dateTimeAbsoluteUnits[number];
-export type DateTimeRelativeUnit = typeof dateTimeRelativeUnits[number];
+export type DateTimeAbsoluteUnit = (typeof dateTimeAbsoluteUnits)[number];
+export type DateTimeRelativeUnit = (typeof dateTimeRelativeUnits)[number];
 export type DatetimeUnit =
   | "default"
   | DateTimeAbsoluteUnit
@@ -85,6 +98,7 @@ export interface ReferenceOptions {
   "temporal-unit"?: DatetimeUnit;
   "join-alias"?: string;
   "base-type"?: string;
+  "source-field"?: number;
 }
 
 type BinningOptions =
@@ -115,11 +129,17 @@ export type ReferenceOptionsKeys =
 
 type ExpressionName = string;
 
-type StringLiteral = string;
-type NumericLiteral = number;
-type DatetimeLiteral = string;
+export type StringLiteral = string;
+export type NumericLiteral = number | bigint;
+export type BooleanLiteral = boolean;
+export type DatetimeLiteral = string;
 
-type Value = null | boolean | StringLiteral | NumericLiteral | DatetimeLiteral;
+type Value =
+  | null
+  | BooleanLiteral
+  | StringLiteral
+  | NumericLiteral
+  | DatetimeLiteral;
 type OrderableValue = NumericLiteral | DatetimeLiteral;
 
 type RelativeDatetimePeriod = "current" | "last" | "next" | number;
@@ -176,7 +196,11 @@ type CommonAggregation =
   | MaxAgg
   | OffsetAgg;
 
-type MetricAgg = ["metric", CardId];
+export type MetricAgg = ["metric", CardId];
+
+export type MeasureAgg =
+  | ["measure", { "display-name"?: string }, CardId]
+  | ["measure", CardId];
 
 type InlineExpressionAgg = [
   "aggregation-options",
@@ -187,7 +211,11 @@ type InlineExpressionAgg = [
 /**
  * An aggregation MBQL clause
  */
-export type Aggregation = CommonAggregation | MetricAgg | InlineExpressionAgg;
+export type Aggregation =
+  | CommonAggregation
+  | MetricAgg
+  | MeasureAgg
+  | InlineExpressionAgg;
 
 type BreakoutClause = Breakout[];
 export type Breakout = ConcreteFieldReference;
@@ -195,8 +223,8 @@ export type Breakout = ConcreteFieldReference;
 type FilterClause = Filter;
 export type Filter = FieldFilter | CompoundFilter | NotFilter | SegmentFilter;
 
-type AndFilter = ["and", Filter, Filter];
-type OrFilter = ["or", Filter, Filter];
+type AndFilter = ["and", ...Filter[]];
+type OrFilter = ["or", ...Filter[]];
 type CompoundFilter = AndFilter | OrFilter;
 
 export type FieldFilter =
@@ -274,7 +302,7 @@ type TimeIntervalFilterOptions = {
   "include-current"?: boolean;
 };
 
-type SegmentFilter = ["segment", SegmentId];
+export type SegmentFilter = ["segment", SegmentId];
 
 type OrderByClause = Array<OrderBy>;
 export type OrderBy = ["asc" | "desc", FieldReference];
@@ -294,6 +322,7 @@ export type Join = {
   "source-query"?: StructuredQuery;
   condition: JoinCondition;
   alias?: JoinAlias;
+  ident?: string;
   strategy?: JoinStrategy;
   fields?: JoinFields;
 };
@@ -362,25 +391,40 @@ export type ExpressionClause = {
 export type Expression =
   | NumericLiteral
   | StringLiteral
-  | boolean
-  | [ExpressionOperator, ExpressionOperand]
-  | [ExpressionOperator, ExpressionOperand, ExpressionOperand]
-  | ["offset", OffsetOptions, ExpressionOperand, NumericLiteral]
-  | [
-      ExpressionOperator,
-      ExpressionOperand,
-      ExpressionOperand,
-      ExpressionOperand,
-    ]
-  | ConcreteFieldReference;
-
-type ExpressionOperator = string;
-type ExpressionOperand =
+  | BooleanLiteral
+  | OffsetExpression
+  | CaseOrIfExpression
+  | CallExpression
   | ConcreteFieldReference
-  | NumericLiteral
-  | StringLiteral
-  | boolean
-  | Expression;
+  | Filter
+  | ValueExpression;
+
+export type CallOptions = { [key: string]: unknown };
+export type CallExpression =
+  | [ExpressionOperator, ...ExpressionOperand[]]
+  | [ExpressionOperator, ...ExpressionOperand[], CallOptions];
+
+export type CaseOperator = "case";
+export type IfOperator = "if";
+export type CaseOrIfOperator = CaseOperator | IfOperator;
+
+export type CaseOptions = { default?: Expression };
+
+export type CaseOrIfExpression =
+  | [CaseOrIfOperator, [Expression, Expression][]]
+  | [CaseOrIfOperator, [Expression, Expression][], CaseOptions];
+
+export type ValueExpression = ["value", Value, CallOptions | null];
+
+export type OffsetExpression = [
+  "offset",
+  OffsetOptions,
+  Expression,
+  NumericLiteral,
+];
+
+export type ExpressionOperator = string;
+export type ExpressionOperand = Expression | CallOptions;
 
 type FieldsClause = ConcreteFieldReference[];
 

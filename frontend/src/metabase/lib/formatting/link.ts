@@ -1,3 +1,4 @@
+import { isSameOrSiteUrlOrigin } from "metabase/lib/dom";
 import {
   formatValue,
   getUrlProtocol,
@@ -45,7 +46,10 @@ export function renderLinkTextForClick(
   );
 }
 
-function isSafeUrl(urlString: string): boolean {
+export function isSafeUrl(urlString: string): boolean {
+  if (isSameOrSiteUrlOrigin(urlString)) {
+    return true;
+  }
   const protocol = getUrlProtocol(urlString);
   return protocol != null && isDefaultLinkProtocol(protocol);
 }
@@ -63,7 +67,10 @@ export function renderLinkURLForClick(
     ) => {
       const valueForLinkTemplate = formatValueForLinkTemplate(value, column);
 
-      if ([null, NULL_DISPLAY_VALUE].includes(valueForLinkTemplate)) {
+      if (
+        valueForLinkTemplate == null ||
+        valueForLinkTemplate === NULL_DISPLAY_VALUE
+      ) {
         return "";
       }
 
@@ -81,12 +88,16 @@ export function renderLinkURLForClick(
       // Also, this only makes sense when such parameters are at the beginning of the link template.
       const isColumnValue = column != null;
       const isStart = offset === 0;
+      const isStringValue = typeof valueForLinkTemplate === "string";
       const shouldSkipEncoding =
-        isColumnValue && isStart && isSafeUrl(valueForLinkTemplate);
+        isColumnValue &&
+        isStart &&
+        isStringValue &&
+        isSafeUrl(valueForLinkTemplate);
 
       return shouldSkipEncoding
         ? valueForLinkTemplate
-        : encodeURIComponent(valueForLinkTemplate);
+        : encodeURIComponent(String(valueForLinkTemplate));
     },
   );
 }

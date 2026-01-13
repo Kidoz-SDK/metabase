@@ -1,14 +1,14 @@
 import type { ReactNode } from "react";
+import { c } from "ttag";
 
-import { Icon } from "metabase/ui";
+import { Box, Flex, Group, Icon } from "metabase/ui";
 
 import {
   HeaderBackIcon,
   HeaderCloseButton,
-  HeaderMenu,
-  HeaderRoot,
-  HeaderTitle,
   HeaderLink,
+  HeaderMenu,
+  HeaderTitle,
 } from "./ModalHeader.styled";
 
 export interface ModalHeaderProps {
@@ -16,6 +16,10 @@ export interface ModalHeaderProps {
   children?: ReactNode;
   onClose?: () => void;
   onGoBack?: () => void;
+  pathOptions?: {
+    showPath: boolean;
+    collectionName: string;
+  };
 }
 
 const ModalHeader = ({
@@ -23,20 +27,30 @@ const ModalHeader = ({
   children,
   onClose,
   onGoBack,
+  pathOptions,
 }: ModalHeaderProps): JSX.Element => {
   return (
-    <HeaderRoot>
-      <HeaderLink onClick={onGoBack}>
-        {onGoBack && <HeaderBackIcon name="chevronleft" />}
-        <HeaderTitle tooltipMaxWidth="100%">{title}</HeaderTitle>
-      </HeaderLink>
-      {children && <HeaderMenu>{children}</HeaderMenu>}
-      {onClose && (
-        <HeaderCloseButton onClick={onClose}>
-          <Icon name="close" />
-        </HeaderCloseButton>
+    <Box p="xl" pb={0}>
+      <Flex align="center">
+        <HeaderLink onClick={onGoBack}>
+          {onGoBack && <HeaderBackIcon name="chevronleft" />}
+          <HeaderTitle tooltipProps={{ w: "auto" }}>{title}</HeaderTitle>
+        </HeaderLink>
+        {children && <HeaderMenu>{children}</HeaderMenu>}
+        {onClose && (
+          <HeaderCloseButton onClick={onClose}>
+            <Icon name="close" />
+          </HeaderCloseButton>
+        )}
+      </Flex>
+      {pathOptions?.showPath && (
+        <Group gap="xs" align="center">
+          {c("Refers to: 'Events' in a collection").t`in`}
+          <Icon name="folder" c="text-light" />
+          {pathOptions.collectionName}
+        </Group>
       )}
-    </HeaderRoot>
+    </Box>
   );
 };
 

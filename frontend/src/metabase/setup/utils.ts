@@ -6,14 +6,14 @@ import { UtilApi } from "metabase/services";
 import type { LocaleData } from "metabase-types/api";
 import type { Locale } from "metabase-types/store";
 
-import { SUBSCRIBE_URL, SUBSCRIBE_TOKEN } from "./constants";
+import { SUBSCRIBE_TOKEN, SUBSCRIBE_URL } from "./constants";
 
 export const getLocales = (
   localeData: LocaleData[] = [["en", "English"]],
 ): Locale[] => {
   return _.chain(localeData)
     .map(([code, name]) => ({ code, name }))
-    .sortBy(locale => locale.name)
+    .sortBy((locale) => locale.name)
     .value();
 };
 
@@ -47,10 +47,19 @@ export const validatePassword = async (password: string) => {
   }
 };
 
-export const subscribeToNewsletter = async (email: string): Promise<void> => {
+export const subscribeToNewsletter = (email: string) => {
   const body = new FormData();
   body.append("EMAIL", email);
   body.append(SUBSCRIBE_TOKEN, "");
 
-  await fetch(SUBSCRIBE_URL, { method: "POST", mode: "no-cors", body });
+  if ("sendBeacon" in navigator) {
+    navigator.sendBeacon(SUBSCRIBE_URL, body);
+  } else {
+    fetch(SUBSCRIBE_URL, {
+      method: "POST",
+      mode: "no-cors",
+      body,
+      keepalive: true,
+    });
+  }
 };

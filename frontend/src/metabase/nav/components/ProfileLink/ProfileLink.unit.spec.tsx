@@ -1,18 +1,19 @@
-import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import fetchMock from "fetch-mock";
+import dayjs from "dayjs";
 
+import { setupBugReportingDetailsEndpoint } from "__support__/server-mocks";
 import { mockSettings } from "__support__/settings";
-import { renderWithProviders } from "__support__/ui";
+import { renderWithProviders, screen, waitFor } from "__support__/ui";
 import { ProfileLink } from "metabase/nav/components/ProfileLink";
 import type { HelpLinkSetting } from "metabase-types/api";
 import {
+  createMockMetabaseInfo,
   createMockTokenStatus,
   createMockUser,
 } from "metabase-types/api/mocks";
 import {
-  createMockAdminState,
   createMockAdminAppState,
+  createMockAdminState,
 } from "metabase-types/store/mocks";
 
 const REGULAR_ITEMS = [
@@ -36,18 +37,21 @@ function setup({
   isPaidPlan = true,
   helpLinkSetting = "metabase",
   helpLinkCustomDestinationSetting = "https://custom-destination.com/help",
+  instanceCreationDate = dayjs().toISOString(),
 }: {
   isAdmin?: boolean;
   isHosted?: boolean;
   isPaidPlan?: boolean;
   helpLinkSetting?: HelpLinkSetting;
   helpLinkCustomDestinationSetting?: string;
+  instanceCreationDate?: string;
 }) {
   const settings = mockSettings({
     "is-hosted?": isHosted,
     "token-status": createMockTokenStatus({ valid: isPaidPlan }),
     "help-link": helpLinkSetting,
     "help-link-custom-destination": helpLinkCustomDestinationSetting,
+    "instance-creation": instanceCreationDate,
   });
 
   const admin = createMockAdminState({
@@ -56,7 +60,7 @@ function setup({
     }),
   });
 
-  return renderWithProviders(<ProfileLink onLogout={jest.fn()} />, {
+  return renderWithProviders(<ProfileLink />, {
     storeInitialState: {
       admin,
       settings,
@@ -71,15 +75,16 @@ function setupHosted(opts = {}) {
 
 describe("ProfileLink", () => {
   beforeEach(() => {
-    fetchMock.get("path:/api/util/bug_report_details", "mockBugReportDetails");
+    setupBugReportingDetailsEndpoint();
   });
+
   describe("self-hosted", () => {
     it("should show the proper set of items for normal users", async () => {
       setup({ isAdmin: false });
 
       await openMenu();
 
-      REGULAR_ITEMS.forEach(title => {
+      REGULAR_ITEMS.forEach((title) => {
         expect(screen.getByText(title)).toBeInTheDocument();
       });
       expect(screen.queryByText("Admin settings")).not.toBeInTheDocument();
@@ -90,7 +95,7 @@ describe("ProfileLink", () => {
 
       await openMenu();
 
-      ADMIN_ITEMS.forEach(title => {
+      ADMIN_ITEMS.forEach((title) => {
         expect(screen.getByText(title)).toBeInTheDocument();
       });
     });
@@ -102,7 +107,7 @@ describe("ProfileLink", () => {
 
       await openMenu();
 
-      REGULAR_ITEMS.forEach(title => {
+      REGULAR_ITEMS.forEach((title) => {
         expect(screen.getByText(title)).toBeInTheDocument();
       });
       expect(screen.queryByText("Admin settings")).not.toBeInTheDocument();
@@ -113,9 +118,29 @@ describe("ProfileLink", () => {
 
       await openMenu();
 
-      HOSTED_ITEMS.forEach(title => {
+      HOSTED_ITEMS.forEach((title) => {
         expect(screen.getByText(title)).toBeInTheDocument();
       });
+    });
+  });
+
+  describe("'How to use Metabase' link", () => {
+    it("should render if the instance was created more than 30 days ago", async () => {
+      setup({
+        instanceCreationDate: dayjs().subtract(42, "days").toISOString(),
+      });
+
+      await openMenu();
+      expect(screen.getByText("How to use Metabase")).toBeInTheDocument();
+    });
+
+    it("should not render for new instances (younger than 30 days)", async () => {
+      setup({
+        instanceCreationDate: dayjs().subtract(14, "days").toISOString(),
+      });
+
+      await openMenu();
+      expect(screen.queryByText("How to use Metabase")).not.toBeInTheDocument();
     });
   });
 
@@ -127,7 +152,7 @@ describe("ProfileLink", () => {
         });
         await openMenu();
 
-        const link = screen.queryByRole("link", { name: /help/i });
+        const link = screen.queryByRole("menuitem", { name: /help/i });
 
         expect(link).not.toBeInTheDocument();
       });
@@ -141,7 +166,7 @@ describe("ProfileLink", () => {
         });
         await openMenu();
 
-        const link = screen.getByRole("link", { name: /help/i });
+        const link = screen.getByRole("menuitem", { name: /help/i });
 
         expect(link).toBeInTheDocument();
         expect(link).toHaveProperty("href", "https://custom.example.org/help");
@@ -157,11 +182,11 @@ describe("ProfileLink", () => {
             helpLinkSetting: "metabase",
           });
           await openMenu();
-          const link = screen.getByRole("link", { name: /help/i });
+          const link = screen.getByRole("menuitem", { name: /help/i });
 
           expect(link).toBeInTheDocument();
           const mockBugReportDetails = encodeURIComponent(
-            JSON.stringify("mockBugReportDetails"),
+            JSON.stringify(createMockMetabaseInfo()),
           );
           const expected = `https://www.metabase.com/help-premium?utm_source=in-product&utm_medium=menu&utm_campaign=help&instance_version=v1&diag=${mockBugReportDetails}`;
           await waitFor(() => expect(link).toHaveProperty("href", expected));
@@ -178,7 +203,7 @@ describe("ProfileLink", () => {
             helpLinkSetting: "metabase",
           });
           await openMenu();
-          const link = screen.getByRole("link", { name: /help/i });
+          const link = screen.getByRole("menuitem", { name: /help/i });
 
           expect(link).toBeInTheDocument();
           expect(link).toHaveProperty(
@@ -193,5 +218,5 @@ describe("ProfileLink", () => {
 
 const openMenu = async () => {
   await userEvent.click(screen.getByRole("img", { name: /gear/i }));
-  await screen.findByRole("dialog");
+  await screen.findByRole("menu");
 };

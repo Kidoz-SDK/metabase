@@ -3,6 +3,7 @@ import type { Location } from "history";
 
 import {
   canonicalCollectionId,
+  isLibraryCollection,
   isRootTrashCollection,
 } from "metabase/collections/utils";
 import * as Urls from "metabase/lib/urls/collections";
@@ -41,7 +42,7 @@ function byCollectionQueryParameter(state: State, { location }: Props) {
 
 const getInitialCollectionId = createSelector(
   [
-    state => {
+    (state) => {
       const collections = state.entities.collections || {};
       return collections as Record<CollectionId, Collection>;
     },
@@ -51,12 +52,12 @@ const getInitialCollectionId = createSelector(
     byCollectionIdProp,
     byCollectionIdNavParam,
     byCollectionUrlId,
-    byCollectionQueryParameter,
+    byCollectionQueryParameter, // used by new model flow
   ],
   (collections, personalCollectionId, ...collectionIds) => {
     const rootCollectionId = ROOT_COLLECTION.id as CollectionId;
     const validCollectionIds = collectionIds
-      .filter(id => !isRootTrashCollection(collections[id as CollectionId]))
+      .filter((id) => !isRootTrashCollection(collections[id as CollectionId]))
       .concat(rootCollectionId) as CollectionId[];
 
     if (personalCollectionId) {
@@ -65,7 +66,11 @@ const getInitialCollectionId = createSelector(
 
     for (const collectionId of validCollectionIds) {
       const collection = collections[collectionId];
-      if (collection?.can_write) {
+      if (
+        collection != null &&
+        collection.can_write &&
+        !isLibraryCollection(collection)
+      ) {
         return canonicalCollectionId(collectionId);
       }
     }

@@ -1,27 +1,37 @@
 import type { FormEventHandler } from "react";
-import { useState, useMemo } from "react";
-import { t, jt } from "ttag";
+import { useState } from "react";
+import { jt, t } from "ttag";
 
 import { isNotNull } from "metabase/lib/types";
-import { Stack, Flex, Button, Box, Icon } from "metabase/ui";
+import { Box, Button, Flex, Icon, Stack } from "metabase/ui";
 import * as Lib from "metabase-lib";
+
+import { ExpressionWidgetHeader } from "../ExpressionWidget/ExpressionWidgetHeader";
 
 import { ColumnAndSeparatorRow } from "./ColumnAndSeparatorRow";
 import { Example } from "./Example";
 import type { ColumnAndSeparator } from "./util";
 import {
-  getExample,
-  getDefaultSeparator,
-  formatSeparator,
-  getExpressionName,
   flatten,
+  formatSeparator,
+  getDefaultSeparator,
+  getExpressionName,
+  getNextColumnAndSeparator,
 } from "./util";
 
 interface Props {
   query: Lib.Query;
   stageIndex: number;
+  availableColumns: Lib.ColumnMetadata[];
+  onCancel?: () => void;
   onSubmit: (name: string, clause: Lib.ExpressionClause) => void;
+  withTitle?: boolean;
   width?: number;
+
+  /**
+   * If set, use this as the first column to combine.
+   */
+  column?: Lib.ColumnMetadata;
 }
 
 type State = {
@@ -30,44 +40,45 @@ type State = {
   defaultSeparator: string;
 };
 
-const initialDefaultSeparator = " ";
-
 export function CombineColumns({
-  query: originalQuery,
-  stageIndex: originalStageIndex,
+  query,
+  stageIndex,
+  availableColumns,
+  onCancel,
   onSubmit,
   width,
+  column,
+  withTitle,
 }: Props) {
-  const [state, setState] = useState<State>({
-    columnsAndSeparators: [
-      {
-        column: null,
-        separator: "",
-      },
-      {
-        column: null,
-        separator: initialDefaultSeparator,
-      },
-    ],
-    isUsingDefaultSeparator: true,
-    defaultSeparator: initialDefaultSeparator,
+  const [state, setState] = useState<State>(() => {
+    const defaultSeparator = getDefaultSeparator(column);
+
+    const firstColumnAndSeparator = {
+      column: column ?? availableColumns[0] ?? null,
+      separator: null,
+    };
+
+    const secondColumnAndSeparator = getNextColumnAndSeparator(
+      availableColumns,
+      defaultSeparator,
+      [firstColumnAndSeparator],
+    );
+
+    return {
+      columnsAndSeparators: [firstColumnAndSeparator, secondColumnAndSeparator],
+      isUsingDefaultSeparator: true,
+      defaultSeparator,
+    };
   });
 
   const { columnsAndSeparators, isUsingDefaultSeparator } = state;
-
-  const { query, stageIndex } = Lib.asReturned(
-    originalQuery,
-    originalStageIndex,
-  );
-
-  const expressionableColumns = Lib.expressionableColumns(query, stageIndex);
 
   const handleRowChange = (
     index: number,
     column: Lib.ColumnMetadata | null,
     separator: string,
   ) => {
-    setState(state => {
+    setState((state) => {
       const updated = {
         ...state,
         columnsAndSeparators: [
@@ -78,10 +89,10 @@ export function CombineColumns({
       };
 
       if (index === 0 && state.isUsingDefaultSeparator && column) {
-        // rewrite the default separators when the first column is selected
+        // rewrite the default separator when the first column is selected
         const defaultSeparator = getDefaultSeparator(column);
         updated.columnsAndSeparators = updated.columnsAndSeparators.map(
-          columnAndSeparator => ({
+          (columnAndSeparator) => ({
             ...columnAndSeparator,
             separator: defaultSeparator,
           }),
@@ -94,7 +105,7 @@ export function CombineColumns({
   };
 
   const handleRowRemove = (index: number) => {
-    setState(state => ({
+    setState((state) => ({
       ...state,
       columnsAndSeparators: [
         ...state.columnsAndSeparators.slice(0, index),
@@ -104,27 +115,29 @@ export function CombineColumns({
   };
 
   const handleRowAdd = () => {
-    setState(state => {
-      const lastSeparator =
-        state.columnsAndSeparators.at(-1)?.separator ?? state.defaultSeparator;
+    setState((state) => {
       return {
         ...state,
         columnsAndSeparators: [
           ...state.columnsAndSeparators,
-          { column: null, separator: lastSeparator },
+          getNextColumnAndSeparator(
+            availableColumns,
+            state.defaultSeparator,
+            state.columnsAndSeparators,
+          ),
         ],
       };
     });
   };
 
   const handleEditSeparators = () => {
-    setState(state => ({
+    setState((state) => ({
       ...state,
       isUsingDefaultSeparator: false,
     }));
   };
 
-  const handleSubmit: FormEventHandler = event => {
+  const handleSubmit: FormEventHandler = (event) => {
     event.preventDefault();
 
     const name = getExpressionName(query, stageIndex, columnsAndSeparators);
@@ -141,70 +154,84 @@ export function CombineColumns({
     isNotNull(column),
   );
 
-  const example = useMemo(
-    () => getExample(state.columnsAndSeparators),
-    [state.columnsAndSeparators],
-  );
-
   return (
-    <form onSubmit={handleSubmit}>
-      <Box maw="100vw" w={width} p="lg" pt={0}>
-        <Stack spacing="lg" mt="lg">
-          <Stack spacing="md">
-            <Box>
-              <Stack spacing="md">
-                {columnsAndSeparators.map(({ column, separator }, index) => (
-                  <ColumnAndSeparatorRow
-                    key={index}
-                    query={query}
-                    stageIndex={stageIndex}
-                    index={index}
-                    columns={expressionableColumns}
-                    column={column}
-                    separator={separator}
-                    showSeparator={!isUsingDefaultSeparator && index !== 0}
-                    showRemove={columnsAndSeparators.length >= 3}
-                    onChange={handleRowChange}
-                    onRemove={handleRowRemove}
-                  />
-                ))}
-              </Stack>
-            </Box>
-            <Flex
-              align="center"
-              gap="md"
-              justify={isUsingDefaultSeparator ? "space-between" : "end"}
-            >
-              {isUsingDefaultSeparator && (
-                <Box>
-                  <Button p={0} variant="subtle" onClick={handleEditSeparators}>
-                    {jt`Separated by ${formatSeparator(
-                      state.defaultSeparator,
-                    )}`}
-                  </Button>
-                </Box>
-              )}
-
-              <Button
-                leftIcon={<Icon name="add" />}
-                p={0}
-                variant="subtle"
-                onClick={handleRowAdd}
+    <>
+      {onCancel && withTitle && (
+        <ExpressionWidgetHeader
+          title={t`Select columns to combine`}
+          onBack={onCancel}
+        />
+      )}
+      <form onSubmit={handleSubmit}>
+        <Box maw="100vw" w={width} p="lg" pt={0}>
+          <Stack gap="lg" mt="lg">
+            <Stack gap="md">
+              <Box>
+                <Stack gap="md">
+                  {columnsAndSeparators.map(
+                    (item, index) =>
+                      // Do not allow editing the first column when it is passed from
+                      // the props.
+                      (!column || index > 0) && (
+                        <ColumnAndSeparatorRow
+                          key={index}
+                          query={query}
+                          stageIndex={stageIndex}
+                          index={index}
+                          columns={availableColumns}
+                          column={item.column}
+                          separator={item.separator ?? ""}
+                          showSeparator={
+                            !isUsingDefaultSeparator && index !== 0
+                          }
+                          showRemove={columnsAndSeparators.length >= 3}
+                          onChange={handleRowChange}
+                          onRemove={handleRowRemove}
+                        />
+                      ),
+                  )}
+                </Stack>
+              </Box>
+              <Flex
+                align="center"
+                gap="md"
+                justify={isUsingDefaultSeparator ? "space-between" : "end"}
               >
-                {t`Add column`}
+                {isUsingDefaultSeparator && (
+                  <Box>
+                    <Button
+                      p={0}
+                      variant="subtle"
+                      onClick={handleEditSeparators}
+                    >
+                      {jt`Separated by ${formatSeparator(
+                        state.defaultSeparator,
+                      )}`}
+                    </Button>
+                  </Box>
+                )}
+
+                <Button
+                  leftSection={<Icon name="add" />}
+                  p={0}
+                  variant="subtle"
+                  onClick={handleRowAdd}
+                >
+                  {t`Add column`}
+                </Button>
+              </Flex>
+            </Stack>
+
+            <Example columnsAndSeparators={columnsAndSeparators} />
+
+            <Flex align="center" gap="md" justify="end">
+              <Button type="submit" variant="filled" disabled={!isValid}>
+                {t`Done`}
               </Button>
             </Flex>
           </Stack>
-
-          <Example example={example} />
-
-          <Flex align="center" gap="md" justify="end">
-            <Button type="submit" variant="filled" disabled={!isValid}>
-              {t`Done`}
-            </Button>
-          </Flex>
-        </Stack>
-      </Box>
-    </form>
+        </Box>
+      </form>
+    </>
   );
 }

@@ -1,8 +1,8 @@
-import moment from "moment-timezone"; // eslint-disable-line no-restricted-imports -- deprecated usage
+import dayjs from "dayjs";
 import { useCallback, useMemo } from "react";
 import { t } from "ttag";
 
-import ModalContent from "metabase/components/ModalContent";
+import ModalContent from "metabase/common/components/ModalContent";
 import { getDefaultTimelineIcon } from "metabase/lib/timelines";
 import type {
   Collection,
@@ -24,7 +24,6 @@ export interface NewEventModalProps {
     timeline?: Timeline,
   ) => void;
   onSubmitSuccess?: () => void;
-  onCancel?: () => void;
   onClose?: () => void;
 }
 
@@ -35,11 +34,10 @@ const NewEventModal = ({
   cardId,
   onSubmit,
   onSubmitSuccess,
-  onCancel,
   onClose,
 }: NewEventModalProps): JSX.Element => {
   const availableTimelines = useMemo(() => {
-    return timelines.filter(t => t.collection?.can_write);
+    return timelines.filter((t) => t.collection?.can_write);
   }, [timelines]);
 
   const initialValues = useMemo(() => {
@@ -48,7 +46,7 @@ const NewEventModal = ({
 
   const handleSubmit = useCallback(
     async (values: TimelineEventData) => {
-      const timeline = timelines.find(t => t.id === values.timeline_id);
+      const timeline = timelines.find((t) => t.id === values.timeline_id);
       await onSubmit(values, collection, timeline);
       onSubmitSuccess?.();
     },
@@ -61,7 +59,7 @@ const NewEventModal = ({
         initialValues={initialValues}
         timelines={availableTimelines}
         onSubmit={handleSubmit}
-        onCancel={onCancel}
+        onCancel={onClose}
       />
     </ModalContent>
   );
@@ -81,7 +79,7 @@ const getInitialValues = (
     timestamp: "",
     timeline_id: defaultTimeline?.id,
     icon: hasOneTimeline ? defaultTimeline.icon : getDefaultTimelineIcon(),
-    timezone: moment.tz.guess(),
+    timezone: dayjs.tz.guess(),
     time_matters: false,
     archived: false,
     source,

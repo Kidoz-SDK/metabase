@@ -1,14 +1,14 @@
 ---
-title: SQL snippet folder permissions
+title: Snippet folder permissions
 redirect_from:
   - /docs/latest/enterprise-guide/sql-snippets
 ---
 
-# SQL snippet folder permissions
+# Snippet folder permissions
 
-{% include plans-blockquote.html feature="SQL snippet controls" %}
+{% include plans-blockquote.html feature="Snippet controls" %}
 
-This article covers **SQL snippet folders**, which allow you to organize and set permissions on [SQL snippets](../questions/native-editor/sql-snippets.md).
+This article covers **Snippet folders**, which allow you to organize and set permissions on [Snippets](../questions/native-editor/snippets.md).
 
 Folder permissions should not be considered a security feature, but instead a feature that helps organize and standardize snippets. Although folders are distinct and separate from Collections, they both serve an organizational function: Collections gather and permission dashboards and questions; folders gather and permission snippets. For more info, see the [discussion on permissions below](#permissions).
 
@@ -16,11 +16,11 @@ Folder permissions should not be considered a security feature, but instead a fe
 
 Folders work similarly to a file system. You can add snippets to folders, and put folders inside of other folders. You can nest as many folders as your Metabase instance can handle or the laws of physics allow (whichever yields first).
 
-The **Top folder** is the snippet sidebar's default folder. It is the root folder that contains all folders and snippets.
+**SQL snippets** is the snippet sidebar's default folder. It is the root folder that contains all folders and snippets.
 
-### Creating a new SQL snippet folder
+### Creating a new Snippet folder
 
-You can create a SQL snippet folder from the **Snippets** menu in the [SQL editor](../questions/native-editor/writing-sql.md).
+You can create a Snippet folder from the **Snippets** menu in the [SQL editor](../questions/native-editor/writing-sql.md).
 
 ![Create new snippet folder](./images/snippet-folder.png)
 
@@ -30,13 +30,13 @@ You can create a SQL snippet folder from the **Snippets** menu in the [SQL edito
 
 ![Create new folder modal](./images/create-new-folder-modal.png)
 
-### Creating a new SQL snippet
+### Creating a new Snippet
 
-On [some plans](https://www.metabase.com/pricing), when creating a SQL snippet, you'll also see an additional option to add that snippet to an existing folder (the **Folder this should be in** option).
+On [some plans](https://www.metabase.com/pricing/), when creating a Snippet, you'll also see an additional option to add that snippet to an existing folder (the **Folder this should be in** option).
 
 ![Add a snippet enterprise modal](./images/enterprise-add-snippet.png)
 
-The default location is the **Top folder**, which is the root folder for all snippets and folders. You can add a snippet to a folder at any time (or relocate a snippet to another folder, provided you have Edit permission to both folders).
+The default location is **SQL snippets**, which is the root folder for all snippets and folders. You can add a snippet to a folder at any time (or relocate a snippet to another folder, provided you have Edit permission to both folders).
 
 Note that snippet names must be unique; folders do not affect this requirement.
 
@@ -48,7 +48,7 @@ Administrators (and only administrators) can set snippet visibility and editabil
 
 Administrators can set the permissions on a folder by clicking on the ellipsis (**...**) next to a folder, and selecting **Change permissions**.
 
-You can additionally change the currently selected folder by mousing over to the top of the Snippets sidebar, clicking on the ellipsis (**...**) to the left of the **+**, and selecting **Change permissions**. When at the **Top folder**, selecting the **...** at the top of the sidebar will give Administrators the option to set permissions for all snippets, folders, and sub-folders.
+You can additionally change the currently selected folder by mousing over to the top of the Snippets sidebar, clicking on the ellipsis (**...**) to the left of the **+**, and selecting **Change permissions**. When at the **SQL snippets** root, selecting the **...** at the top of the sidebar will give Administrators the option to set permissions for all snippets, folders, and sub-folders.
 
 When changing permissions on a folder that has sub-folders, you have an option to extend those permissions to that folder's sub-folders by toggling the **Also change sub-folders** setting.
 
@@ -88,4 +88,4 @@ Because of how snippet folder permissions work, we recommend that you consider s
 
 ## Further reading
 
-- [SQL snippets](https://www.metabase.com/learn/sql-questions/sql-snippets).
+- [Snippets](https://www.metabase.com/learn/metabase-basics/querying-and-dashboards/sql-in-metabase/snippets).

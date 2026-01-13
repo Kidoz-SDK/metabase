@@ -11,8 +11,8 @@ import ChartSettingsWidget from "../ChartSettingsWidget";
  * @deprecated HOCs are deprecated
  */
 const chartSettingNestedSettings =
-  ({ getObjectKey, getSettingsWidgetsForObject }) =>
-  ComposedComponent =>
+  ({ getObjectKey, getObjectSettings, getSettingsWidgetsForObject }) =>
+  (ComposedComponent) =>
     class extends Component {
       constructor(props) {
         super(props);
@@ -29,7 +29,7 @@ const chartSettingNestedSettings =
         );
       };
 
-      handleChangeEditingObject = editingObject => {
+      handleChangeEditingObject = (editingObject) => {
         // objectKeyOverride allows child components to set the editing object key to a different value than is derived
         // from the props. For example, this is used by the "More options" button in ChartNestedSettingSeries.
         this.setState({
@@ -41,7 +41,7 @@ const chartSettingNestedSettings =
         }
       };
 
-      handleChangeSettingsForEditingObject = newSettings => {
+      handleChangeSettingsForEditingObject = (newSettings) => {
         const editingObjectKey = this.getEditingObjectKey();
         if (editingObjectKey != null) {
           this.handleChangeSettingsForObjectKey(editingObjectKey, newSettings);
@@ -55,15 +55,23 @@ const chartSettingNestedSettings =
         }
       };
 
-      handleChangeSettingsForObjectKey = (objectKey, changedSettings) => {
-        const { onChange } = this.props;
-        const objectsSettings = this.props.value || {};
-        const objectSettings = objectsSettings[objectKey] || {};
-        const newSettings = updateSettings(objectSettings, changedSettings);
-        onChange({
-          ...objectsSettings,
-          [objectKey]: newSettings,
-        });
+      handleChangeSettingsForObjectKey = (changedKey, changedSettings) => {
+        const { objects, onChange } = this.props;
+        const oldSettings = this.props.value || {};
+        const newSettings = objects.reduce((newSettings, object) => {
+          const currentKey = getObjectKey(object);
+          const objectSettings = getObjectSettings(oldSettings, object);
+          if (currentKey === changedKey) {
+            newSettings[currentKey] = updateSettings(
+              objectSettings,
+              changedSettings,
+            );
+          } else {
+            newSettings[currentKey] = objectSettings;
+          }
+          return newSettings;
+        }, {});
+        onChange(newSettings);
       };
 
       render() {
@@ -72,11 +80,12 @@ const chartSettingNestedSettings =
         if (editingObjectKey !== undefined) {
           const editingObject = _.find(
             objects,
-            o => getObjectKey(o) === editingObjectKey,
+            (o) => getObjectKey(o) === editingObjectKey,
           );
           if (editingObject) {
             const objectsSettings = this.props.value || {};
-            const objectSettings = objectsSettings[editingObjectKey] || {};
+            const objectSettings =
+              getObjectSettings(objectsSettings, editingObject) ?? {};
             const objectSettingsWidgets = getSettingsWidgetsForObject(
               series,
               editingObject,
@@ -91,7 +100,7 @@ const chartSettingNestedSettings =
                 onChangeEditingObject={this.handleChangeEditingObject}
                 onChangeObjectSettings={this.handleChangeSettingsForObject}
                 object={editingObject}
-                objectSettingsWidgets={objectSettingsWidgets.map(widget => (
+                objectSettingsWidgets={objectSettingsWidgets.map((widget) => (
                   <ChartSettingsWidget key={widget.id} {...widget} />
                 ))}
               />

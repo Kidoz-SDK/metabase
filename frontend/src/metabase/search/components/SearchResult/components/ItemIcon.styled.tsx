@@ -1,6 +1,8 @@
+// eslint-disable-next-line no-restricted-imports
 import styled from "@emotion/styled";
 
-import { color, lighten } from "metabase/lib/colors";
+import { lighten } from "metabase/lib/colors";
+import { color } from "metabase/ui/utils/colors";
 import type { SearchModel } from "metabase-types/api";
 
 function getColorForIconWrapper(
@@ -22,7 +24,7 @@ export const IconWrapper = styled.div<{
   archived: boolean;
   type: SearchModel;
 }>`
-  border: ${({ theme }) => `1px solid ${theme.fn.themeColor("border")}`};
+  border: 1px solid var(--mb-color-border);
   border-radius: ${({ theme }) => theme.radius.sm};
   display: flex;
   align-items: center;
@@ -32,5 +34,5 @@ export const IconWrapper = styled.div<{
   color: ${({ active, archived, type }) =>
     getColorForIconWrapper(active, archived, type)};
   flex-shrink: 0;
-  background: ${color("white")};
+  background: var(--mb-color-bg-white);
 `;

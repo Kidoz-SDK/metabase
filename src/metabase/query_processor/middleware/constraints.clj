@@ -1,9 +1,10 @@
 (ns metabase.query-processor.middleware.constraints
   "Middleware that adds default constraints to limit the maximum number of rows returned to queries that specify the
   `:add-default-userland-constraints?` `:middleware` option."
+  (:refer-clojure :exclude [get-in])
   (:require
-   [metabase.models.setting :as setting]
-   [metabase.util.i18n :refer [deferred-tru]]))
+   [metabase.query-processor.settings :as qp.settings]
+   [metabase.util.performance :refer [get-in]]))
 
 ;; The following "defaults" are not applied to the settings themselves - why not? Because the existing behavior is
 ;; that, if you manually update the settings, queries are affected *WHETHER OR NOT* the
@@ -19,35 +20,17 @@
 ;;    b) `nil` if the setting is not set
 ;; 3. the value of `absolute-max-results`
 ;;
+;;
 ;; If we turned the below `const`s into `:default`s on the settings themselves, we would use the default values for
 ;; all queries, whether or not the middleware was applied.
 (def ^:private ^:const default-unaggregated-query-row-limit 2000)
 (def ^:private ^:const default-aggregated-query-row-limit 10000)
 
-;; NOTE: this was changed from a hardcoded var with value of 2000 (now moved to [[default-unaggregated-query-row-limit]])
-;; to a setting in 0.43 the setting, which allows for DB local value, can still be nil, so any places below that used
-;; to reference the former constant value have to expect it could return nil instead
-(setting/defsetting unaggregated-query-row-limit
-  (deferred-tru "Maximum number of rows to return specifically on :rows type queries via the API.")
-  :visibility     :authenticated
-  :export?        true
-  :type           :integer
-  :database-local :allowed
-  :audit          :getter)
-
-(setting/defsetting aggregated-query-row-limit
-  (deferred-tru "Maximum number of rows to return for aggregated queries via the API.")
-  :visibility     :authenticated
-  :export?        true
-  :type           :integer
-  :database-local :allowed
-  :audit          :getter)
-
 (defn default-query-constraints
   "Default map of constraints that we apply on dataset queries executed by the api."
   []
-  {:max-results           (or (aggregated-query-row-limit) default-aggregated-query-row-limit)
-   :max-results-bare-rows (or (unaggregated-query-row-limit) default-unaggregated-query-row-limit)})
+  {:max-results           (or (qp.settings/aggregated-query-row-limit) default-aggregated-query-row-limit)
+   :max-results-bare-rows (or (qp.settings/unaggregated-query-row-limit) default-unaggregated-query-row-limit)})
 
 (defn- ensure-valid-constraints
   "Clamps the value of `max-results-bare-rows` to be less than or equal to the value of `max-results`."
@@ -72,5 +55,6 @@
   "If the query is marked as requiring userland constraints, actually calculate the constraints and add them to the
   query."
   [query]
-  (cond-> query
-    (should-add-userland-constraints? query) add-constraints))
+  (let [userland? (should-add-userland-constraints? query)]
+    (cond-> query
+      userland? add-constraints)))

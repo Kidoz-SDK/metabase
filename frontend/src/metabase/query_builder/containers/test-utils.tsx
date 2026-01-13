@@ -1,24 +1,30 @@
+/* eslint-disable i18next/no-literal-string */
 import userEvent from "@testing-library/user-event";
 import fetchMock from "fetch-mock";
 import type { ComponentPropsWithoutRef } from "react";
 import { IndexRoute, Route } from "react-router";
 
 import {
+  setupAdhocQueryMetadataEndpoint,
   setupAlertsEndpoints,
   setupBookmarksEndpoints,
   setupCardDataset,
   setupCardQueryEndpoints,
+  setupCardQueryMetadataEndpoint,
   setupCardsEndpoints,
   setupCollectionByIdEndpoint,
   setupCollectionsEndpoints,
   setupDatabasesEndpoints,
-  setupFieldValuesEndpoints,
+  setupFieldValuesEndpoint,
+  setupGetUserKeyValueEndpoint,
   setupModelIndexEndpoints,
+  setupPropertiesEndpoints,
+  setupRecentViewsAndSelectionsEndpoints,
+  setupRecentViewsEndpoints,
   setupSearchEndpoints,
   setupTimelinesEndpoints,
-  setupPropertiesEndpoints,
-  setupRecentViewsEndpoints,
 } from "__support__/server-mocks";
+import { mockSettings } from "__support__/settings";
 import {
   renderWithProviders,
   screen,
@@ -26,14 +32,15 @@ import {
   waitForLoaderToBeRemoved,
   within,
 } from "__support__/ui";
-import NewItemMenu from "metabase/containers/NewItemMenu";
-import { LOAD_COMPLETE_FAVICON } from "metabase/hoc/Favicon";
+import NewItemMenu from "metabase/common/components/NewItemMenu";
+import { LOAD_COMPLETE_FAVICON } from "metabase/common/hooks/constants";
 import { serializeCardForUrl } from "metabase/lib/card";
 import { checkNotNull } from "metabase/lib/types";
 import NewModelOptions from "metabase/models/containers/NewModelOptions";
 import type { Card, Dataset, UnsavedCard } from "metabase-types/api";
 import {
   createMockCard,
+  createMockCardQueryMetadata,
   createMockCollection,
   createMockColumn,
   createMockDataset,
@@ -46,6 +53,8 @@ import {
   createMockStructuredDatasetQuery,
   createMockStructuredQuery,
   createMockUnsavedCard,
+  createMockUser,
+  createMockUserPermissions,
 } from "metabase-types/api/mocks";
 import {
   ORDERS,
@@ -54,10 +63,11 @@ import {
   createSampleDatabase,
 } from "metabase-types/api/mocks/presets";
 import type { RequestState, State } from "metabase-types/store";
+import { createMockState } from "metabase-types/store/mocks";
 
-import QueryBuilder from "./QueryBuilder";
+import { QueryBuilder } from "./QueryBuilder";
 
-const TEST_DB = createSampleDatabase();
+export const TEST_DB = createSampleDatabase();
 
 export const TEST_CARD = createMockCard({
   id: 1,
@@ -117,7 +127,7 @@ export const TEST_MODEL_CARD = createMockCard({
     },
   },
   type: "model",
-  display: "scalar",
+  display: "table",
   description: "Test description",
 });
 
@@ -203,7 +213,7 @@ const TestQueryBuilder = (
   props: ComponentPropsWithoutRef<typeof QueryBuilder>,
 ) => {
   return (
-    <div>
+    <div data-testid="test-container">
       <link rel="icon" />
       <QueryBuilder {...props} />
     </div>
@@ -239,13 +249,23 @@ export const setup = async ({
   setupBookmarksEndpoints([]);
   setupTimelinesEndpoints([]);
   setupCollectionByIdEndpoint({ collections: [TEST_COLLECTION] });
-  setupFieldValuesEndpoints(
+  setupFieldValuesEndpoint(
     createMockFieldValues({ field_id: Number(ORDERS.QUANTITY) }),
   );
   setupRecentViewsEndpoints([]);
+  setupRecentViewsAndSelectionsEndpoints([]);
+  setupGetUserKeyValueEndpoint({
+    namespace: "user_acknowledgement",
+    key: "turn_into_model_modal",
+    value: false,
+  });
+
+  const metadata = createMockCardQueryMetadata({ databases: [TEST_DB] });
+  setupAdhocQueryMetadataEndpoint(metadata);
 
   if (isSavedCard(card)) {
     setupCardsEndpoints([card]);
+    setupCardQueryMetadataEndpoint(card, metadata);
     setupCardQueryEndpoints(card, dataset);
     setupAlertsEndpoints(card, []);
     setupModelIndexEndpoints(card.id, []);
@@ -262,28 +282,42 @@ export const setup = async ({
     container,
     history,
   } = renderWithProviders(
-    <Route>
-      <Route path="/" component={TestHome} />
-      <Route path="/model">
-        <Route path="new" component={NewModelOptions} />
-        <Route path="query" component={TestQueryBuilder} />
-        <Route path="metadata" component={TestQueryBuilder} />
-        <Route path="notebook" component={TestQueryBuilder} />
-        <Route path=":slug/query" component={TestQueryBuilder} />
-        <Route path=":slug/metadata" component={TestQueryBuilder} />
-        <Route path=":slug/notebook" component={TestQueryBuilder} />
+    <div>
+      <Route>
+        <Route path="/" component={TestHome} />
+        <Route path="/model">
+          <Route path="new" component={NewModelOptions} />
+          <Route path="query" component={TestQueryBuilder} />
+          <Route path="columns" component={TestQueryBuilder} />
+          <Route path="metadata" component={TestQueryBuilder} />
+          <Route path="notebook" component={TestQueryBuilder} />
+          <Route path=":slug" component={TestQueryBuilder} />
+          <Route path=":slug/query" component={TestQueryBuilder} />
+          <Route path=":slug/columns" component={TestQueryBuilder} />
+          <Route path=":slug/metadata" component={TestQueryBuilder} />
+          <Route path=":slug/notebook" component={TestQueryBuilder} />
+        </Route>
+        <Route path="/question">
+          <IndexRoute component={TestQueryBuilder} />
+          <Route path="notebook" component={TestQueryBuilder} />
+          <Route path=":slug" component={TestQueryBuilder} />
+          <Route path=":slug/notebook" component={TestQueryBuilder} />
+        </Route>
+        <Route path="/redirect" component={TestRedirect} />
       </Route>
-      <Route path="/question">
-        <IndexRoute component={TestQueryBuilder} />
-        <Route path="notebook" component={TestQueryBuilder} />
-        <Route path=":slug" component={TestQueryBuilder} />
-        <Route path=":slug/notebook" component={TestQueryBuilder} />
-      </Route>
-      <Route path="/redirect" component={TestRedirect} />
-    </Route>,
+    </div>,
     {
       withRouter: true,
       initialRoute,
+      storeInitialState: createMockState({
+        currentUser: createMockUser({
+          permissions: createMockUserPermissions({
+            can_create_queries: true,
+            can_create_native_queries: true,
+          }),
+        }),
+        settings: mockSettings({ "site-url": "http://localhost:3000" }),
+      }),
     },
   );
 
@@ -302,7 +336,7 @@ const waitForLoadingRequests = async (getState: () => State) => {
   await waitFor(
     () => {
       const requests = getRequests(getState());
-      const areRequestsLoading = requests.some(request => request.loading);
+      const areRequestsLoading = requests.some((request) => request.loading);
       expect(areRequestsLoading).toBe(false);
     },
     { timeout: 5000 },
@@ -310,9 +344,9 @@ const waitForLoadingRequests = async (getState: () => State) => {
 };
 
 const getRequests = (state: State): RequestState[] => {
-  return Object.values(state.requests).flatMap(group =>
-    Object.values(group).flatMap(entity =>
-      Object.values(entity).flatMap(request => Object.values(request)),
+  return Object.values(state.requests).flatMap((group) =>
+    Object.values(group).flatMap((entity) =>
+      Object.values(entity).flatMap((request) => Object.values(request)),
     ),
   );
 };
@@ -321,9 +355,10 @@ export const startNewNotebookModel = async () => {
   await userEvent.click(screen.getByText("Use the notebook editor"));
   await waitForLoaderToBeRemoved();
 
-  const modal = await screen.findByTestId("entity-picker-modal");
+  const modal = await screen.findByTestId("mini-picker");
   await waitForLoaderToBeRemoved();
-  await userEvent.click(within(modal).getByText("Orders"));
+  await userEvent.click(await within(modal).findByText("Sample Database"));
+  await userEvent.click(await within(modal).findByText("Orders"));
 
   expect(screen.getByRole("button", { name: "Get Answer" })).toBeEnabled();
 };
@@ -355,17 +390,15 @@ export const triggerMetadataChange = async () => {
 export const triggerVisualizationQueryChange = async () => {
   await userEvent.click(screen.getByText("Filter"));
 
-  const modal = screen.getByRole("dialog");
-  const total = within(modal).getByTestId("filter-column-Total");
-  const maxInput = within(total).getByPlaceholderText("Max");
+  const popover = screen.getByRole("dialog");
+  await userEvent.click(within(popover).getByText("Total"));
+  const maxInput = within(popover).getByPlaceholderText("Max");
   await userEvent.type(maxInput, "1000");
-  await userEvent.tab();
-
-  await userEvent.click(screen.getByTestId("apply-filters"));
+  await userEvent.click(await screen.findByText("Apply filter"));
 };
 
 export const triggerNotebookQueryChange = async () => {
-  await userEvent.click(screen.getByText("Row limit"));
+  await userEvent.click(await screen.findByText("Row limit"));
 
   const rowLimitInput = await within(
     screen.getByTestId("step-limit-0-0"),
@@ -381,9 +414,8 @@ export const triggerNotebookQueryChange = async () => {
  */
 export const revertNotebookQueryChange = async () => {
   const limitStep = screen.getByTestId("step-limit-0-0");
-  const limitInput = await within(limitStep).findByPlaceholderText(
-    "Enter a limit",
-  );
+  const limitInput =
+    await within(limitStep).findByPlaceholderText("Enter a limit");
 
   await userEvent.click(limitInput);
   await userEvent.type(limitInput, "{backspace}");

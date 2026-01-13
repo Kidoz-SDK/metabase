@@ -1,5 +1,4 @@
 import Color from "color";
-import _ from "underscore";
 
 import { checkNumber, isNotNull } from "metabase/lib/types";
 import { X_AXIS_DATA_KEY } from "metabase/visualizations/echarts/cartesian/constants/dataset";
@@ -16,6 +15,7 @@ import { getScaledMinAndMax } from "./axis";
 import {
   getKeyBasedDatasetTransform,
   getNormalizedDatasetTransform,
+  scaleDataset,
   transformDataset,
 } from "./dataset";
 import type {
@@ -39,20 +39,20 @@ const getSeriesModelsWithTrends = (
   seriesModels: SeriesModel[],
 ): [SeriesModel, TrendFn][] => {
   return seriesModels
-    .map(seriesModel => {
+    .map((seriesModel) => {
       // Breakout series do not support trend lines because the data grouping happens on the client
       if ("breakoutColumn" in seriesModel) {
         return null;
       }
 
       const seriesDataset = rawSeries.find(
-        series =>
+        (series) =>
           series.card.id === seriesModel.cardId ||
           (series.card.id == null && seriesModel.cardId == null),
       )?.data;
 
       const insight = seriesDataset?.insights?.find(
-        insight => insight.col === seriesModel.column.name,
+        (insight) => insight.col === seriesModel.column.name,
       );
 
       if (!insight) {
@@ -82,8 +82,8 @@ const getLimitTrendLineTransform = (
   return (datum: Datum) => {
     const transformedDatum = { ...datum };
 
-    seriesModels.forEach(seriesModel => {
-      const axis = yAxisModels.find(yAxisModel =>
+    seriesModels.forEach((seriesModel) => {
+      const axis = yAxisModels.find((yAxisModel) =>
         yAxisModel?.seriesKeys.includes(seriesModel.sourceDataKey),
       );
 
@@ -128,16 +128,20 @@ export const getTrendLines = (
     return;
   }
 
+  const visibleSeriesModels = seriesModels.filter(
+    (seriesModel) => seriesModel.visible,
+  );
+
   const seriesModelsWithTrends = getSeriesModelsWithTrends(
     rawSeries,
-    seriesModels,
+    visibleSeriesModels,
   );
 
   if (seriesModelsWithTrends.length === 0) {
     return;
   }
 
-  const dataset = chartDataset.map(datum => {
+  const dataset = chartDataset.map((datum) => {
     const trendDatum: Datum = {
       [X_AXIS_DATA_KEY]: datum[X_AXIS_DATA_KEY],
     };
@@ -162,21 +166,25 @@ export const getTrendLines = (
       color: Color(renderingContext.getColor(seriesModel.color))
         .lighten(0.25)
         .hex(),
+      visible: true,
+      column: seriesModel.column,
+      columnIndex: seriesModel.columnIndex,
     }),
   );
-  const dataKeys = trendSeriesModels.map(seriesModel => seriesModel.dataKey);
+  const dataKeys = trendSeriesModels.map((seriesModel) => seriesModel.dataKey);
 
-  const transformedDataset = transformDataset(dataset, [
+  const scaledTrendDataset = scaleDataset(dataset, trendSeriesModels, settings);
+  const transformedDataset = transformDataset(scaledTrendDataset, [
     {
       condition: settings["stackable.stack_type"] === "normalized",
       fn: getNormalizedDatasetTransform(
-        stackModels.map(stackModel => ({
+        stackModels.map((stackModel) => ({
           ...stackModel,
           seriesKeys: stackModel.seriesKeys.map(getTrendKeyForSeries),
         })),
       ),
     },
-    getKeyBasedDatasetTransform(dataKeys, value =>
+    getKeyBasedDatasetTransform(dataKeys, (value) =>
       yAxisScaleTransforms.toEChartsAxisValue(value),
     ),
     {

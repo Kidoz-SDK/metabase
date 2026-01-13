@@ -1,20 +1,17 @@
+import cx from "classnames";
 import { useEffect, useMemo, useState } from "react";
 import { t } from "ttag";
 import _ from "underscore";
 
-import Tooltip from "metabase/core/components/Tooltip";
-import styles from "metabase/css/core/animation.module.css";
+import { MetabotLogo } from "metabase/common/components/MetabotLogo";
+import animationStyles from "metabase/css/core/animation.module.css";
 import { useSelector } from "metabase/lib/redux";
 import { getUser } from "metabase/selectors/user";
-import { Box } from "metabase/ui";
+import { Tooltip } from "metabase/ui";
 
 import { getHasMetabotLogo } from "../../selectors";
 
-import {
-  GreetingLogo,
-  GreetingMessage,
-  GreetingRoot,
-} from "./HomeGreeting.styled";
+import S from "./HomeGreeting.module.css";
 
 export const HomeGreeting = (): JSX.Element => {
   const user = useSelector(getUser);
@@ -23,19 +20,15 @@ export const HomeGreeting = (): JSX.Element => {
   const message = useMemo(() => getMessage(name), [name]);
 
   return (
-    <GreetingRoot>
-      {showLogo && (
-        <Tooltip
-          tooltip={t`Don't tell anyone, but you're my favorite.`}
-          placement="bottom"
-        >
-          <MetabotGreeting />
-        </Tooltip>
-      )}
-      <GreetingMessage data-testid="greeting-message" showLogo={showLogo}>
+    <div className={S.greetingRoot}>
+      {showLogo && <MetabotGreeting />}
+      <span
+        data-testid="greeting-message"
+        className={cx(S.greetingMessage, showLogo ? S.withLogo : S.withoutLogo)}
+      >
         {message}
-      </GreetingMessage>
-    </GreetingRoot>
+      </span>
+    </div>
   );
 };
 
@@ -52,60 +45,50 @@ const getMessage = (name: string | null | undefined): string => {
   return _.sample(options) ?? "";
 };
 
-const MetabotGreeting = () => {
+export const MetabotGreeting = () => {
   const [buffer, setBuffer] = useState<string[]>([]);
   const [isCooling, setIsCooling] = useState(false);
   const [isCool, setIsCool] = useState(false);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      setBuffer(prevBuffer => {
-        const newBuffer = [...prevBuffer, event.key];
-        if (newBuffer.length > 10) {
-          newBuffer.shift();
-        }
-        return newBuffer;
-      });
+      setBuffer((prevBuffer) => [...prevBuffer, event.key].slice(-10));
     };
-
     window.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
   useEffect(() => {
     if (isCoolEnough(buffer)) {
-      setTimeout(() => {
-        setIsCooling(true);
-      }, 1);
-      setTimeout(() => {
-        setIsCool(true);
-      }, 300);
+      setTimeout(() => setIsCooling(true), 1);
+      setTimeout(() => setIsCool(true), 300);
     }
   }, [buffer]);
 
   return (
-    <Box
-      style={{
-        position: "relative",
-        width: "62px",
-        height: "40px",
-        marginInlineEnd: "0.5rem",
-      }}
+    <Tooltip
+      label={t`Don't tell anyone, but you're my favorite.`}
+      position="bottom"
     >
-      <GreetingLogo
-        isCool={isCool}
-        className={`${styles.SpinOut} ${isCooling ? styles.SpinOutActive : ""}`}
-        variant="cool"
-      />
-      <GreetingLogo
-        isCool={!isCool}
-        className={`${styles.SpinOut} ${isCooling ? styles.SpinOutActive : ""}`}
-        variant="happy"
-      />
-    </Box>
+      <div className={S.greetingLogoContainer}>
+        <MetabotLogo
+          className={cx(S.greetingLogo, animationStyles.SpinOut, {
+            [S.isCool]: isCool,
+            [S.isNotCool]: !isCool,
+            [animationStyles.SpinOutActive]: isCooling,
+          })}
+          variant="cool"
+        />
+        <MetabotLogo
+          className={cx(S.greetingLogo, animationStyles.SpinOut, {
+            [S.isCool]: !isCool,
+            [S.isNotCool]: isCool,
+            [animationStyles.SpinOutActive]: isCooling,
+          })}
+          variant="happy"
+        />
+      </div>
+    </Tooltip>
   );
 };
 

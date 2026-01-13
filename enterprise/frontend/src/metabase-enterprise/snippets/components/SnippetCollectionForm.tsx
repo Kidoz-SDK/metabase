@@ -1,21 +1,21 @@
 import { useCallback, useMemo } from "react";
-import { connect } from "react-redux";
 import { t } from "ttag";
 import _ from "underscore";
 import * as Yup from "yup";
 
 import FormCollectionPicker from "metabase/collections/containers/FormCollectionPicker";
-import Button from "metabase/core/components/Button";
-import FormErrorMessage from "metabase/core/components/FormErrorMessage";
-import FormFooter from "metabase/core/components/FormFooter";
-import FormInput from "metabase/core/components/FormInput";
-import FormSubmitButton from "metabase/core/components/FormSubmitButton";
-import FormTextArea from "metabase/core/components/FormTextArea";
-import { DEFAULT_COLLECTION_COLOR_ALIAS } from "metabase/entities/collections";
-import SnippetCollections from "metabase/entities/snippet-collections";
+import Button from "metabase/common/components/Button";
+import FormErrorMessage from "metabase/common/components/FormErrorMessage";
+import { FormFooter } from "metabase/common/components/FormFooter";
+import FormInput from "metabase/common/components/FormInput";
+import FormSubmitButton from "metabase/common/components/FormSubmitButton";
+import FormTextArea from "metabase/common/components/FormTextArea";
+import type { CollectionPickerItem } from "metabase/common/components/Pickers/CollectionPicker";
+import { isItemInCollectionOrItsDescendants } from "metabase/common/components/Pickers/utils";
+import { SnippetCollections } from "metabase/entities/snippet-collections";
 import { Form, FormProvider } from "metabase/forms";
-import { color } from "metabase/lib/colors";
 import * as Errors from "metabase/lib/errors";
+import { connect } from "metabase/lib/redux";
 import type { Collection, CollectionId } from "metabase-types/api";
 import type { State } from "metabase-types/store";
 
@@ -25,9 +25,6 @@ const SNIPPET_COLLECTION_SCHEMA = Yup.object({
     .max(100, Errors.maxLength)
     .default(""),
   description: Yup.string().nullable().max(255, Errors.maxLength).default(null),
-  color: Yup.string()
-    .nullable()
-    .default(() => color(DEFAULT_COLLECTION_COLOR_ALIAS)),
   parent_id: Yup.number().nullable().default(null),
 });
 
@@ -112,6 +109,12 @@ function SnippetCollectionForm({
     [collection.id, isEditing, handleCreate, handleUpdate, onSave],
   );
 
+  const shouldDisableItem = useCallback(
+    (item: CollectionPickerItem) =>
+      isItemInCollectionOrItsDescendants(item, passedCollection.id),
+    [passedCollection.id],
+  );
+
   return (
     <FormProvider
       initialValues={initialValues}
@@ -125,7 +128,6 @@ function SnippetCollectionForm({
             name="name"
             title={t`Give your folder a name`}
             placeholder={t`Something short but sweet`}
-            autoFocus
           />
           <FormTextArea
             name="description"
@@ -137,6 +139,9 @@ function SnippetCollectionForm({
             name="parent_id"
             title={t`Folder this should be in`}
             type="snippet-collections"
+            collectionPickerModalProps={{
+              shouldDisableItem: shouldDisableItem,
+            }}
           />
           <FormFooter>
             <FormErrorMessage inline />

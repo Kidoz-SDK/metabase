@@ -1,10 +1,9 @@
 (ns metabase.query-processor.pipeline
   (:require
    [clojure.core.async :as a]
-   [metabase.config :as config]
+   [metabase.analytics.core :as analytics]
    [metabase.driver :as driver]
    [metabase.query-processor.error-type :as qp.error-type]
-   [metabase.util :as u]
    [metabase.util.i18n :as i18n]
    [metabase.util.log :as log]))
 
@@ -16,20 +15,31 @@
   consumed."
   nil)
 
+(defn canceled?*
+  "Whether the corresponding query execution has been canceled. This is usually triggered by an HTTP connection closing when
+  running queries from the REST API. Generally prefer `canceled?`."
+  [canceled-chan]
+  (some-> canceled-chan a/poll!))
+
 (defn canceled?
   "Whether the current query execution has been canceled. This is usually triggered by an HTTP connection closing when
   running queries from the REST API; you should check this before or while doing something expensive (such as before
   running the query against a data warehouse) to avoid doing work for queries that have been canceled."
   []
-  (some-> *canceled-chan* a/poll!))
+  (canceled?* *canceled-chan*))
+
+(defn default-result-handler
+  "Default implementation for *result*."
+  [result]
+  (if (instance? Throwable result)
+    (throw result)
+    result))
 
 (defn ^:dynamic *result*
   "Called exactly once with the final result, which is the result of either [[*reduce*]] (if query completed
   successfully), or an Exception (if it did not)."
   [result]
-  (if (instance? Throwable result)
-    (throw result)
-    result))
+  (default-result-handler result))
 
 (defn ^:dynamic *execute*
   "Called by [[*run*]] to have driver run query. By default, [[metabase.driver/execute-reducible-query]]. `respond` is a
@@ -40,9 +50,11 @@
   The implementation should call `respond` with this information once it is available. `response` MUST BE CALLED
   SYNCHRONOUSLY, and [[*execute*]] should ultimately return whatever it returns."
   [driver query respond]
-  (when-not (canceled?)
-    ;; the context map that gets passed to [[driver/execute-reducible-query]] is for backwards compatibility for
-    ;; pre-#35465 code
+  (if (canceled?)
+    (do
+      (log/trace "Query was cancelled before driver execution started")
+      nil)
+    ;; Normal execution path
     (let [context {:canceled-chan *canceled-chan*}]
       (driver/execute-reducible-query driver query context respond))))
 
@@ -50,7 +62,11 @@
   "Called by [[*run*]] (inside the `respond` callback provided by it) to reduce results of query. Reduces results, then
   calls [[*result*]] with the reduced results."
   [rff metadata reducible-rows]
-  (when-not (canceled?)
+  (if (canceled?)
+    (do
+      (log/trace "Query was cancelled before reduction started")
+      nil)
+    ;; Normal execution path
     (let [[status rf-or-e] (try
                              [::ready-to-reduce (rff metadata)]
                              (catch Throwable e
@@ -60,7 +76,18 @@
           [status result]  (case status
                              ::ready-to-reduce
                              (try
-                               [::success (transduce identity rf-or-e reducible-rows)]
+                               [::success (transduce (fn [rf]
+                                                       (fn wrapper
+                                                         ([] (rf))
+                                                         ([acc]
+                                                          (analytics/inc! :metabase-query-processor/query
+                                                                          {:driver driver/*driver* :status "success"})
+                                                          (some-> *canceled-chan* a/close!)
+                                                          (rf acc))
+                                                         ([acc row]
+                                                          (rf acc row))))
+                                                     rf-or-e
+                                                     reducible-rows)]
                                (catch Throwable e
                                  [::error (ex-info (i18n/tru "Error reducing result rows: {0}" (ex-message e))
                                                    {:type qp.error-type/qp}
@@ -81,7 +108,11 @@
 (defn ^:dynamic *run*
   "Function for running the query. Calls [[*execute*]], then [[*reduce*]] on the results."
   [query rff]
-  (when-not (canceled?)
+  (if (canceled?)
+    (do
+      (log/trace "Query was cancelled before execution started")
+      nil)
+    ;; Normal execution path
     (letfn [(respond [metadata reducible-rows]
               (*reduce* rff metadata reducible-rows))]
       (try
@@ -95,14 +126,4 @@
           ;; just to be extra safe and sure that the canceled chan has gotten a message. It's a promise channel so
           ;; duplicate messages don't matter
           (some-> *canceled-chan* (a/>!! ::cancel))
-          ::cancel)))))
-
-(def ^:dynamic ^Long *query-timeout-ms*
-  "Maximum amount of time query is allowed to run, in ms."
-  ;; I don't know if these numbers make sense, but my thinking is we want to enable (somewhat) long-running queries on
-  ;; prod but for test and dev purposes we want to fail faster because it usually means I broke something in the QP
-  ;; code
-  (u/minutes->ms
-   (if config/is-prod?
-     20
-     3)))
+          nil)))))

@@ -1,8 +1,7 @@
-import { screen } from "@testing-library/react";
-
+import { screen } from "__support__/ui";
 import {
-  createMockDashboard,
   createMockCollection,
+  createMockDashboard,
 } from "metabase-types/api/mocks";
 
 import { setup } from "./setup";
@@ -10,8 +9,8 @@ import { setup } from "./setup";
 const setupEnterprise = (opts: any) => {
   return setup({
     ...opts,
-    hasEnterprisePlugins: true,
     tokenFeatures: { audit_app: true },
+    enterprisePlugins: ["audit_app", "database_routing", "collections"],
   });
 };
 
@@ -35,10 +34,12 @@ describe("DashboardHeader - enterprise", () => {
       dashboard: INSTANCE_ANALYTICS_DASHBOARD,
       collections: [INSTANCE_ANALYTICS_COLLECTION],
     });
-    expect(screen.getByRole("img", { name: /audit/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("img", { name: /audit/i }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Make a copy")).toBeInTheDocument();
 
-    //Other buttons
+    // Other buttons
     expect(
       screen.getByRole("button", { name: /bookmark/i }),
     ).toBeInTheDocument();

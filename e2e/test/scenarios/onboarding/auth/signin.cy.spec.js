@@ -1,5 +1,5 @@
+const { H } = cy;
 import { USERS } from "e2e/support/cypress_data";
-import { browseDatabases, restore } from "e2e/support/helpers";
 
 const sizes = [
   [1280, 800],
@@ -9,7 +9,7 @@ const { admin } = USERS;
 
 describe("scenarios > auth > signin", () => {
   beforeEach(() => {
-    restore();
+    H.restore();
     cy.signOut();
     cy.intercept("POST", "/api/dataset").as("dataset");
   });
@@ -75,7 +75,7 @@ describe("scenarios > auth > signin", () => {
   it("should redirect to an unsaved question after login", () => {
     cy.signInAsAdmin();
     cy.visit("/");
-    browseDatabases().click();
+    H.browseDatabases().click();
     cy.findByRole("heading", { name: "Sample Database" }).click();
     cy.findByRole("heading", { name: "Orders" }).click();
     cy.wait("@dataset");
@@ -94,7 +94,7 @@ describe("scenarios > auth > signin", () => {
     cy.findAllByRole("gridcell", { name: "37.65" });
   });
 
-  sizes.forEach(size => {
+  sizes.forEach((size) => {
     it(`should redirect from /auth/forgot_password back to /auth/login (viewport: ${size}) (metabase#12658)`, () => {
       if (Array.isArray(size)) {
         cy.viewport(size[0], size[1]);

@@ -1,6 +1,6 @@
 import userEvent from "@testing-library/user-event";
 
-import { screen, renderWithProviders } from "__support__/ui";
+import { renderWithProviders, screen } from "__support__/ui";
 import type {
   DatasetColumn,
   TableColumnOrderSetting,
@@ -43,26 +43,18 @@ const COLUMNS = [
 const COLUMN_SETTINGS = [
   createMockTableColumnOrderSetting({
     name: "TOTAL",
-    key: `["ref",["field",${ORDERS.TOTAL},null]]`,
-    fieldRef: ["field", ORDERS.TOTAL, null],
     enabled: true,
   }),
   createMockTableColumnOrderSetting({
     name: "ID",
-    key: `["ref",["field",${ORDERS.ID},null]]`,
-    fieldRef: ["field", ORDERS.ID, null],
     enabled: true,
   }),
   createMockTableColumnOrderSetting({
     name: "TAX",
-    key: `["ref",["field",${ORDERS.TAX},null]]`,
-    fieldRef: ["field", ORDERS.TAX, null],
     enabled: false,
   }),
   createMockTableColumnOrderSetting({
     name: "SUBTOTAL",
-    key: `["ref",["field",${ORDERS.SUBTOTAL},null]]`,
-    fieldRef: ["field", ORDERS.SUBTOTAL, null],
     enabled: false,
   }),
 ];
@@ -70,13 +62,15 @@ const COLUMN_SETTINGS = [
 interface SetupOpts {
   columns?: DatasetColumn[];
   columnSettings?: TableColumnOrderSetting[];
+  isShowingDetailsOnlyColumns?: boolean;
   getColumnName?: (column: DatasetColumn) => string;
 }
 
 function setup({
   columns = COLUMNS,
   columnSettings = COLUMN_SETTINGS,
-  getColumnName = column => column.display_name,
+  isShowingDetailsOnlyColumns = false,
+  getColumnName = (column) => column.display_name,
 }: SetupOpts = {}) {
   const onChange = jest.fn();
   const onShowWidget = jest.fn();
@@ -85,6 +79,7 @@ function setup({
     <TableColumnPanel
       columns={columns}
       columnSettings={columnSettings}
+      isShowingDetailsOnlyColumns={isShowingDetailsOnlyColumns}
       getColumnName={getColumnName}
       onChange={onChange}
       onShowWidget={onShowWidget}
@@ -126,6 +121,63 @@ describe("DatasetColumnSelector", () => {
     newSettings[columnIndex] = { ...newSettings[columnIndex], enabled: false };
     expect(onChange).toHaveBeenCalledWith(newSettings);
   });
+
+  it("should not show columns that are 'details-only' by default", () => {
+    setup({
+      columns: [
+        COLUMNS[0],
+        COLUMNS[1],
+        { ...COLUMNS[2], visibility_type: "details-only" },
+        COLUMNS[3],
+      ],
+      columnSettings: COLUMN_SETTINGS,
+    });
+
+    const items = screen.getAllByTestId(/draggable-item/);
+    expect(items).toHaveLength(3);
+    expect(items[0]).toHaveTextContent("Total");
+    expect(items[1]).toHaveTextContent("ID");
+    expect(items[2]).toHaveTextContent("Subtotal");
+  });
+
+  it("should be able to disable columns when 'details-only' columns are hidden", async () => {
+    const { onChange } = setup({
+      columns: [
+        COLUMNS[0],
+        COLUMNS[1],
+        { ...COLUMNS[2], visibility_type: "details-only" },
+        COLUMNS[3],
+      ],
+      columnSettings: COLUMN_SETTINGS,
+    });
+
+    await disableColumn("ID");
+
+    const columnIndex = findColumnIndex("ID", COLUMN_SETTINGS);
+    const newSettings = [...COLUMN_SETTINGS];
+    newSettings[columnIndex] = { ...newSettings[columnIndex], enabled: false };
+    expect(onChange).toHaveBeenCalledWith(newSettings);
+  });
+
+  it("should show columns that are 'details-only' if enabled", () => {
+    setup({
+      columns: [
+        COLUMNS[0],
+        COLUMNS[1],
+        { ...COLUMNS[2], visibility_type: "details-only" },
+        COLUMNS[3],
+      ],
+      columnSettings: COLUMN_SETTINGS,
+      isShowingDetailsOnlyColumns: true,
+    });
+
+    const items = screen.getAllByTestId(/draggable-item/);
+    expect(items).toHaveLength(4);
+    expect(items[0]).toHaveTextContent("Total");
+    expect(items[1]).toHaveTextContent("ID");
+    expect(items[2]).toHaveTextContent("Tax");
+    expect(items[3]).toHaveTextContent("Subtotal");
+  });
 });
 
 async function enableColumn(columnName: string) {
@@ -140,5 +192,5 @@ function findColumnIndex(
   columnName: string,
   settings: TableColumnOrderSetting[],
 ) {
-  return settings.findIndex(setting => setting.name === columnName);
+  return settings.findIndex((setting) => setting.name === columnName);
 }

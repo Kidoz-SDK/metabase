@@ -1,20 +1,33 @@
-import { popover } from "./e2e-ui-elements-helpers";
-
 export function openSeriesSettings(field, isBreakout = false) {
   if (isBreakout) {
     cy.get("[data-testid^=draggable-item]")
       .contains(field)
       .closest("[data-testid^=draggable-item]")
       .find(".Icon-ellipsis")
-      .click();
+      .click({ force: true });
   } else {
-    cy.findAllByTestId("chartsettings-field-picker")
-      .contains(field)
+    cy.findAllByTestId("chart-setting-select")
+      .then(($elements) => {
+        for (const element of $elements) {
+          if (element.value === field) {
+            return cy.wrap(element);
+          }
+        }
+      })
       .closest("[data-testid=chartsettings-field-picker]")
-      .find(".Icon-ellipsis")
-      .click();
-    popover().within(() => {
-      cy.findAllByRole("radiogroup").findByText("Style").click();
-    });
+      .icon("ellipsis")
+      .click({ force: true });
   }
+}
+
+export function openVizTypeSidebar() {
+  cy.findByTestId("viz-type-button").click();
+}
+
+export function openVizSettingsSidebar() {
+  cy.findByTestId("viz-settings-button").click();
+}
+
+export function vizSettingsSidebar() {
+  return cy.findByTestId("chartsettings-sidebar");
 }

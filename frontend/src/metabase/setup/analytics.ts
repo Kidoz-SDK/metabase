@@ -1,11 +1,16 @@
 import { trackSchemaEvent } from "metabase/lib/analytics";
+import type { SetupVersion } from "metabase-types/analytics/setup";
 import type { UsageReason } from "metabase-types/api";
 
 import type { SetupStep } from "./types";
 
-const ONBOARDING_VERSION = "1.2.0";
-const SETUP_SCHEMA_VERSION = "1-0-3";
-const SETTINGS_SCHEMA_VERSION = "1-0-2";
+/**
+ * The internal "versioning" tracker that needs to be bumbed for every significant
+ * change to the setup flow. If you update the version here, make sure to add an
+ * entry to the corresponding Notion doc:
+ * {@link https://www.notion.so/metabase/Set-up-step-seen-19f39925938d401da2111f8a3d0dc36c}.
+ */
+const ONBOARDING_VERSION: SetupVersion = "1.4.0";
 
 export const trackStepSeen = ({
   stepName,
@@ -14,7 +19,7 @@ export const trackStepSeen = ({
   stepName: SetupStep;
   stepNumber: number;
 }) => {
-  trackSchemaEvent("setup", SETUP_SCHEMA_VERSION, {
+  trackSchemaEvent("setup", {
     event: "step_seen",
     version: ONBOARDING_VERSION,
     step: stepName,
@@ -23,7 +28,7 @@ export const trackStepSeen = ({
 };
 
 export const trackUsageReasonSelected = (usageReason: UsageReason) => {
-  trackSchemaEvent("setup", SETUP_SCHEMA_VERSION, {
+  trackSchemaEvent("setup", {
     event: "usage_reason_selected",
     version: ONBOARDING_VERSION,
     usage_reason: usageReason,
@@ -31,7 +36,7 @@ export const trackUsageReasonSelected = (usageReason: UsageReason) => {
 };
 
 export const trackLicenseTokenStepSubmitted = (validTokenPresent: boolean) => {
-  trackSchemaEvent("setup", SETUP_SCHEMA_VERSION, {
+  trackSchemaEvent("setup", {
     event: "license_token_step_submitted",
     valid_token_present: validTokenPresent,
     version: ONBOARDING_VERSION,
@@ -39,7 +44,7 @@ export const trackLicenseTokenStepSubmitted = (validTokenPresent: boolean) => {
 };
 
 export const trackDatabaseSelected = (engine: string) => {
-  trackSchemaEvent("setup", SETUP_SCHEMA_VERSION, {
+  trackSchemaEvent("setup", {
     event: "database_selected",
     version: ONBOARDING_VERSION,
     database: engine,
@@ -47,7 +52,7 @@ export const trackDatabaseSelected = (engine: string) => {
 };
 
 export const trackAddDataLaterClicked = (engine?: string) => {
-  trackSchemaEvent("setup", SETUP_SCHEMA_VERSION, {
+  trackSchemaEvent("setup", {
     event: "add_data_later_clicked",
     version: ONBOARDING_VERSION,
     source: engine ? "post_selection" : "pre_selection",
@@ -55,7 +60,7 @@ export const trackAddDataLaterClicked = (engine?: string) => {
 };
 
 export const trackTrackingChanged = (isTrackingAllowed: boolean) => {
-  trackSchemaEvent("settings", SETTINGS_SCHEMA_VERSION, {
+  trackSchemaEvent("settings", {
     event: isTrackingAllowed
       ? "tracking_permission_enabled"
       : "tracking_permission_disabled",

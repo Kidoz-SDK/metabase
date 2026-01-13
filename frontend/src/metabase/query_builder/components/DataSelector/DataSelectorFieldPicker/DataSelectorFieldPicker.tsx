@@ -1,24 +1,21 @@
 import type { ReactNode } from "react";
 import { t } from "ttag";
 
+import { AccordionList } from "metabase/common/components/AccordionList";
 import {
   HoverParent,
   TableColumnInfoIcon,
-} from "metabase/components/MetadataInfo/ColumnInfoIcon";
-import AccordionList from "metabase/core/components/AccordionList";
+} from "metabase/common/components/MetadataInfo/ColumnInfoIcon";
 import CS from "metabase/css/core/index.css";
 import type { IconName } from "metabase/ui";
-import { Icon, DelayGroup } from "metabase/ui";
+import { Box, DelayGroup, Icon } from "metabase/ui";
 import type Field from "metabase-lib/v1/metadata/Field";
 import type Table from "metabase-lib/v1/metadata/Table";
 
 import DataSelectorLoading from "../DataSelectorLoading";
+import { CONTAINER_WIDTH } from "../constants";
 
-import {
-  Container,
-  HeaderContainer,
-  HeaderName,
-} from "./DataSelectorFieldPicker.styled";
+import DataSelectorFieldPickerS from "./DataSelectorFieldPicker.module.css";
 
 type DataSelectorFieldPickerProps = {
   fields: Field[];
@@ -27,12 +24,12 @@ type DataSelectorFieldPickerProps = {
   isLoading?: boolean;
   selectedField?: Field;
   selectedTable?: Table;
-  onBack: () => void;
+  onBack?: () => void;
   onChangeField: (field: Field) => void;
 };
 
 type HeaderProps = {
-  onBack: DataSelectorFieldPickerProps["onBack"];
+  onBack?: DataSelectorFieldPickerProps["onBack"];
   selectedTable: DataSelectorFieldPickerProps["selectedTable"];
 };
 
@@ -60,7 +57,7 @@ const DataSelectorFieldPicker = ({
   const sections = [
     {
       name: header,
-      items: fields.map(field => ({
+      items: fields.map((field) => ({
         name: field.displayName(),
         field: field,
       })),
@@ -76,12 +73,12 @@ const DataSelectorFieldPicker = ({
         field={item.field}
         position="top-end"
         size={18}
-        icon={item.field.dimension().icon() as unknown as IconName}
+        icon={item.field.icon() as unknown as IconName}
       />
     );
 
   return (
-    <Container>
+    <Box w={CONTAINER_WIDTH} className={DataSelectorFieldPickerS.Container}>
       <DelayGroup>
         <AccordionList
           id="FieldPicker"
@@ -94,12 +91,12 @@ const DataSelectorFieldPicker = ({
           searchable={hasFiltering}
           onChange={(item: { field: Field }) => onChangeField(item.field)}
           itemIsSelected={checkIfItemIsSelected}
-          itemIsClickable={(item: FieldWithName) => item.field}
+          itemIsClickable={(item: FieldWithName) => Boolean(item.field)}
           renderItemWrapper={renderItemWrapper}
           renderItemIcon={renderItemIcon}
         />
       </DelayGroup>
-    </Container>
+    </Box>
   );
 };
 
@@ -108,10 +105,12 @@ function renderItemWrapper(content: ReactNode) {
 }
 
 const Header = ({ onBack, selectedTable }: HeaderProps) => (
-  <HeaderContainer onClick={onBack}>
-    <Icon name="chevronleft" size={18} />
-    <HeaderName>{selectedTable?.display_name || t`Fields`}</HeaderName>
-  </HeaderContainer>
+  <Box className={DataSelectorFieldPickerS.HeaderContainer} onClick={onBack}>
+    {onBack && <Icon name="chevronleft" size={18} />}
+    <Box component="span" className={DataSelectorFieldPickerS.HeaderName}>
+      {selectedTable?.display_name || t`Fields`}
+    </Box>
+  </Box>
 );
 
 // eslint-disable-next-line import/no-default-export -- deprecated usage

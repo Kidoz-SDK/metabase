@@ -3,17 +3,16 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { jt, t } from "ttag";
 
-import { getPlan } from "metabase/common/utils/plan";
-import ExternalLink from "metabase/core/components/ExternalLink";
+import ExternalLink from "metabase/common/components/ExternalLink";
+import { useDocsUrl } from "metabase/common/hooks";
 import CS from "metabase/css/core/index.css";
-import { useSelector } from "metabase/lib/redux";
+import { MoreServerSnippetExamplesLink } from "metabase/embedding/components/MoreServerSnippetExamplesLink/MoreServerSnippetExamplesLink";
 import { getEmbedClientCodeExampleOptions } from "metabase/public/lib/code";
 import type {
   EmbedResourceType,
   ServerCodeSampleConfig,
 } from "metabase/public/lib/types";
-import { getDocsUrl, getSetting } from "metabase/selectors/settings";
-import { Box, Center, Stack, Text } from "metabase/ui";
+import { Stack, Text } from "metabase/ui";
 
 import { ClientEmbedCodePane } from "./ClientEmbedCodePane";
 import { SettingsTabLayout } from "./StaticEmbedSetupPane.styled";
@@ -34,17 +33,19 @@ export const OverviewSettings = ({
   selectedServerCodeOption,
   onClientCodeCopy,
 }: OverviewSettingsProps): JSX.Element => {
-  const docsUrl = useSelector(state =>
-    // eslint-disable-next-line no-unconditional-metabase-links-render -- Only appear to admins
-    getDocsUrl(state, { page: "embedding/static-embedding" }),
-  );
-  const plan = useSelector(state =>
-    getPlan(getSetting(state, "token-features")),
-  );
-
   const [selectedClientCodeOptionId, setSelectedClientCodeOptionId] = useState(
     clientCodeOptions[0].id,
   );
+
+  // eslint-disable-next-line no-unconditional-metabase-links-render -- This links only shows for admins.
+  const { url: docsUrl } = useDocsUrl("embedding/static-embedding", {
+    utm: {
+      utm_source: "product",
+      utm_medium: "docs",
+      utm_campaign: "embedding-static",
+      utm_content: "static-embed-settings-overview",
+    },
+  });
 
   useEffect(() => {
     if (selectedServerCodeOption) {
@@ -76,13 +77,13 @@ export const OverviewSettings = ({
           <Text>{jt`Check out the ${(
             <ExternalLink
               key="doc"
-              href={`${docsUrl}?utm_source=${plan}&utm_media=static-embed-settings-overview`}
+              href={docsUrl}
             >{t`documentation`}</ExternalLink>
           )} for more.`}</Text>
         </StaticEmbedSetupPaneSettingsContentSection>
       }
       previewSlot={
-        <Stack spacing="2rem" className={cx(CS.flexFull, CS.wFull)}>
+        <Stack gap="2rem" className={cx(CS.flexFull, CS.wFull)}>
           {serverEmbedCodeSlot}
 
           <ClientEmbedCodePane
@@ -92,18 +93,7 @@ export const OverviewSettings = ({
             onCopy={() => onClientCodeCopy(selectedClientCodeOptionId)}
           />
 
-          <Box my="1rem">
-            <Center>
-              <h4>{jt`More ${(
-                <ExternalLink
-                  key="examples"
-                  href="https://github.com/metabase/embedding-reference-apps"
-                >
-                  {t`examples on GitHub`}
-                </ExternalLink>
-              )}`}</h4>
-            </Center>
-          </Box>
+          <MoreServerSnippetExamplesLink />
         </Stack>
       }
     />
