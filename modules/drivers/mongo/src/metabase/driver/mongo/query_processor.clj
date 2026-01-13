@@ -131,28 +131,28 @@
   Note that during the compilation of joins, the field :join-alias is renamed to ::join-local to prevent prefixing the
   fields of the current join to be prefixed with the join alias."
   [[_ field-id params :as field]]
-  (letfn [(same-join-alias? [opts]
-            (and (= (:join-alias opts) (:join-alias params))
-                 (= (::join-local opts) (::join-local params))))
-          (direct-match? [entry]
-            (and (vector? entry)
-                 (= (subvec entry 0 2) [:field field-id])
-                 (same-join-alias? (entry 2))))
-          (normalized-name-match? [entry normalized-field-id]
-            (when (and (vector? entry)
-                       (= :field (first entry))
-                       (same-join-alias? (entry 2)))
-              (when-let [mapped-id (second entry)]
-                (when (integer? mapped-id)
-                  (let [candidate (field->name (driver-api/field (driver-api/metadata-provider) mapped-id))]
-                    (= normalized-field-id (normalize-projected-alias candidate)))))))]
-    (or (get *field-mappings* field)
-        (some (fn [[e n]] (when (direct-match? e) n)) *field-mappings*)
-        (when (string? field-id)
-          (let [normalized-field-id (normalize-projected-alias field-id)]
-            (some (fn [[e n]]
-                    (when (normalized-name-match? e normalized-field-id) n))
-                  *field-mappings*))))))
+  (let [mappings *field-mappings*
+        same-join-alias? (fn [opts]
+                           (and (= (:join-alias opts) (:join-alias params))
+                                (= (::join-local opts) (::join-local params))))
+        direct-match? (fn [entry]
+                        (and (vector? entry)
+                             (= (subvec entry 0 2) [:field field-id])
+                             (same-join-alias? (entry 2))))
+        normalized-field-id (when (string? field-id)
+                              (normalize-projected-alias field-id))
+        normalized-name-match? (fn [entry]
+                                 (when (and normalized-field-id
+                                            (vector? entry)
+                                            (= :field (first entry))
+                                            (same-join-alias? (entry 2)))
+                                   (when-let [mapped-id (second entry)]
+                                     (when (integer? mapped-id)
+                                       (let [candidate (field->name (driver-api/field (driver-api/metadata-provider) mapped-id))]
+                                         (= normalized-field-id (normalize-projected-alias candidate)))))))]
+    (or (get mappings field)
+        (some (fn [[e n]] (when (direct-match? e) n)) mappings)
+        (some (fn [[e n]] (when (normalized-name-match? e) n)) mappings))))
 
 (defn- get-join-alias
   "Calculates the name of the join field used for `join-alias`, if any.
