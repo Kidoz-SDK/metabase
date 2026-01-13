@@ -616,6 +616,11 @@
     (let [parsed (mongo.qp/parse-query-string "[{\"limit\": \"1000\"}]")]
       (is (not (instance? org.bson.BsonValue (get-in parsed [0 "limit"])))))))
 
+(deftest ^:parallel parse-query-string-missing-bracket-test
+  (testing "`parse-query-string` tolerates a missing closing bracket"
+    (let [parsed (mongo.qp/parse-query-string "[{\"limit\": 1000}")]
+      (is (= 1000 (get-in parsed [0 "limit"])))))))
+
 (deftest ^:parallel parse-query-string-test-2
   (mt/test-driver :mongo
     (mt/dataset qp.alternative-date-test/string-times

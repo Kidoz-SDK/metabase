@@ -1687,20 +1687,36 @@ function(bin) {
   [query]
   (generate-aggregation-pipeline (or (:query query) query)))
 
+(defn- parse-bson-array [^String s]
+  ;; Only way to parse _ejson array_ using bson library is through `BsonArray/parse`. That results in sequence
+  ;; of `org.bson.BsonDocument`s. Currently `org.bson.Document` fits our needs better as it (1) implements `Map`
+  ;; and (2) converts `BsonValue`s to java types.
+  (mapv (fn [^org.bson.BsonValue v] (-> v .asDocument .toJson org.bson.Document/parse))
+        (org.bson.BsonArray/parse s)))
+
 (defn parse-query-string
   "Parse a serialized native query. Like a normal JSON parse, but handles BSON/MongoDB extended JSON forms."
   [^String s]
-  (try
-    ;; Only way to parse _ejson array_ using bson library is through `BsonArray/parse`. That results in sequence
-    ;; of `org.bson.BsonDocument`s. Currently `org.bson.Document` fits our needs better as it (1) implements `Map`
-    ;; and (2) converts `BsonValue`s to java types.
-    (mapv (fn [^org.bson.BsonValue v] (-> v .asDocument .toJson org.bson.Document/parse))
-          (org.bson.BsonArray/parse s))
-    (catch Throwable e
-      (throw (ex-info (tru "Unable to parse query: {0}" (.getMessage e))
-                      {:type  driver-api/qp.error-type.invalid-query
-                       :query s}
-                      e)))))
+  (let [trimmed (str/trim s)]
+    (try
+      (parse-bson-array trimmed)
+      (catch Throwable e
+        (let [message (ex-message e)]
+          (if (and (string? message)
+                   (str/includes? message "Trying to read past EOF")
+                   (str/starts-with? trimmed "[")
+                   (not (str/ends-with? trimmed "]")))
+            (try
+              (parse-bson-array (str trimmed "]"))
+              (catch Throwable e2
+                (throw (ex-info (tru "Unable to parse query: {0}" (.getMessage e2))
+                                {:type  driver-api/qp.error-type.invalid-query
+                                 :query s}
+                                e2))))
+            (throw (ex-info (tru "Unable to parse query: {0}" (.getMessage e))
+                            {:type  driver-api/qp.error-type.invalid-query
+                             :query s}
+                            e))))))))
 
 (defn- mbql->native-rec
   "Compile a potentially nested MBQL query."
