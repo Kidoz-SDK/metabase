@@ -117,6 +117,13 @@
   by the nested query."
   {})
 
+(declare field->name)
+
+(defn- normalize-projected-alias [alias]
+  (if (str/starts-with? alias "_id.")
+    (subs alias 4)
+    alias))
+
 (defn- find-mapped-field-name
   "Finds the name of a mapped field, if any.
   First it does a quick exact match and if the field is not found, it searches for a field with the same ID/name and
@@ -124,14 +131,28 @@
   Note that during the compilation of joins, the field :join-alias is renamed to ::join-local to prevent prefixing the
   fields of the current join to be prefixed with the join alias."
   [[_ field-id params :as field]]
-  (or (get *field-mappings* field)
-      (some (fn [[e n]]
-              (when (and (vector? e)
-                         (= (subvec e 0 2) [:field field-id])
-                         (= (:join-alias (e 2)) (:join-alias params))
-                         (= (::join-local (e 2)) (::join-local params)))
-                n))
-            *field-mappings*)))
+  (letfn [(same-join-alias? [opts]
+            (and (= (:join-alias opts) (:join-alias params))
+                 (= (::join-local opts) (::join-local params))))
+          (direct-match? [entry]
+            (and (vector? entry)
+                 (= (subvec entry 0 2) [:field field-id])
+                 (same-join-alias? (entry 2))))
+          (normalized-name-match? [entry normalized-field-id]
+            (when (and (vector? entry)
+                       (= :field (first entry))
+                       (same-join-alias? (entry 2)))
+              (when-let [mapped-id (second entry)]
+                (when (integer? mapped-id)
+                  (let [candidate (field->name (driver-api/field (driver-api/metadata-provider) mapped-id))]
+                    (= normalized-field-id (normalize-projected-alias candidate)))))))]
+    (or (get *field-mappings* field)
+        (some (fn [[e n]] (when (direct-match? e) n)) *field-mappings*)
+        (when (string? field-id)
+          (let [normalized-field-id (normalize-projected-alias field-id)]
+            (some (fn [[e n]]
+                    (when (normalized-name-match? e normalized-field-id) n))
+                  *field-mappings*))))))
 
 (defn- get-join-alias
   "Calculates the name of the join field used for `join-alias`, if any.
@@ -1163,11 +1184,6 @@ function(bin) {
   (or (driver-api/qp.add.desired-alias opts)
       (->lvalue field-ref)))
 
-(defn- normalize-projected-alias [alias]
-  (if (str/starts-with? alias "_id.")
-    (subs alias 4)
-    alias))
-
 (mu/defn- breakouts-and-ags->projected-fields :- [:maybe [:sequential [:tuple driver-api/schema.common.non-blank-string :any]]]
   "Determine field projections for MBQL breakouts and aggregations. Returns a sequence of pairs like
   `[projected-field-name source]`."
@@ -1558,7 +1574,8 @@ function(bin) {
               (when (and (= agg-type :field)
                          (integer? field-id))
                 (let [{:keys [parent-id]} (driver-api/field (driver-api/metadata-provider) field-id)]
-                  (and parent-id (contains? field-ids parent-id)))))
+                  (when (and parent-id (contains? field-ids parent-id))
+                    (not= "_id" (:name (driver-api/field (driver-api/metadata-provider) parent-id)))))))
             fields)))
 
 (defn- handle-order-by [{:keys [order-by breakout aggregation]} pipeline-ctx]

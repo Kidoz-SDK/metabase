@@ -277,6 +277,16 @@
                 "offerId" "$_id.offerId"}
                (get-in compiled [:query 0 "$project"])))))))
 
+(deftest ^:parallel project-id-and-subfields-test
+  (mt/test-driver :mongo
+    (testing "Projecting _id and _id.* together returns both without collisions"
+      (let [compiled (qp.compile/compile
+                      (mt/mbql-query venues {:fields [[:field "_id"]
+                                                      [:field "_id.offerId"]]}))]
+        (is (= {"_id" "$_id"
+                "offerId" "$_id.offerId"}
+               (get-in compiled [:query 0 "$project"])))))))
+
 (deftest ^:parallel multiple-distinct-count-test
   (mt/test-driver :mongo
     (testing "Should generate correct queries for multiple `:distinct` count aggregations (#13097)"
