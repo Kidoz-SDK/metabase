@@ -1163,13 +1163,19 @@ function(bin) {
   (or (driver-api/qp.add.desired-alias opts)
       (->lvalue field-ref)))
 
+(defn- normalize-breakout-alias [alias]
+  (if (str/starts-with? alias "_id.")
+    (subs alias 4)
+    alias))
+
 (mu/defn- breakouts-and-ags->projected-fields :- [:maybe [:sequential [:tuple driver-api/schema.common.non-blank-string :any]]]
   "Determine field projections for MBQL breakouts and aggregations. Returns a sequence of pairs like
   `[projected-field-name source]`."
   [breakout-fields aggregations]
   (concat
    (for [field-or-expr breakout-fields]
-     [(field-alias field-or-expr) (format "$_id.%s" (field-alias field-or-expr))])
+     (let [alias (normalize-breakout-alias (field-alias field-or-expr))]
+       [alias (format "$_id.%s" alias)]))
    (for [ag aggregations
          :let [ag-name (driver-api/aggregation-name (:query *query*) ag)]]
      [ag-name true])))
@@ -1459,18 +1465,19 @@ function(bin) {
 (defn- projection-group-map [fields]
   (reduce
    (fn [m field-clause]
-     (assoc-in
-      m
-      (driver-api/match-one field-clause
-        [:field (field-id :guard integer?) _]
-        (str/split (field-alias field-clause) #"\.")
+     (let [path (driver-api/match-one field-clause
+                  [:field (field-id :guard integer?) _]
+                  (let [segments (str/split (field-alias field-clause) #"\.")]
+                    (if (and (= "_id" (first segments)) (> (count segments) 1))
+                      (vec (rest segments))
+                      segments))
 
-        [:field (field-name :guard string?) _]
-        [field-name]
+                  [:field (field-name :guard string?) _]
+                  [field-name]
 
-        [:expression expr-name _]
-        [expr-name])
-      (->rvalue field-clause)))
+                  [:expression expr-name _]
+                  [expr-name])]
+       (assoc-in m path (->rvalue field-clause))))
    (ordered-map/ordered-map)
    fields))
 
