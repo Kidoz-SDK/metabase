@@ -243,9 +243,21 @@
                   :collection  "tips"
                   :mbql?       true}
                  (qp.compile/compile
-                  (mt/mbql-query tips
-                    {:aggregation [[:count]]
-                     :breakout    [$tips.source.username]}))))
+                 (mt/mbql-query tips
+                   {:aggregation [[:count]]
+                    :breakout    [$tips.source.username]}))))
+          (testing "Breakout aliases that start with _id. don't nest under _id"
+            (is (= {:projections ["offerId" "count"]
+                    :query       [{"$group" {"_id"   {"offerId" "$_id.offerId"}
+                                             "count" {"$sum" 1}}}
+                                  {"$sort" {"_id" 1}}
+                                  {"$project" {"_id" false, "offerId" "$_id.offerId", "count" true}}]
+                    :collection  "tips"
+                    :mbql?       true}
+                   (qp.compile/compile
+                    (mt/mbql-query tips
+                      {:aggregation [[:count]]
+                       :breakout    [[:field "_id.offerId"]]})))))
           (testing "Nested fields in join condition aliases are transformed to use `_` instead of a `.` (#32182)"
             (let [query (mt/mbql-query tips
                           {:joins [{:alias "Tips"
