@@ -1163,7 +1163,7 @@ function(bin) {
   (or (driver-api/qp.add.desired-alias opts)
       (->lvalue field-ref)))
 
-(defn- normalize-breakout-alias [alias]
+(defn- normalize-projected-alias [alias]
   (if (str/starts-with? alias "_id.")
     (subs alias 4)
     alias))
@@ -1174,7 +1174,7 @@ function(bin) {
   [breakout-fields aggregations]
   (concat
    (for [field-or-expr breakout-fields]
-     (let [alias (normalize-breakout-alias (field-alias field-or-expr))]
+     (let [alias (normalize-projected-alias (field-alias field-or-expr))]
        [alias (format "$_id.%s" alias)]))
    (for [ag aggregations
          :let [ag-name (driver-api/aggregation-name (:query *query*) ag)]]
@@ -1612,12 +1612,13 @@ function(bin) {
   (if-not (seq fields)
     pipeline-ctx
     (let [new-projections (for [field (remove-child-fields fields)]
-                            [(field-alias field) (->rvalue field)])]
+                            (let [alias (normalize-projected-alias (field-alias field))]
+                              [alias (->rvalue field)]))]
       (-> pipeline-ctx
           ;; we can't ask mongo for both a parent field and its child at the same time, because mongo will throw an
           ;; error. It's also unnecessary, because the parent includes the child. However, we need to list all fields
           ;; we think we want in :projections so that we know to look for them all once we get data back.
-          (assoc :projections (map field-alias fields))
+          (assoc :projections (map (comp normalize-projected-alias field-alias) fields))
           ;; add project _id = false to keep _id from getting automatically returned unless explicitly specified
           (update :query conj {$project (into
                                          (ordered-map/ordered-map "_id" false)

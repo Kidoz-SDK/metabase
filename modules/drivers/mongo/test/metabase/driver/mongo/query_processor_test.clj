@@ -268,6 +268,15 @@
               (is (and (not (str/includes? let-lhs "."))
                        (str/includes? let-lhs "source_categories"))))))))))
 
+(deftest ^:parallel project-id-subfields-test
+  (mt/test-driver :mongo
+    (testing "Projecting _id.* fields should avoid _id path collisions"
+      (let [compiled (qp.compile/compile
+                      (mt/mbql-query venues {:fields [[:field "_id.offerId"]]}))]
+        (is (= {"_id" false
+                "offerId" "$_id.offerId"}
+               (get-in compiled [:query 0 "$project"])))))))
+
 (deftest ^:parallel multiple-distinct-count-test
   (mt/test-driver :mongo
     (testing "Should generate correct queries for multiple `:distinct` count aggregations (#13097)"
