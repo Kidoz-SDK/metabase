@@ -117,6 +117,13 @@
   by the nested query."
   {})
 
+(declare field->name)
+
+(defn- normalize-projected-alias [alias]
+  (if (str/starts-with? alias "_id.")
+    (subs alias 4)
+    alias))
+
 (defn- find-mapped-field-name
   "Finds the name of a mapped field, if any.
   First it does a quick exact match and if the field is not found, it searches for a field with the same ID/name and
@@ -124,14 +131,28 @@
   Note that during the compilation of joins, the field :join-alias is renamed to ::join-local to prevent prefixing the
   fields of the current join to be prefixed with the join alias."
   [[_ field-id params :as field]]
-  (or (get *field-mappings* field)
-      (some (fn [[e n]]
-              (when (and (vector? e)
-                         (= (subvec e 0 2) [:field field-id])
-                         (= (:join-alias (e 2)) (:join-alias params))
-                         (= (::join-local (e 2)) (::join-local params)))
-                n))
-            *field-mappings*)))
+  (let [mappings *field-mappings*
+        same-join-alias? (fn [opts]
+                           (and (= (:join-alias opts) (:join-alias params))
+                                (= (::join-local opts) (::join-local params))))
+        direct-match? (fn [entry]
+                        (and (vector? entry)
+                             (= (subvec entry 0 2) [:field field-id])
+                             (same-join-alias? (entry 2))))
+        normalized-field-id (when (string? field-id)
+                              (normalize-projected-alias field-id))
+        normalized-name-match? (fn [entry]
+                                 (when (and normalized-field-id
+                                            (vector? entry)
+                                            (= :field (first entry))
+                                            (same-join-alias? (entry 2)))
+                                   (when-let [mapped-id (second entry)]
+                                     (when (integer? mapped-id)
+                                       (let [candidate (field->name (driver-api/field (driver-api/metadata-provider) mapped-id))]
+                                         (= normalized-field-id (normalize-projected-alias candidate)))))))]
+    (or (get mappings field)
+        (some (fn [[e n]] (when (direct-match? e) n)) mappings)
+        (some (fn [[e n]] (when (normalized-name-match? e) n)) mappings))))
 
 (defn- get-join-alias
   "Calculates the name of the join field used for `join-alias`, if any.
@@ -1169,7 +1190,8 @@ function(bin) {
   [breakout-fields aggregations]
   (concat
    (for [field-or-expr breakout-fields]
-     [(field-alias field-or-expr) (format "$_id.%s" (field-alias field-or-expr))])
+     (let [alias (normalize-projected-alias (field-alias field-or-expr))]
+       [alias (format "$_id.%s" alias)]))
    (for [ag aggregations
          :let [ag-name (driver-api/aggregation-name (:query *query*) ag)]]
      [ag-name true])))
@@ -1459,18 +1481,19 @@ function(bin) {
 (defn- projection-group-map [fields]
   (reduce
    (fn [m field-clause]
-     (assoc-in
-      m
-      (driver-api/match-one field-clause
-        [:field (field-id :guard integer?) _]
-        (str/split (field-alias field-clause) #"\.")
+     (let [path (driver-api/match-one field-clause
+                  [:field (field-id :guard integer?) _]
+                  (let [segments (str/split (field-alias field-clause) #"\.")]
+                    (if (and (= "_id" (first segments)) (> (count segments) 1))
+                      (vec (rest segments))
+                      segments))
 
-        [:field (field-name :guard string?) _]
-        [field-name]
+                  [:field (field-name :guard string?) _]
+                  [field-name]
 
-        [:expression expr-name _]
-        [expr-name])
-      (->rvalue field-clause)))
+                  [:expression expr-name _]
+                  [expr-name])]
+       (assoc-in m path (->rvalue field-clause))))
    (ordered-map/ordered-map)
    fields))
 
@@ -1551,7 +1574,8 @@ function(bin) {
               (when (and (= agg-type :field)
                          (integer? field-id))
                 (let [{:keys [parent-id]} (driver-api/field (driver-api/metadata-provider) field-id)]
-                  (and parent-id (contains? field-ids parent-id)))))
+                  (when (and parent-id (contains? field-ids parent-id))
+                    (not= "_id" (:name (driver-api/field (driver-api/metadata-provider) parent-id)))))))
             fields)))
 
 (defn- handle-order-by [{:keys [order-by breakout aggregation]} pipeline-ctx]
@@ -1605,12 +1629,13 @@ function(bin) {
   (if-not (seq fields)
     pipeline-ctx
     (let [new-projections (for [field (remove-child-fields fields)]
-                            [(field-alias field) (->rvalue field)])]
+                            (let [alias (normalize-projected-alias (field-alias field))]
+                              [alias (->rvalue field)]))]
       (-> pipeline-ctx
           ;; we can't ask mongo for both a parent field and its child at the same time, because mongo will throw an
           ;; error. It's also unnecessary, because the parent includes the child. However, we need to list all fields
           ;; we think we want in :projections so that we know to look for them all once we get data back.
-          (assoc :projections (map field-alias fields))
+          (assoc :projections (map (comp normalize-projected-alias field-alias) fields))
           ;; add project _id = false to keep _id from getting automatically returned unless explicitly specified
           (update :query conj {$project (into
                                          (ordered-map/ordered-map "_id" false)
@@ -1680,20 +1705,36 @@ function(bin) {
   [query]
   (generate-aggregation-pipeline (or (:query query) query)))
 
+(defn- parse-bson-array [^String s]
+  ;; Only way to parse _ejson array_ using bson library is through `BsonArray/parse`. That results in sequence
+  ;; of `org.bson.BsonDocument`s. Currently `org.bson.Document` fits our needs better as it (1) implements `Map`
+  ;; and (2) converts `BsonValue`s to java types.
+  (mapv (fn [^org.bson.BsonValue v] (-> v .asDocument .toJson org.bson.Document/parse))
+        (org.bson.BsonArray/parse s)))
+
 (defn parse-query-string
   "Parse a serialized native query. Like a normal JSON parse, but handles BSON/MongoDB extended JSON forms."
   [^String s]
-  (try
-    ;; Only way to parse _ejson array_ using bson library is through `BsonArray/parse`. That results in sequence
-    ;; of `org.bson.BsonDocument`s. Currently `org.bson.Document` fits our needs better as it (1) implements `Map`
-    ;; and (2) converts `BsonValue`s to java types.
-    (mapv (fn [^org.bson.BsonValue v] (-> v .asDocument .toJson org.bson.Document/parse))
-          (org.bson.BsonArray/parse s))
-    (catch Throwable e
-      (throw (ex-info (tru "Unable to parse query: {0}" (.getMessage e))
-                      {:type  driver-api/qp.error-type.invalid-query
-                       :query s}
-                      e)))))
+  (let [trimmed (str/trim s)]
+    (try
+      (parse-bson-array trimmed)
+      (catch Throwable e
+        (let [message (ex-message e)]
+          (if (and (string? message)
+                   (str/includes? message "Trying to read past EOF")
+                   (str/starts-with? trimmed "[")
+                   (not (str/ends-with? trimmed "]")))
+            (try
+              (parse-bson-array (str trimmed "]"))
+              (catch Throwable e2
+                (throw (ex-info (tru "Unable to parse query: {0}" (.getMessage e2))
+                                {:type  driver-api/qp.error-type.invalid-query
+                                 :query s}
+                                e2))))
+            (throw (ex-info (tru "Unable to parse query: {0}" (.getMessage e))
+                            {:type  driver-api/qp.error-type.invalid-query
+                             :query s}
+                            e))))))))
 
 (defn- mbql->native-rec
   "Compile a potentially nested MBQL query."

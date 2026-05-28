@@ -1,6 +1,7 @@
 (ns metabase.lib.join.util
   "Some small join-related helper functions which are used from a few different namespaces."
   (:require
+   [clojure.string :as str]
    [metabase.lib.dispatch :as lib.dispatch]
    [metabase.lib.metadata :as lib.metadata]
    [metabase.lib.options :as lib.options]
@@ -103,4 +104,4 @@
         (if-let [join-alias (or (current-join-alias col)
                                 (implicit-join-name metadata-providerable col))]
           (joined-field-desired-alias join-alias source-alias)
-          source-alias))))
+          (str/replace source-alias #"^_id\\." "")))))

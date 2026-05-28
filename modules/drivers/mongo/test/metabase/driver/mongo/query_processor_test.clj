@@ -243,9 +243,21 @@
                   :collection  "tips"
                   :mbql?       true}
                  (qp.compile/compile
-                  (mt/mbql-query tips
-                    {:aggregation [[:count]]
-                     :breakout    [$tips.source.username]}))))
+                 (mt/mbql-query tips
+                   {:aggregation [[:count]]
+                    :breakout    [$tips.source.username]}))))
+          (testing "Breakout aliases that start with _id. don't nest under _id"
+            (is (= {:projections ["offerId" "count"]
+                    :query       [{"$group" {"_id"   {"offerId" "$_id.offerId"}
+                                             "count" {"$sum" 1}}}
+                                  {"$sort" {"_id" 1}}
+                                  {"$project" {"_id" false, "offerId" "$_id.offerId", "count" true}}]
+                    :collection  "tips"
+                    :mbql?       true}
+                   (qp.compile/compile
+                    (mt/mbql-query tips
+                      {:aggregation [[:count]]
+                       :breakout    [[:field "_id.offerId"]]})))))
           (testing "Nested fields in join condition aliases are transformed to use `_` instead of a `.` (#32182)"
             (let [query (mt/mbql-query tips
                           {:joins [{:alias "Tips"
@@ -255,6 +267,25 @@
                   let-lhs (-> compiled (get-in [:query 0 "$lookup" :let]) keys first)]
               (is (and (not (str/includes? let-lhs "."))
                        (str/includes? let-lhs "source_categories"))))))))))
+
+(deftest ^:parallel project-id-subfields-test
+  (mt/test-driver :mongo
+    (testing "Projecting _id.* fields should avoid _id path collisions"
+      (let [compiled (qp.compile/compile
+                      (mt/mbql-query venues {:fields [[:field "_id.offerId"]]}))]
+        (is (= {"_id" false
+                "offerId" "$_id.offerId"}
+               (get-in compiled [:query 0 "$project"])))))))
+
+(deftest ^:parallel project-id-and-subfields-test
+  (mt/test-driver :mongo
+    (testing "Projecting _id and _id.* together returns both without collisions"
+      (let [compiled (qp.compile/compile
+                      (mt/mbql-query venues {:fields [[:field "_id"]
+                                                      [:field "_id.offerId"]]}))]
+        (is (= {"_id" "$_id"
+                "offerId" "$_id.offerId"}
+               (get-in compiled [:query 0 "$project"])))))))
 
 (deftest ^:parallel multiple-distinct-count-test
   (mt/test-driver :mongo
@@ -603,6 +634,11 @@
     ;; ie. parse result does not look as follows: `#object[org.bson.BsonString 0x5f26b3a1 "BsonString{value='1000'}"]`
     (let [parsed (mongo.qp/parse-query-string "[{\"limit\": \"1000\"}]")]
       (is (not (instance? org.bson.BsonValue (get-in parsed [0 "limit"])))))))
+
+(deftest ^:parallel parse-query-string-missing-bracket-test
+  (testing "`parse-query-string` tolerates a missing closing bracket"
+    (let [parsed (mongo.qp/parse-query-string "[{\"limit\": 1000}")]
+      (is (= 1000 (get-in parsed [0 "limit"])))))))
 
 (deftest ^:parallel parse-query-string-test-2
   (mt/test-driver :mongo
