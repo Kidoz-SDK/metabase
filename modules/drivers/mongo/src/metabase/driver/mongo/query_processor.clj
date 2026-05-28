@@ -1483,14 +1483,15 @@ function(bin) {
   (reduce
    (fn [m field-clause]
      (let [path (driver-api/match-one field-clause
-                  [:field (field-id :guard integer?) _]
+                  [:field _ _]
+                  ;; MongoDB rejects a $project that suppresses `_id` while also projecting an `_id.<child>`
+                  ;; sub-path ("Path collision at _id.<child>"). Strip a leading `_id` segment from the
+                  ;; group-by path so the resulting $group._id (and downstream $project keys) don't
+                  ;; reference the `_id` namespace at all.
                   (let [segments (str/split (field-alias field-clause) #"\.")]
                     (if (and (= "_id" (first segments)) (> (count segments) 1))
                       (vec (rest segments))
                       segments))
-
-        [:field (field-name :guard string?) _]
-        (str/split (field-alias field-clause) #"\.")
 
                   [:expression expr-name _]
                   [expr-name])]
