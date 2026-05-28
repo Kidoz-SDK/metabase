@@ -257,7 +257,7 @@
                    (qp.compile/compile
                     (mt/mbql-query tips
                       {:aggregation [[:count]]
-                       :breakout    [[:field "_id.offerId"]]})))))
+                       :breakout    [[:field "_id.offerId" {:base-type :type/Text}]]})))))
           (testing "Nested fields in join condition aliases are transformed to use `_` instead of a `.` (#32182)"
             (let [query (mt/mbql-query tips
                           {:joins [{:alias "Tips"
@@ -272,7 +272,7 @@
   (mt/test-driver :mongo
     (testing "Projecting _id.* fields should avoid _id path collisions"
       (let [compiled (qp.compile/compile
-                      (mt/mbql-query venues {:fields [[:field "_id.offerId"]]}))]
+                      (mt/mbql-query venues {:fields [[:field "_id.offerId" {:base-type :type/Text}]]}))]
         (is (= {"_id" false
                 "offerId" "$_id.offerId"}
                (get-in compiled [:query 0 "$project"])))))))
@@ -281,8 +281,8 @@
   (mt/test-driver :mongo
     (testing "Projecting _id and _id.* together returns both without collisions"
       (let [compiled (qp.compile/compile
-                      (mt/mbql-query venues {:fields [[:field "_id"]
-                                                      [:field "_id.offerId"]]}))]
+                      (mt/mbql-query venues {:fields [[:field "_id" {:base-type :type/MongoBSONID}]
+                                                      [:field "_id.offerId" {:base-type :type/Text}]]}))]
         (is (= {"_id" "$_id"
                 "offerId" "$_id.offerId"}
                (get-in compiled [:query 0 "$project"])))))))
@@ -638,7 +638,7 @@
 (deftest ^:parallel parse-query-string-missing-bracket-test
   (testing "`parse-query-string` tolerates a missing closing bracket"
     (let [parsed (mongo.qp/parse-query-string "[{\"limit\": 1000}")]
-      (is (= 1000 (get-in parsed [0 "limit"])))))))
+      (is (= 1000 (get-in parsed [0 "limit"]))))))
 
 (deftest ^:parallel parse-query-string-test-2
   (mt/test-driver :mongo
