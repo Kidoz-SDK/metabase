@@ -17,6 +17,11 @@
    [metabase.util.number :as u.number]
    [metabase.util.time :as u.time]))
 
+(def ^:private all-filter-operators
+  [:= :!= :> :< :>= :<= :between :inside
+   :contains :does-not-contain :starts-with :ends-with
+   :is-null :not-null :is-empty :not-empty])
+
 (deftest ^:parallel basic-filter-parts-test
   (let [query (-> (lib/query meta/metadata-provider (meta/table-metadata :users))
                   (lib/join (-> (lib/join-clause (meta/table-metadata :checkins)
@@ -30,9 +35,8 @@
                                                    (meta/field-metadata :venues :id))])
                                 (lib/with-join-fields :all))))]
     (doseq [col (lib/filterable-columns query)
-            op (lib/filterable-column-operators col)
-            :let [short-op (:short op)
-                  expression-clause (case short-op
+            short-op all-filter-operators
+            :let [expression-clause (case short-op
                                       :between (lib/expression-clause short-op [col col col] {})
                                       (:contains :does-not-contain :starts-with :ends-with) (lib/expression-clause short-op [col "123"] {})
                                       (:is-null :not-null :is-empty :not-empty) (lib/expression-clause short-op [col] {})
@@ -97,12 +101,12 @@
                [{:lib/type :metadata/column
                  :lib/source-uuid string?
                  :effective-type :type/Integer
-                 :metabase.lib.field/binning {:strategy :default}
-                 :operators (comp vector? not-empty)
+                 :lib/binning {:strategy :default}
+
                  :active true
                  :id (:id checkins-user-id-col)
                  :display-name "User ID: Auto binned"
-                 :metabase.lib.join/join-alias "Checkins"}
+                 :lib/join-alias "Checkins"}
                 (assoc (m/filter-vals some? (meta/field-metadata :users :id)) :display-name "ID: Auto binned")]}
               (lib/expression-parts query (lib/= (lib/with-binning checkins-user-id-col {:strategy :default})
                                                  (lib/with-binning user-id-col {:strategy :default}))))))
@@ -113,11 +117,11 @@
                [{:lib/type :metadata/column
                  :lib/source-uuid string?
                  :effective-type :type/Date
-                 :operators (comp vector? not-empty)
+
                  :id (:id checkins-date-col)
-                 :metabase.lib.field/temporal-unit :day
+                 :lib/temporal-unit :day
                  :display-name "Date: Day"
-                 :metabase.lib.join/join-alias "Checkins"}
+                 :lib/join-alias "Checkins"}
                 (assoc (m/filter-vals some? (meta/field-metadata :users :last-login)) :display-name "Last Login: Day")]}
               (lib/expression-parts query (lib/= (lib/with-temporal-bucket checkins-date-col :day)
                                                  (lib/with-temporal-bucket user-last-login-col :day))))))))
@@ -1150,14 +1154,6 @@
                {:type :native-query-snippet :id 40}]
               (lib/dependent-metadata query nil :question))))))
 
-(deftest ^:parallel table-or-card-dependent-metadata-test
-  (testing "start from table"
-    (is (= [{:type :table, :id (meta/id :checkins)}]
-           (lib/table-or-card-dependent-metadata meta/metadata-provider (meta/id :checkins)))))
-  (testing "start from card"
-    (is (= [{:type :table, :id "card__1"}]
-           (lib/table-or-card-dependent-metadata lib.tu/metadata-provider-with-card "card__1")))))
-
 (deftest ^:parallel expand-temporal-expression-test
   (let [update-temporal-unit (fn [expr temporal-type] (update-in expr [2 1] assoc :temporal-unit temporal-type))
         expr [:=
@@ -1177,3 +1173,21 @@
                       (= false
                          (#'lib.fe-util/expandable-temporal-expression? expr)))
           :minute :day)))))
+
+(deftest ^:parallel expand-temporal-expression-preserves-local-date-test
+  (testing "values with a timezone offset must produce a range on the offset's local calendar day, not UTC (#72937)"
+    ;; The drill-thru/underlying-records path calls expand-temporal-expression directly for `:day`, and the FE
+    ;; can pass values stamped with the report-timezone offset (e.g. Asia/Shanghai +08:00). Truncating those to
+    ;; a calendar day must keep the original date — converting to UTC first shifts the day backwards.
+    (let [field-with-unit (fn [unit] [:field {:lib/uuid "3fcaefe5-5c20-4cbc-98ed-6007b67843a3"
+                                              :temporal-unit unit} 111])
+          expr-with       (fn [unit value] [:= {:lib/uuid "4fcaefe5-5c20-4cbc-98ed-6007b67843a4"}
+                                            (field-with-unit unit) value])]
+      (are [unit value start end]
+           (=? [:between map? [:field {:temporal-unit unit} int?] start end]
+               (#'lib.fe-util/expand-temporal-expression (expr-with unit value)))
+        :day   "2024-05-13T00:00:00Z"      "2024-05-13" "2024-05-13"
+        :day   "2024-05-13T00:00:00+08:00" "2024-05-13" "2024-05-13"
+        :day   "2024-05-13T00:00:00-08:00" "2024-05-13" "2024-05-13"
+        :week  "2024-05-13T00:00:00+08:00" "2024-05-12" "2024-05-18"
+        :month "2024-05-01T00:00:00+08:00" "2024-05-01" "2024-05-31"))))

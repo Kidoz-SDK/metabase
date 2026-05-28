@@ -3,10 +3,10 @@ import {
   useGetMeasureQuery,
   useListMeasuresQuery,
 } from "metabase/api";
-import { color } from "metabase/lib/colors";
-import { createEntity, entityCompatibleQuery } from "metabase/lib/entities";
 import { MeasureSchema } from "metabase/schema";
 import { getMetadata } from "metabase/selectors/metadata";
+
+import { createEntity, entityCompatibleQuery } from "./utils";
 
 /**
  * @deprecated use "metabase/api" instead
@@ -17,12 +17,12 @@ export const Measures = createEntity({
   path: "/api/measure",
   schema: MeasureSchema,
 
-  rtk: {
+  rtk: () => ({
     getUseGetQuery: () => ({
       useGetQuery,
     }),
     useListQuery: useListMeasuresQuery,
-  },
+  }),
 
   api: {
     list: (entityQuery, dispatch) =>
@@ -51,23 +51,12 @@ export const Measures = createEntity({
       ),
   },
 
-  objectActions: {
-    setArchived: (
-      { id },
-      archived,
-      { revision_message = archived ? "(Archive)" : "(Unarchive)" } = {},
-    ) => Measures.actions.update({ id }, { archived, revision_message }),
-
-    delete: null,
-  },
-
   selectors: {
     getObject: (state, { entityId }) => getMetadata(state).measure(entityId),
   },
 
   objectSelectors: {
     getName: (measure) => measure && measure.name,
-    getColor: () => color("summarize"),
   },
 });
 

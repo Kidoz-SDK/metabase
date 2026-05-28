@@ -1,9 +1,9 @@
 (ns metabase.legacy-mbql.util
-  "Utilitiy functions for working with MBQL queries.
+  "Utility functions for working with MBQL queries.
 
   DEPRECATED: Use [[metabase.lib.core]] for MBQL manipulation in all new code."
   {:deprecated "0.57.0"}
-  (:refer-clojure :exclude [replace some mapv every? not-empty get-in #?(:clj for)])
+  (:refer-clojure :exclude [some mapv every? not-empty get-in #?(:clj for)])
   (:require
    #?@(:clj
        [[metabase.legacy-mbql.jvm-util :as mbql.jvm-u]])
@@ -13,11 +13,11 @@
    [metabase.lib.schema.common :as lib.schema.common]
    [metabase.lib.schema.id :as lib.schema.id]
    [metabase.lib.schema.ref :as lib.schema.ref]
-   [metabase.lib.util.match :as lib.util.match]
    [metabase.util :as u]
    [metabase.util.i18n :as i18n]
    [metabase.util.log :as log]
    [metabase.util.malli :as mu]
+   [metabase.util.match :as match]
    [metabase.util.performance :refer [some mapv every? not-empty get-in #?(:clj for)]]
    [metabase.util.time :as u.time]))
 
@@ -84,11 +84,9 @@
 (defn- combine-compound-filters-of-type
   {:deprecated "0.57.0"}
   [compound-type subclauses]
-  (mapcat #(lib.util.match/match-lite %
-             [(t :guard (= t compound-type)) & args]
-             args
-             _
-             [%])
+  (mapcat #(match/match-one %
+             [#{compound-type} & args] args
+             _                         [%])
           subclauses))
 
 (declare simplify-compound-filter)
@@ -162,7 +160,7 @@
   "Rewrite `:inside` filter clauses as a pair of `:between` clauses."
   {:deprecated "0.57.0"}
   [m]
-  (lib.util.match/replace m
+  (match/replace m
     [:inside lat-field lon-field lat-max lon-min lat-min lon-max]
     [:and
      [:between lat-field lat-min lat-max]
@@ -172,7 +170,7 @@
   "Rewrite `:is-null` and `:not-null` filter clauses as simpler `:=` and `:!=`, respectively."
   {:deprecated "0.57.0"}
   [m]
-  (lib.util.match/replace m
+  (match/replace m
     [:is-null field]  [:=  field nil]
     [:not-null field] [:!= field nil]))
 
@@ -196,7 +194,7 @@
   {:deprecated "0.57.0"}
   [m]
   #_{:clj-kondo/ignore [:deprecated-var]}
-  (lib.util.match/replace m
+  (match/replace m
     [:is-empty clause]
     (if (emptyable? clause)
       [:or [:= clause nil] [:= clause ""]]
@@ -212,11 +210,11 @@
   {:deprecated "0.57.0"}
   [m unit]
   #_{:clj-kondo/ignore [:deprecated-var]}
-  (lib.util.match/replace m
+  (match/replace m
     [:field id-or-name opts]
     [:field id-or-name (assoc opts :temporal-unit unit)]
 
-    :expression
+    [:expression & _]
     (let [[_expression expression-name opts] &match]
       [:expression expression-name (assoc opts :temporal-unit unit)])))
 
@@ -225,21 +223,21 @@
   {:deprecated "0.57.0"}
   [m]
   #_{:clj-kondo/ignore [:deprecated-var]}
-  (lib.util.match/replace m
-    [:time-interval field-or-expression n unit] (recur [:time-interval field-or-expression n unit nil])
+  (match/replace m
+    [:time-interval field-or-expression n unit] (&recur [:time-interval field-or-expression n unit nil])
 
     ;; replace current/last/next with corresponding value of n and recur
-    [:time-interval field-or-expression :current unit options] (recur [:time-interval field-or-expression  0 unit options])
-    [:time-interval field-or-expression :last    unit options] (recur [:time-interval field-or-expression -1 unit options])
-    [:time-interval field-or-expression :next    unit options] (recur [:time-interval field-or-expression  1 unit options])
+    [:time-interval field-or-expression :current unit options] (&recur [:time-interval field-or-expression  0 unit options])
+    [:time-interval field-or-expression :last    unit options] (&recur [:time-interval field-or-expression -1 unit options])
+    [:time-interval field-or-expression :next    unit options] (&recur [:time-interval field-or-expression  1 unit options])
 
-    [:time-interval field-or-expression (n :guard #{-1}) unit (_ :guard :include-current)]
+    [:time-interval field-or-expression (n :guard #{-1}) unit {:include-current &truthy}]
     [:between
      (replace-field-or-expression field-or-expression unit)
      [:relative-datetime n unit]
      [:relative-datetime 0 unit]]
 
-    [:time-interval field-or-expression (n :guard #{1}) unit (_ :guard :include-current)]
+    [:time-interval field-or-expression (n :guard #{1}) unit {:include-current &truthy}]
     [:between
      (replace-field-or-expression field-or-expression unit)
      [:relative-datetime 0 unit]
@@ -248,7 +246,7 @@
     [:time-interval field-or-expression (n :guard #{-1 0 1}) unit _]
     [:= (replace-field-or-expression field-or-expression unit) [:relative-datetime n unit]]
 
-    [:time-interval field-or-expression (n :guard neg?) unit (_ :guard :include-current)]
+    [:time-interval field-or-expression (n :guard neg?) unit {:include-current &truthy}]
     [:between
      (replace-field-or-expression field-or-expression unit)
      [:relative-datetime n unit]
@@ -260,7 +258,7 @@
      [:relative-datetime n unit]
      [:relative-datetime -1 unit]]
 
-    [:time-interval field-or-expression n unit (_ :guard :include-current)]
+    [:time-interval field-or-expression n unit {:include-current &truthy}]
     [:between
      (replace-field-or-expression field-or-expression unit)
      [:relative-datetime 0 unit]
@@ -277,7 +275,7 @@
   {:deprecated "0.57.0"}
   [m]
   #_{:clj-kondo/ignore [:deprecated-var]}
-  (lib.util.match/replace
+  (match/replace
     m
     [:relative-time-interval col value bucket offset-value offset-bucket]
     (let [col-default-bucket (cond-> col (and (vector? col) (= 3 (count col)))
@@ -300,7 +298,7 @@
   {:deprecated "0.57.0"}
   [m]
   #_{:clj-kondo/ignore [:deprecated-var]}
-  (lib.util.match/replace
+  (match/replace
     m
     [:during col value unit]
     (let [col-default-bucket (cond-> col
@@ -317,8 +315,7 @@
   {:deprecated "0.57.0"}
   [m]
   #_{:clj-kondo/ignore [:deprecated-var]}
-  (lib.util.match/replace
-    m
+  (match/replace m
     [:if & args]
     (into [:case] args)))
 
@@ -327,7 +324,7 @@
   {:deprecated "0.57.0"}
   [m]
   #_{:clj-kondo/ignore [:deprecated-var]}
-  (lib.util.match/replace m
+  (match/replace m
     [:in & args]
     (into [:=] args)
 
@@ -343,7 +340,7 @@
   {:deprecated "0.57.0"}
   [m]
   #_{:clj-kondo/ignore [:deprecated-var]}
-  (lib.util.match/replace m
+  (match/replace m
     [:does-not-contain & args]
     [:not (into [:contains] args)]))
 
@@ -357,12 +354,12 @@
 
   Note that the optional options map is in different positions for `:contains`, `:does-not-contain`, `:starts-with` and
   `:ends-with` depending on the number of arguments. 2-argument forms use the legacy style `[:contains field x opts]`.
-  Multi-argument forms use pMBQL style with the options at index 1, **even if there are no options**:
+  Multi-argument forms use MBQL 5 style with the options at index 1, **even if there are no options**:
   `[:contains {} field x y z]`."
   {:deprecated "0.57.0"}
   [m]
   #_{:clj-kondo/ignore [:deprecated-var]}
-  (lib.util.match/replace m
+  (match/replace m
     [:= field x y & more]
     (apply vector :or (for [x (concat [x y] more)]
                         [:= field x]))
@@ -386,12 +383,12 @@
   {:deprecated "0.57.0"}
   [m]
   #_{:clj-kondo/ignore [:deprecated-var]}
-  (lib.util.match/replace m
-    [clause field & (args :guard (partial some (partial = [:relative-datetime :current])))]
-    (let [temporal-unit (or (lib.util.match/match-lite-recursive field
+  (match/replace m
+    [clause field & (args :guard (some #{[:relative-datetime :current]} args))]
+    (let [temporal-unit (or (match/match-one field
                               [:field _ {:temporal-unit temporal-unit}] temporal-unit)
                             :default)]
-      (into [clause field] (lib.util.match/replace args
+      (into [clause field] (match/replace args
                              [:relative-datetime :current]
                              [:relative-datetime 0 temporal-unit])))))
 
@@ -423,16 +420,16 @@
   {:deprecated "0.57.0"}
   [m]
   #_{:clj-kondo/ignore [:deprecated-var]}
-  (lib.util.match/replace m
+  (match/replace m
     [(op :guard temporal-extract-ops) field & args]
     [:temporal-extract field (temporal-extract-ops->unit [op (first args)])]))
 
 (defn- desugar-divide-with-extra-args
   {:deprecated "0.57.0"}
   [expression]
-  (lib.util.match/replace expression
+  (match/replace expression
     [:/ x y z & more]
-    (recur (into [:/ [:/ x y]] (cons z more)))))
+    (&recur (into [:/ [:/ x y]] (cons z more)))))
 
 (defn- temporal-case-expression
   "Creates a `:case` expression with a condition for each value of the given unit."
@@ -454,13 +451,13 @@
   {:deprecated "0.57.0"}
   [expression]
   #_{:clj-kondo/ignore [:deprecated-var]}
-  (lib.util.match/replace expression
+  (match/replace expression
     [:month-name column]
-    (recur (temporal-case-expression column :month-of-year 12))
+    (&recur (temporal-case-expression column :month-of-year 12))
     [:quarter-name column]
-    (recur (temporal-case-expression column :quarter-of-year 4))
+    (&recur (temporal-case-expression column :quarter-of-year 4))
     [:day-name column]
-    (recur (temporal-case-expression column :day-of-week 7))))
+    (&recur (temporal-case-expression column :day-of-week 7))))
 
 (mu/defn desugar-expression :- ::mbql.s/FieldOrExpressionDef
   "Rewrite various 'syntactic sugar' expressions like `:/` with more than two args into something simpler for drivers
@@ -614,8 +611,8 @@
    (aggregation-at-index query index 0))
 
   ([query         :- ::mbql.s/Query
-    index         :- ::lib.schema.common/int-greater-than-or-equal-to-zero
-    nesting-level :- ::lib.schema.common/int-greater-than-or-equal-to-zero]
+    index         :- nat-int?
+    nesting-level :- nat-int?]
    (if (zero? nesting-level)
      (or (nth (get-in query [:query :aggregation]) index)
          (throw (ex-info (i18n/tru "No aggregation at index: {0}" index) {:index index})))
@@ -724,7 +721,7 @@
   (not-empty
    (into #{}
          (comp cat (filter some?))
-         (lib.util.match/match coll
+         (match/match-many coll
            [:field (id :guard integer?) opts]
            [id (:source-field opts)]))))
 

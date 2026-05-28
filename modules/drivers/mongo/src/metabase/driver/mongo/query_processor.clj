@@ -469,7 +469,8 @@ function(bin) {
                 (->rvalue (assoc (driver-api/field (driver-api/metadata-provider) id-or-name)
                                  ::source-alias source-alias
                                  ::join-field   join-field
-                                 ::inherited?   (not (pos-int? (driver-api/qp.add.source-table opts))))))
+                                 ::inherited?   (not (or (pos-int? (driver-api/qp.add.source-table opts))
+                                                         (:qp/allow-coercion-for-columns-without-integer-qp.add.source-table opts))))))
               (if-let [mapped (find-mapped-field-name field)]
                 (str \$ mapped)
                 (str \$ (scope-with-join-field (name id-or-name) join-field source-alias))))
@@ -1066,7 +1067,7 @@ function(bin) {
   See [[find-mapped-field-name]] for an explanation why this is done."
   [expr alias]
   (driver-api/replace expr
-    [:field _ {:join-alias alias}]
+    [:field _ {:join-alias (a :guard (= a alias))}]
     (update &match 2 set/rename-keys {:join-alias ::join-local})))
 
 (defn- get-field-mappings [source-query projections]
@@ -1096,8 +1097,8 @@ function(bin) {
         source-field-mappings (get-field-mappings source-query projections)
         ;; Find the fields the join condition refers to that are not coming from the joined query.
         ;; These have to be bound in the :let property of the $lookup stage, they cannot be referred to directly.
-        own-fields (driver-api/match condition
-                     [:field _ (_ :guard #(not= (:join-alias %) alias))])
+        own-fields (driver-api/match-many condition
+                     [:field _ (opts :guard (not= (:join-alias opts) alias))] &match)
         ;; Map the own fields to a fresh alias and to its rvalue.
         mapping (map (fn [f] (let [alias (-> (format "let_%s_" (->lvalue f))
                                              ;; ~ in let aliases provokes a parse error in Mongo. For correct function,
@@ -1144,7 +1145,7 @@ function(bin) {
 (defn- aggregation->rvalue [ag]
   (driver-api/match-one ag
     [:aggregation-options ag' _]
-    (recur ag')
+    (&recur ag')
 
     [:count]
     {$sum 1}
@@ -1156,7 +1157,7 @@ function(bin) {
 
     ;; these aggregation types can all be used in expressions as well so their implementations live above in the
     ;; general [[->rvalue]] implementations
-    #{:avg :stddev :sum :min :max}
+    [#{:avg :stddev :sum :min :max} & _]
     (->rvalue &match)
 
     [:distinct arg]
@@ -1168,9 +1169,9 @@ function(bin) {
                   :else 0}}}
 
     [:count-where pred]
-    (recur [:sum-where [:value 1] pred])
+    (&recur [:sum-where [:value 1] pred])
 
-    :else
+    _
     (throw
      (ex-info (tru "Don''t know how to handle aggregation {0}" ag)
               {:type :invalid-query, :clause ag}))))
@@ -1295,9 +1296,9 @@ function(bin) {
            [(str \$ aggr-name) (assoc aggregations-seen aggr-expr aggr-name)])
 
          :else
-         (reduce (fn [[ges as] arg]
+         (reduce (fn [[ges as] arg] ; codespell:ignore
                    (let [[ge as] (extract-aggregations arg parent-name as)]
-                     [(conj ges ge) as]))
+                     [(conj ges ge) as])) ; codespell:ignore
                  [[op] aggregations-seen]
                  args)))
      [aggr-expr aggregations-seen])))
@@ -1488,8 +1489,8 @@ function(bin) {
                       (vec (rest segments))
                       segments))
 
-                  [:field (field-name :guard string?) _]
-                  [field-name]
+        [:field (field-name :guard string?) _]
+        (str/split (field-alias field-clause) #"\.")
 
                   [:expression expr-name _]
                   [expr-name])]
@@ -1688,12 +1689,11 @@ function(bin) {
   "Return `:collection` from a source query, if it exists."
   [query]
   (driver-api/match-one query
-    (_ :guard (every-pred map? :collection))
+    {:collection (collection :guard identity)}
     ;; ignore source queries inside `:joins` or `:collection` outside of a `:source-query`
-    (when (let [parents (set &parents)]
-            (and (contains? parents :source-query)
-                 (not (contains? parents :joins))))
-      (:collection &match))))
+    (when (and (some #{:source-query} &parents)
+               (not (some #{:joins} &parents)))
+      collection)))
 
 (defn- log-aggregation-pipeline [form]
   (when-not driver-api/*disable-qp-logging*
@@ -1803,13 +1803,12 @@ function(bin) {
                 [:field source-alias opts]
                 [:field id-or-name opts])))]
     (driver-api/replace form
-      :field
+      [:field & _]
       (update-field-ref &match)
 
-      (join :guard (every-pred map?
-                               driver-api/qp.add.alias
-                               #(not= (driver-api/qp.add.alias %) (:alias %))))
-      (recur (assoc join :alias (driver-api/qp.add.alias join))))))
+      (:and join
+            {driver-api/qp.add.alias (add-alias :guard (and add-alias (not= add-alias (:alias join))))})
+      (&recur (assoc join :alias add-alias)))))
 
 (defn- preprocess
   [inner-query]

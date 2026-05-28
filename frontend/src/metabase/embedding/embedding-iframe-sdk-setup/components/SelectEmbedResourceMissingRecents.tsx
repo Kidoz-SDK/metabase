@@ -24,18 +24,18 @@ export const SelectEmbedResourceMissingRecents = ({
       py="xl"
       data-testid="embed-resource-missing-recents"
     >
-      <Icon name={embedIcon} size={48} c="text-light" />
+      <Icon name={embedIcon} size={48} c="text-tertiary" />
 
       <Stack align="center" gap="xs">
         <Text fw="bold" size="md">
           {getEmptyStateTitle(experience)}
         </Text>
 
-        <Text size="sm" c="text-medium" ta="center">
+        <Text size="sm" c="text-secondary" ta="center">
           {getEmptyStateDescription(experience)}
         </Text>
 
-        <Text size="sm" c="text-medium" ta="center">
+        <Text size="sm" c="text-secondary" ta="center">
           {getSearchLink(experience, openPicker)}
         </Text>
       </Stack>
@@ -66,12 +66,12 @@ const getSearchLink = (
       "dashboard",
       () =>
         c("{0} is a link button to search for dashboards")
-          .jt`You can ${(<Anchor size="sm" onClick={openPicker} key="picker-link" inline>{t`search for dashboards`}</Anchor>)} to embed.`,
+          .jt`You can ${<Anchor size="sm" onClick={openPicker} key="picker-link" inline>{t`search for dashboards`}</Anchor>} to embed.`,
     )
     .with(
       "chart",
       () =>
         c("{0} is a link button to search for charts")
-          .jt`You can ${(<Anchor size="sm" onClick={openPicker} key="picker-link" inline>{t`search for charts`}</Anchor>)} to embed.`,
+          .jt`You can ${<Anchor size="sm" onClick={openPicker} key="picker-link" inline>{t`search for charts`}</Anchor>} to embed.`,
     )
     .otherwise(() => null);

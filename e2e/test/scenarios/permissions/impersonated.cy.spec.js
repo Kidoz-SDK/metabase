@@ -1,6 +1,5 @@
 const { H } = cy;
 import { USER_GROUPS } from "e2e/support/cypress_data";
-import * as PH from "e2e/test/scenarios/admin/performance/helpers/e2e-strategy-form-helpers";
 
 const { ALL_USERS_GROUP, COLLECTION_GROUP } = USER_GROUPS;
 
@@ -109,16 +108,15 @@ describe("impersonated permission", { tags: "@external" }, () => {
         H.saveQuestion("foo", undefined, {
           path: ["Our analytics", "First collection"],
           select: true,
-          tab: "Browse",
         });
 
         cy.log("configure caching");
-        PH.openSidebar("question");
+        H.openQuestionActions("Edit settings");
         cy.findByLabelText("When to get new results").click();
-        PH.cacheStrategySidesheet().within(() => {
+        H.cacheStrategySidesheet().within(() => {
           cy.findByText(/Use default/).click();
           cy.findByText(/Caching settings/).should("be.visible");
-          PH.durationRadioButton().click();
+          H.durationRadioButton().click();
           cy.findByRole("button", { name: /Save/ }).click();
         });
 

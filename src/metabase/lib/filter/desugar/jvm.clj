@@ -2,8 +2,8 @@
   "This namespace contains functionality that is not compatible with js."
   (:require
    [metabase.lib.schema.mbql-clause :as lib.schema.mbql-clause]
-   [metabase.lib.util.match :as lib.util.match]
-   [metabase.util.malli :as mu]))
+   [metabase.util.malli :as mu]
+   [metabase.util.match :as match]))
 
 ;;;; Following regex definitions are incompatible with Safari browser. Code is unused on FE.
 
@@ -141,16 +141,16 @@
 (mu/defn desugar-host-and-domain :- ::lib.schema.mbql-clause/clause
   "Unwrap host and domain."
   [expression :- ::lib.schema.mbql-clause/clause]
-  (lib.util.match/replace expression
+  (match/replace expression
     [:host opts expr]
     ;; TODO (Cam 8/18/25) -- seems weird that we don't support Regex literals in the regex clauses and have to call (str ...)
-    (recur [:regex-match-first opts expr (str host-regex)])
+    (&recur [:regex-match-first opts expr (str host-regex)])
 
     [:domain opts expr]
-    (recur [:regex-match-first opts expr (str domain-regex)])
+    (&recur [:regex-match-first opts expr (str domain-regex)])
 
     [:subdomain opts expr]
-    (recur [:regex-match-first opts expr (str subdomain-regex)])
+    (&recur [:regex-match-first opts expr (str subdomain-regex)])
 
     [:path opts expr]
-    (recur [:regex-match-first opts expr (str path-regex)])))
+    (&recur [:regex-match-first opts expr (str path-regex)])))

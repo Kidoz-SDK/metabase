@@ -54,6 +54,10 @@
   "Valid Measure ID"
   pos-int?)
 
+(mr/def ::metric
+  "Valid Metric ID (metrics are Cards with type :metric)"
+  pos-int?)
+
 (mr/def ::snippet
   "Valid Snippet ID"
   pos-int?)
@@ -92,10 +96,6 @@
 
 (mr/def ::collection
   "Valid Collection ID"
-  pos-int?)
-
-(mr/def ::document
-  "Valid Document ID"
   pos-int?)
 
 (mr/def ::sandbox

@@ -20,6 +20,7 @@
    [metabase.util.log :as log]
    [metabase.util.malli :as mu]
    [metabase.util.malli.schema :as ms]
+   [metabase.util.password :as u.password]
    [throttle.core :as throttle]
    [toucan2.core :as t2]))
 
@@ -85,7 +86,7 @@
     (throttle/check throttler throttle-key)))
 
 (mu/defn- login :- session.schema/SessionSchema
-  "Attempt to login with different avaialable methods with `username` and `password`, returning new Session ID or
+  "Attempt to login with different available methods with `username` and `password`, returning new Session ID or
   throwing an Exception if login could not be completed."
   [username    :- ms/NonBlankString
    password    :- ms/NonBlankString
@@ -164,16 +165,30 @@
   {:email      (throttle/make-throttler :email :attempts-threshold 3 :attempt-ttl-ms 1000)
    :ip-address (throttle/make-throttler :email :attempts-threshold 50)})
 
-(defn- password-reset-disabled?
-  "Disable password reset for all users created with SSO logins, unless those Users were created with Google SSO
-  in which case disable reset for them as long as the Google SSO feature is enabled.
+(defn- sso-password-reset-disabled?
+  "Disable password reset for users whose SSO provider is still active — they should use SSO.
+   When a provider is no longer available (e.g., after license downgrade), allow password reset
+   so users aren't locked out."
+  [sso-source]
+  (and (some? sso-source)
+       (sso/sso-source-enabled? sso-source)))
 
-  Disable password reset for any support users -- users with a auth-identity of type `support-access-request`."
-  [user-id sso-source]
-  (cond
-    (t2/exists? :model/AuthIdentity :user_id user-id :provider "support-access-grant") true
-    (and (= sso-source :google) (not (sso/sso-enabled?))) (sso/google-auth-enabled)
-    :else (some? sso-source)))
+(defn- refresh-support-access-token!
+  "Refresh the reset token on an existing support-access-grant AuthIdentity, preserving the grant
+   binding. Returns the new plaintext token, or nil if the grant has expired."
+  [user-id]
+  (when-let [auth-identity (t2/select-one :model/AuthIdentity
+                                          :user_id user-id
+                                          :provider "support-access-grant")]
+    (let [grant-ends-at (get-in auth-identity [:credentials :grant_ends_at])]
+      (when (and grant-ends-at (t/before? (t/instant) (t/instant grant-ends-at)))
+        (let [token (auth-identity/generate-reset-token user-id)]
+          (t2/update! :model/AuthIdentity (:id auth-identity)
+                      {:credentials {:token_hash   (u.password/hash-bcrypt token)
+                                     :expires_at   (t/plus (t/instant) (t/hours 48))
+                                     :grant_ends_at grant-ends-at
+                                     :consumed_at  nil}})
+          token)))))
 
 (defn- forgot-password-impl
   [email]
@@ -184,13 +199,23 @@
                (t2/select-one [:model/User :id :sso_source :is_active]
                               :%lower.email
                               (u/lower-case-en email))]
-      (if (password-reset-disabled? user-id sso-source)
-        ;; If user uses any SSO method to log in, no need to generate a reset token. Some cases for Google SSO
-        ;; are exempted see `password-reset-allowed?`
+      (cond
+        ;; SSO users should use their SSO provider, not password reset.
+        (sso-password-reset-disabled? sso-source)
         (messages/send-password-reset-email! email sso-source nil is-active?)
+
+        ;; Support-access users get a refreshed token bound to the grant.
+        ;; If the grant has expired, refresh-support-access-token! returns nil and we silently
+        ;; do nothing (same as a nonexistent account).
+        (t2/exists? :model/AuthIdentity :user_id user-id :provider "support-access-grant")
+        (when-let [reset-token (refresh-support-access-token! user-id)]
+          (let [password-reset-url (str (system/site-url) "/auth/reset_password/" reset-token)]
+            (messages/send-password-reset-email! email nil password-reset-url is-active?)))
+
+        ;; Normal password reset.
+        :else
         (let [reset-token        (auth-identity/create-password-reset! user-id)
               password-reset-url (str (system/site-url) "/auth/reset_password/" reset-token)]
-          (log/info password-reset-url)
           (messages/send-password-reset-email! email nil password-reset-url is-active?)))
       (events/publish-event! :event/password-reset-initiated
                              {:object (assoc user :token (t2/select-one-fn :reset_token :model/User :id user-id))}))))

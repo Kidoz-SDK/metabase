@@ -10,18 +10,18 @@ import {
 import { AdminPaneLayout } from "metabase/common/components/AdminPaneLayout";
 import { useConfirmation } from "metabase/common/hooks/use-confirmation";
 import { useToast } from "metabase/common/hooks/use-toast";
+import { PLUGIN_GROUP_MANAGERS, PLUGIN_TENANTS } from "metabase/plugins";
+import { useDispatch } from "metabase/redux";
+import { Box, Button, Text } from "metabase/ui";
 import {
   canEditMembership,
   getGroupNameLocalized,
   isAdminGroup,
   isDefaultGroup,
-} from "metabase/lib/groups";
-import { useDispatch } from "metabase/lib/redux";
-import { PLUGIN_GROUP_MANAGERS, PLUGIN_TENANTS } from "metabase/plugins";
-import { Box, Button, Text } from "metabase/ui";
+} from "metabase/utils/groups";
 import type { Group, Member, Membership, User } from "metabase-types/api";
 
-import Alert from "./Alert";
+import { Alert } from "./Alert";
 import { GroupMembersTable } from "./GroupMembersTable";
 
 interface GroupDetailProps {
@@ -120,7 +120,7 @@ export const GroupDetail = ({
         title={
           <Fragment>
             {getGroupNameLocalized(group ?? {})}
-            <Box component="span" c="text-light" ms="sm">
+            <Box component="span" c="text-tertiary" ms="sm">
               {ngettext(
                 msgid`${group.members.length} member`,
                 `${group.members.length} members`,

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { plugin as cypressGrepPlugin } from "@cypress/grep/plugin";
 import cypressOnFix from "cypress-on-fix";
 import installLogsPrinter from "cypress-terminal-report/src/installLogsPrinter";
 
@@ -14,9 +15,12 @@ import {
   removeDirectory,
   verifyDownloadTasks,
 } from "./commands/downloads/downloadUtils";
-import webpackConfig from "./component-webpack.config";
 import * as dbTasks from "./db_tasks";
 import { signJwt } from "./helpers/e2e-jwt-tasks";
+import {
+  startMockLlmServer,
+  stopMockLlmServer,
+} from "./helpers/e2e-mock-llm-tasks";
 
 const createBundler = require("@bahmutov/cypress-esbuild-preprocessor"); // This function is called when a project is opened or re-opened (e.g. due to the project's config changing)
 const {
@@ -47,6 +51,22 @@ const assetsResolverPlugin = {
 };
 
 const defaultConfig = {
+  // Expose non-sensitive environment variables synchronously via Cypress.expose()
+  // These are safe to expose in the browser and are used for configuration
+  expose: {
+    CI: isCI,
+    IS_ENTERPRISE: isEnterprise,
+    MB_EDITION: process.env["MB_EDITION"],
+    ENABLE_NETWORK_THROTTLING: !!process.env["ENABLE_NETWORK_THROTTLING"],
+    SNOWPLOW_MICRO_URL: snowplowMicroUrl,
+    CLIENT_PORT: process.env["CLIENT_PORT"],
+    feHealthcheck: process.env["FE_HEALTHCHECK_URL"]
+      ? { enabled: true, url: process.env["FE_HEALTHCHECK_URL"] }
+      : undefined,
+  },
+
+  allowCypressEnv: false,
+
   // This is the functionality of the old cypress-plugins.js file
   setupNodeEvents(cypressOn, config) {
     // `on` is used to hook into various events Cypress emits
@@ -57,7 +77,7 @@ const defaultConfig = {
 
     // CLI grep can't handle commas in the name
     // needed when we want to run only specific tests
-    config.env.grep ??= process.env.GREP;
+    config.expose.grep ??= process.env.GREP;
 
     // cypress-terminal-report
     if (isCI) {
@@ -88,6 +108,7 @@ const defaultConfig = {
       //  Open dev tools in Chrome by default
       if (browser.name === "chrome" || browser.name === "chromium") {
         launchOptions.args.push("--auto-open-devtools-for-tabs");
+        launchOptions.args.push("--blink-settings=preferredColorScheme=1");
       }
 
       // Start browsers with prefers-reduced-motion set to "reduce"
@@ -117,6 +138,8 @@ const defaultConfig = {
       copyDirectory,
       removeDirectory,
       signJwt,
+      startMockLlmServer,
+      stopMockLlmServer,
     });
 
     /********************************************************************
@@ -125,14 +148,11 @@ const defaultConfig = {
 
     // `grepIntegrationFolder` needs to point to the root!
     // See: https://github.com/cypress-io/cypress/issues/24452#issuecomment-1295377775
-    config.env.grepIntegrationFolder = "../../";
-    config.env.grepFilterSpecs = true;
-    config.env.grepOmitFiltered = true;
+    config.expose.grepIntegrationFolder = "../../";
+    config.expose.grepFilterSpecs = true;
+    config.expose.grepOmitFiltered = true;
 
-    config.env.IS_ENTERPRISE = isEnterprise;
-    config.env.SNOWPLOW_MICRO_URL = snowplowMicroUrl;
-
-    require("@cypress/grep/src/plugin")(config);
+    cypressGrepPlugin(config);
 
     if (isCI) {
       cypressSplit(on, config);
@@ -165,8 +185,8 @@ const defaultConfig = {
   viewportHeight: 800,
   viewportWidth: 1280,
   // enable video recording in run mode
-  video: true,
-  videoCompression: true,
+  video: process.env["CYPRESS_VIDEO"] !== "false",
+  videoCompression: false,
 };
 
 const mainConfig = {
@@ -197,34 +217,15 @@ const mainConfig = {
     },
   },
   retries: {
-    runMode: 1,
+    runMode:
+      process.env["CYPRESS_RETRIES"] != null
+        ? parseInt(process.env["CYPRESS_RETRIES"], 10)
+        : 1,
     openMode: 0,
-  },
-};
-
-const embeddingSdkComponentTestConfig = {
-  ...defaultConfig,
-  baseUrl: undefined, // baseUrl should not be set for component tests,
-  defaultCommandTimeout: 10000,
-  requestTimeout: 10000,
-  video: false,
-  specPattern: "e2e/test-component/scenarios/embedding-sdk/**/*.cy.spec.tsx",
-  indexHtmlFile: "e2e/support/component-index.html",
-  supportFile: "e2e/support/component-cypress.js",
-
-  reporter: mainConfig.reporter,
-  reporterOptions: mainConfig.reporterOptions,
-  retries: mainConfig.retries,
-
-  devServer: {
-    framework: "react",
-    bundler: "webpack",
-    webpackConfig: webpackConfig,
   },
 };
 
 module.exports = {
   defaultConfig,
   mainConfig,
-  embeddingSdkComponentTestConfig,
 };

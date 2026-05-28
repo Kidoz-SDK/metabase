@@ -56,7 +56,7 @@ Generally, annual billing is a great deal; it's cheaper across the board. The on
 
 ## What counts as a user account?
 
-A user account is any account which has been added to your Metabase instance (manually or via SSO) that has not been deactivated. You can view a list of user accounts in your **Admin settings** -> **People** list. Any user account which has been [deactivated](../people-and-groups/managing.md#deactivating-an-account) doesn't count toward your number of user accounts. That is to say: if an account exists, but has not been deactivated, that account will count toward your bill, _even if no one signs in and uses that account_. If an account is deactivated, that account is charged for the number of days the account was available for use during that billing period, including the day it was deactivated (since it was available for use for part of the day up until it was deactivated).
+A user account is any account which has been added to your Metabase instance (manually or via SSO) that has not been deactivated. You can view a list of user accounts in your **Admin** -> **People** list. Any user account which has been [deactivated](../people-and-groups/managing.md#deactivating-an-account) doesn't count toward your number of user accounts. That is to say: if an account exists, but has not been deactivated, that account will count toward your bill, _even if no one signs in and uses that account_. If an account is deactivated, that account is charged for the number of days the account was available for use during that billing period, including the day it was deactivated (since it was available for use for part of the day up until it was deactivated).
 
 ## How billing works with embedding
 
@@ -92,7 +92,7 @@ Metabase offers annual invoicing for Pro plans (in addition to our Enterprise pl
 ### How invoicing works for Pro plans
 
 - After switching to billing via invoices, Metabase will send you an invoice via email for the amount due for that year, as well as payment instructions. Each year after that, you'll get an annual invoice billing you for the coming year.
-- **After receiving an invoice via email, you have 15 days to pay the invoice with ACH, wire transfer, or credit card**.
+- **After receiving an invoice via email, you have 30 days to pay the invoice with ACH, wire transfer, or credit card**.
 - If you add user accounts to your plan throughout the year, Metabase will bill these true-ups on a quarterly basis, with invoices for the prorated yearly cost of the additional user accounts (see [annual billing](#how-annual-billing-works)).
 - Payment can be done via Automated Clearing House (ACH) or wire transfer.
 - You can see a list of all of your invoices and their statuses in the **Billing** tab of your Metabase Store account.

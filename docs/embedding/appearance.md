@@ -2,42 +2,164 @@
 title: "Customizing the appearance of modular embeds"
 summary: "Style your embedded Metabase components using themes to customize colors, backgrounds, and more."
 redirect_from:
-  - /docs/latest/embedding/sdk/appearance
+- /docs/latest/embedding/sdk/appearance
 ---
 
 # Customizing the appearance of modular embeds
-
-{% include plans-blockquote.html feature="Modular embedding" %}
 
 You can style your embedded [Metabase components](./components.md) with a **theme**.
 
 ![Embed share button](./images/embed-share-button.png)
 
-Change the colors, and the code snippet will include a `theme` object in the object passed to the `defineMetabaseConfig` function.
+On OSS and Starter plans, embeds come with two theme presets: [light and dark](#dark-mode-and-light-mode).
 
-## Theme options
+On Pro and Enterprise plans, you can:
 
-Here's an example that includes the various styling options available via the [modular embedding React SDK](./sdk/introduction.md):
+- [Save reusable themes](#embedding-themes), then pick one in the embed wizard.
+- Customize individual colors, backgrounds, fonts, and more in your embedding code. See [Advanced theming](#advanced-theming).
+
+## Dark mode and light mode
+
+By default, components that you embed using the SDK will use a light mode theme.
+
+To use dark mode, set `theme.preset` to `"dark"` in the `defineMetabaseConfig()` function of your [embedding code snippet](./modular-embedding.md#add-the-embedding-script-to-your-app):
+
+```js
+defineMetabaseConfig({
+  theme: {
+    preset: "dark", // or "light"
+  },
+});
+```
+
+## Embedding themes
+
+![Embedding themes](./images/themes.png)
+
+{% include plans-blockquote.html feature="Saved embedding themes" is_plural=true %}
+
+A theme is a named set of colors and fonts that the embed wizard can copy into each new embed's config. The embed doesn't reference the theme, the embed carries its own inlined copy of the values. Changing or deleting the theme won't affect existing embeds.
+
+### Manage themes
+
+Go to **Admin settings > Embedding > Themes**.
+
+Metabase ships with light and dark themes that pick up any appearance settings you've set on your Metabase (though you can tinker with these default themes as well, including removing theme like you can any other custom theme).
+
+From the Themes tab, you can:
+
+- **Create a theme.** Click **+ New theme**, then set a name, colors, and font.
+- **Edit a theme.** Click a theme card to open the editor. Changes show up in the live preview.
+- **Choose what the preview renders.** Pick the dashboard or question used to preview the theme.
+- **Duplicate a theme.** Handy if you want to vary an existing theme.
+- **Delete a theme.** This deletion is eternal.
+
+![Theme editor](./images/theme-editor.png)
+
+### Apply a saved theme to a new embed
+
+When you create a new embed using the [embed wizard](./modular-embedding.md#3-customize-your-embed), the last customization step lets you pick:
+
+- **A saved theme** from your list of themes.
+- **Instance theme** to use Metabase's instance defaults.
+- **Custom** to set colors directly on this embed without saving them as a theme.
+
+![Embed wizard appearance](./images/embed-wizard-appearance.png)
+
+The theme you pick is inlined into the generated `defineMetabaseConfig({ theme: ... })` snippet. Because each embed carries its _own_ copy of the values, editing or deleting the theme in Metabase won't change the themes in embeds that have already been generated. Those embeds keep the colors and fonts they were created with. To pick up theme changes in an existing embed, regenerate the snippet from the wizard, or edit the `theme` block in your code by hand.
+
+### Reuse a saved theme in the SDK
+
+If you're using the [SDK](./sdk/introduction.md), pass a theme to `MetabaseProvider` with `defineMetabaseTheme`, which accepts the same theme shape that you configure in the Themes admin UI. You can copy a saved theme's values into your code:
+
+```tsx
+import {
+  MetabaseProvider,
+  defineMetabaseTheme,
+} from "@metabase/embedding-sdk-react";
+
+const theme = defineMetabaseTheme({
+  fontFamily: "Lato",
+  colors: {
+    brand: "#50e397",
+    background: "#11123d",
+    "text-primary": "#f9f9fc",
+  },
+});
+
+export function App() {
+  return (
+    <MetabaseProvider authConfig={authConfig} theme={theme}>
+      {/* your app */}
+    </MetabaseProvider>
+  );
+}
+```
+
+For the full set of available colors and component overrides, see [Theme options](#theme-options).
+
+## Advanced theming
+
+{% include plans-blockquote.html feature="Advanced theming modular embeds" is_plural=true %}
+
+On Pro/Enterprise plan, you can configure granular appearance options, like background colors, font sizes etc. See the [list of all theming options](#theme-options).
+
+### Add an advanced theme to your embed
+
+![Behavior and appearance](./images/behavior-and-appearance.png)
+
+If you have a [saved theme](#embedding-themes), you can pick it directly in the embed wizard. The rest of this section covers further customization on top of (or instead of) a saved theme.
+
+Some appearance options like brand, text, and background color are configurable in the [embed wizard](./modular-embedding.md#create-a-new-embed).
+
+For other appearance settings, use the `theme` parameter with `preset` in the `defineMetabaseConfig()` function in your [embedding code snippet](./modular-embedding.md#add-the-embedding-script-to-your-app). For example:
+
+```js
+defineMetabaseConfig({
+  theme: {
+    colors: {
+      background: "#FFFFFF",
+      "text-primary": "hsla(204, 66%, 8%, 0.84)",
+      brand: "hsla(208, 72%, 60%, 1.00)",
+      "background-hover": "rgb(236, 236, 236)",
+      "background-disabled": "rgb(231, 231, 231)",
+      "background-secondary": "rgb(233, 233, 233)",
+      "background-light": "rgb(233, 233, 233)",
+      "text-secondary": "rgba(9, 30, 44, 0.84)",
+      "text-tertiary": "rgba(11, 37, 54, 0.84)",
+      "brand-hover": "rgb(185, 216, 244)",
+      "brand-hover-light": "rgb(238, 245, 252)",
+    },
+  },
+  instanceUrl: "http://localhost:3000",
+});
+```
+
+### Theme options
+
+{% include plans-blockquote.html feature="Advanced theme options" is_plural=true %}
+
+For advanced theme configuration options, you can configure the `theme` object in the object passed to the `defineMetabaseConfig` function, see [Add an advanced theme to your embed](#add-an-advanced-theme-to-your-embed). Here's the list of all options available for customization:
 
 ```json
 {
   // Specify a font to use from the set of fonts supported by Metabase.
   // You can set the font to "Custom" to use the custom font
   // configured in your Metabase instance.
-  fontFamily: "Lato",
+  "fontFamily": "Lato",
 
   // Override the base font size for every component.
   // This does not usually need to be set, as the components
   // inherit the font size from the parent container, such as the body.
-  fontSize: "16px",
+  "fontSize": "16px",
 
   // Override the base line height for every component.
-  lineHeight: 1.5,
+  "lineHeight": 1.5,
 
   // Match your application's color scheme
-  colors: {
+  "colors": {
     // The primary color of your application
-    brand: "#9B5966",
+    "brand": "#9B5966",
 
     // Lighter variation of the brand color. Used for hover and accented elements.
     "brand-hover": "#DDECFA",
@@ -55,7 +177,7 @@ Here's an example that includes the various styling options available via the [m
     "text-tertiary": "#949AAB",
 
     // Default background color
-    background: "#FFFFFF",
+    "background": "#FFFFFF",
 
     // Light background color for some control backgrounds.
     // Defaults are derived from `background` (slightly darker in light mode, much lighter in dark mode).
@@ -71,249 +193,188 @@ Here's an example that includes the various styling options available via the [m
     "background-disabled": "#F3F5F7",
 
     // Color used for borders
-    border: "#EEECEC",
+    "border": "#EEECEC",
 
     // Color used for filters context
-    filter: "#7172AD",
+    "filter": "#7172AD",
 
     // Color used for aggregations and breakouts context
-    summarize: "#88BF4D",
+    "summarize": "#88BF4D",
 
     // Color used to indicate successful actions and positive values/trends
-    positive: "#BADC58",
+    "positive": "#BADC58",
 
     // Color used to indicate dangerous actions and negative values/trends
-    negative: "#FF7979",
+    "negative": "#FF7979",
 
     /** Color used to outline elements in focus */
-    focus: "#CAE1F7",
+    "focus": "#CAE1F7",
 
     /** Color used for popover shadows */
-    shadow: "rgba(0,0,0,0.08)",
+    "shadow": "rgba(0,0,0,0.08)",
 
     // Overrides the chart colors. Supports up to 8 colors
     // Limitation: this does not affect charts with custom series color
-    charts: [
+    "charts": [
       // can either be a hex code
       "#9B59B6",
 
       // or a color object. tint and shade represents lighter and darker variations
       // only base color is required, while tint and shade are optional
-      { base: "#E74C3C", tint: "#EE6B56", shade: "#CB4436" },
-    ],
+      { "base": "#E74C3C", "tint": "#EE6B56", "shade": "#CB4436" }
+    ]
   },
 
-  components: {
+  "components": {
     // Dashboard
-    dashboard: {
+    "dashboard": {
       // Background color for all dashboards
-      backgroundColor: "#2F3640",
+      "backgroundColor": "#2F3640",
 
       // Border color of the dashboard grid, shown only when editing dashboards.
       // Defaults to `colors.border`
-      gridBorderColor: "#EEECEC",
+      "gridBorderColor": "#EEECEC",
 
-      card: {
+      "card": {
         // Background color for all dashboard cards
-        backgroundColor: "#2D2D30",
+        "backgroundColor": "#2D2D30",
 
         // Apply a border color instead of shadow for dashboard cards.
         // Unset by default.
-        border: "1px solid #EEECEC",
-      },
+        "border": "1px solid #EEECEC"
+      }
     },
 
     // Question
-    question: {
+    "question": {
       // Background color for all questions
-      backgroundColor: "#2E353B",
+      "backgroundColor": "#2E353B",
 
       // Toolbar of the default interactive question layout
-      toolbar: {
-        backgroundColor: "#F3F5F7",
-      },
+      "toolbar": {
+        "backgroundColor": "#F3F5F7"
+      }
     },
 
     // Tooltips
-    tooltip: {
+    "tooltip": {
       // Tooltip text color.
-      textColor: "#FFFFFF",
+      "textColor": "#FFFFFF",
 
       // Secondary text color shown in the tooltip, e.g. for tooltip headers and percentage changes.
-      secondaryTextColor: "#949AAB",
+      "secondaryTextColor": "#949AAB",
 
       // Tooltip background color.
-      backgroundColor: "#2E353B",
+      "backgroundColor": "#2E353B",
 
       // Tooltip background color for focused rows.
-      focusedBackgroundColor: "#0A0E10",
+      "focusedBackgroundColor": "#0A0E10"
     },
 
     // Data table
-    table: {
-      cell: {
+    "table": {
+      "cell": {
         // Text color of cells, defaults to `text-primary`
-        textColor: "#4C5773",
+        "textColor": "#4C5773",
 
         // Default background color of cells, defaults to `background`
-        backgroundColor: "#FFFFFF",
+        "backgroundColor": "#FFFFFF",
 
         // Font size of cell values, defaults to ~12.5px
-        fontSize: "12.5px",
+        "fontSize": "12.5px"
       },
 
-      idColumn: {
+      "idColumn": {
         // Text color of ID column, defaults to `brand`
-        textColor: "#9B5966",
+        "textColor": "#9B5966",
 
         // Background color of ID column, defaults to a lighter shade of `brand`
-        backgroundColor: "#F5E9EB",
-      },
+        "backgroundColor": "#F5E9EB"
+      }
     },
 
     // Number chart
-    number: {
+    "number": {
       // Value displayed on number charts.
       // This also applies to the primary value in trend charts.
-      value: {
-        fontSize: "24px",
-        lineHeight: "21px",
-      },
+      "value": {
+        "fontSize": "24px",
+        "lineHeight": "21px"
+      }
     },
 
     // Cartesian chart
-    cartesian: {
+    "cartesian": {
       // Padding around the cartesian charts.
       // Uses CSS's `padding` property format.
-      padding: "4px 8px",
+      "padding": "4px 8px"
     },
 
     // Pivot table
-    pivotTable: {
-      cell: {
+    "pivotTable": {
+      "cell": {
         // Font size of cell values, defaults to ~12px
-        fontSize: "12px",
+        "fontSize": "12px"
       },
 
       // Pivot row toggle to expand or collapse row
-      rowToggle: {
-        textColor: "#FFFFFF",
-        backgroundColor: "#95A5A6",
-      },
+      "rowToggle": {
+        "textColor": "#FFFFFF",
+        "backgroundColor": "#95A5A6"
+      }
     },
 
-    collectionBrowser: {
-      breadcrumbs: {
-        expandButton: {
-          textColor: "#8118F4",
-          backgroundColor: "#767D7C",
-          hoverTextColor: "#CE8C8C",
-          hoverBackgroundColor: "#69264B",
-        },
-      },
+    "collectionBrowser": {
+      "breadcrumbs": {
+        "expandButton": {
+          "textColor": "#8118F4",
+          "backgroundColor": "#767D7C",
+          "hoverTextColor": "#CE8C8C",
+          "hoverBackgroundColor": "#69264B"
+        }
+      }
     },
 
     // Popover are used in components such as click actions in interactive questions.
+    "popover": {
+      // z-index of the popover. Defaults to 200.
+      "zIndex": 200
+    }
+  }
+}
+```
+
+## Can't see a modal? Bump the z-index
+
+If your app renders its own modal, drawer, or backdrop at a high z-index, SDK-internal overlays (like a save dialog) may be hidden behind your overlay.
+
+The SDK defaults popovers to `zIndex: 200`, which may be lower than your app's overlay settings. All you need to do in this case is raise the SDK popover z-index above your overlay via `defineMetabaseTheme`:
+
+```tsx
+import {
+  MetabaseProvider,
+  defineMetabaseTheme,
+} from "@metabase/embedding-sdk-react";
+
+const theme = defineMetabaseTheme({
+  components: {
+    //... Other theme settings
     popover: {
-      // z-index of the popover. Useful for embedding components in a modal. defaults to 4.
-      zIndex: 4,
+      // Set above your overlay's z-index.
+      // For example, if your modal is at 1000, use 1001.
+      zIndex: 1001,
     },
   },
+});
+
+export function App() {
+  return (
+    <MetabaseProvider authConfig={authConfig} theme={theme}>
+      {/* your app */}
+    </MetabaseProvider>
+  );
 }
 ```
-
-
-## Customizing the appearance of an SSO embed
-
-![Behavior and appearance with sso](./images/embed-with-sso.png)
-
-Add a `theme` object to your config object:
-
-
-```html
-<script defer src="http://localhost:3000/app/embed.js"></script>
-<script>
-function defineMetabaseConfig(config) {
-  window.metabaseConfig = config;
-}
-</script>
-
-<script>
-  defineMetabaseConfig({
-    "theme": {
-      "colors": {
-        "background": "#FFFFFF",
-        "text-primary": "hsla(204, 66%, 8%, 0.84)",
-        "brand": "hsla(208, 72%, 60%, 1.00)",
-        "background-hover": "rgb(236, 236, 236)",
-        "background-disabled": "rgb(231, 231, 231)",
-        "background-secondary": "rgb(233, 233, 233)",
-        "background-light": "rgb(233, 233, 233)",
-        "text-secondary": "rgba(9, 30, 44, 0.84)",
-        "text-tertiary": "rgba(11, 37, 54, 0.84)",
-        "brand-hover": "rgb(185, 216, 244)",
-        "brand-hover-light": "rgb(238, 245, 252)"
-      }
-    },
-    "instanceUrl": "http://localhost:3000"
-  });
-</script>
-
-<metabase-dashboard dashboard-id="10"
-  with-title="true"
-  with-downloads="false"
-  with-subscriptions="false"
-  hidden-parameters='["category"]'
-  drills="true">
-</metabase-dashboard>
-```
-
-## Customizing the appearance of a guest embed
-
-![Behavior and appearance](./images/behavior-and-appearance.png)
-
-Add a `theme` object to your config object:
-
-```html
-<script defer src="http://localhost:3000/app/embed.js"></script>
-<script>
-function defineMetabaseConfig(config) {
-  window.metabaseConfig = config;
-}
-</script>
-
-<script>
-  defineMetabaseConfig({
-    "theme": {
-      "colors": {
-        "background": "#FFFFFF",
-        "text-primary": "hsla(204, 66%, 8%, 0.84)",
-        "brand": "hsla(208, 72%, 60%, 1.00)",
-        "background-hover": "rgb(236, 236, 236)",
-        "background-disabled": "rgb(231, 231, 231)",
-        "background-secondary": "rgb(233, 233, 233)",
-        "background-light": "rgb(233, 233, 233)",
-        "text-secondary": "rgba(9, 30, 44, 0.84)",
-        "text-tertiary": "rgba(11, 37, 54, 0.84)",
-        "brand-hover": "rgb(185, 216, 244)",
-        "brand-hover-light": "rgb(238, 245, 252)"
-      }
-    },
-    "isGuest": true,
-    "instanceUrl": "http://localhost:3000"
-  });
-</script>
-
-<metabase-dashboard
-  token=<TODO: Fetch the JWT token from your backend and programmatically pass it to this 'metabase-dashboard' component>
-  with-title="true"
-  with-downloads="false">
-</metabase-dashboard>
-```
-
-## Example app with theming
-
-Check out our [sample app](https://github.com/metabase/modular-embedding-sample-app). Bring your Metabase, embed a question or dashboard, and play around with changing colors.
 
 ## Limitations
 

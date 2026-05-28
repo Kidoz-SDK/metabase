@@ -1,7 +1,8 @@
 import userEvent from "@testing-library/user-event";
 
 import { findRequests, setupCardEndpoints } from "__support__/server-mocks";
-import { screen } from "__support__/ui";
+import { screen, waitFor } from "__support__/ui";
+import type { SearchRequest } from "metabase-types/api";
 import { createMockCard, createMockCollection } from "metabase-types/api/mocks";
 
 import { setup } from "./setup";
@@ -115,6 +116,7 @@ describe("MiniPicker", () => {
         value: {
           model: "table",
           id: 4,
+          // @ts-expect-error - needed to make compatible with minipicker and entity picker
           db_id: 1,
           schema: "pokemon",
           name: "cards",
@@ -194,7 +196,6 @@ describe("MiniPicker", () => {
         value: {
           id: 202,
           model: "card",
-          name: "Rosings",
           database_id: 1,
         },
       });
@@ -259,6 +260,29 @@ describe("MiniPicker", () => {
           name: "Bingley",
         }),
       );
+    });
+
+    it("passes the local search input query to searchParams callbacks", async () => {
+      const searchParams = jest.fn((params: SearchRequest) => {
+        return params.q ? {} : { collection: 123 };
+      });
+
+      await setup({
+        forceSearch: true,
+        showSearchInput: true,
+        searchParams,
+      });
+
+      await userEvent.type(screen.getByRole("textbox"), "bing");
+
+      expect(searchParams).toHaveBeenCalledWith(
+        expect.objectContaining({ q: "" }),
+      );
+      await waitFor(() => {
+        expect(searchParams).toHaveBeenCalledWith(
+          expect.objectContaining({ q: "bing" }),
+        );
+      });
     });
   });
 });

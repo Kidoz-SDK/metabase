@@ -11,6 +11,9 @@ import {
 } from "embedding-sdk-bundle/components/private/PublicComponentWrapper";
 import { QuestionVisualization } from "embedding-sdk-bundle/components/private/SdkQuestion/components/Visualization";
 import { SdkQuestion } from "embedding-sdk-bundle/components/public/SdkQuestion";
+import { QuestionAlertsButton } from "embedding-sdk-bundle/components/public/notifications/QuestionAlertsButton";
+import { useCollectionData } from "embedding-sdk-bundle/hooks/private/use-collection-data";
+import { useMobileLayout } from "embedding-sdk-bundle/hooks/private/use-mobile-layout";
 import { useQuestionEditorSync } from "embedding-sdk-bundle/hooks/private/use-question-editor-sync";
 import { useSdkBreadcrumbs } from "embedding-sdk-bundle/hooks/private/use-sdk-breadcrumb";
 import { shouldRunCardQuery } from "embedding-sdk-bundle/lib/sdk-question";
@@ -33,9 +36,10 @@ import {
   FlexibleSizeComponent,
   type FlexibleSizeProps,
 } from "../FlexibleSizeComponent";
-import { BackButton } from "../SdkQuestion/components/BackButton/BackButton";
+import { RenderIfHasContent } from "../RenderIfHasContent/RenderIfHasContent";
+import { SdkInternalNavigationBackButton } from "../SdkInternalNavigation/SdkInternalNavigationBackButton";
 import { BreakoutDropdown } from "../SdkQuestion/components/Breakout/BreakoutDropdown";
-import { ChartTypeDropdown } from "../SdkQuestion/components/ChartTypeSelectorList";
+import { ChartTypeDropdown } from "../SdkQuestion/components/ChartTypeDropdown";
 import { DownloadWidgetDropdown } from "../SdkQuestion/components/DownloadWidget";
 import { Editor } from "../SdkQuestion/components/Editor";
 import { EditorButton } from "../SdkQuestion/components/EditorButton/EditorButton";
@@ -59,11 +63,6 @@ export interface SdkQuestionDefaultViewProps extends FlexibleSizeProps {
   title?: SdkQuestionTitleProps;
 
   /**
-   * Determines whether a reset button is displayed. Only relevant when using the default layout.
-   */
-  withResetButton?: boolean;
-
-  /**
    * Determines whether the chart type selector and corresponding settings button are shown. Only relevant when using the default layout.
    */
   withChartTypeSelector?: boolean;
@@ -75,7 +74,6 @@ export const SdkQuestionDefaultView = ({
   className,
   style,
   title,
-  withResetButton,
   withChartTypeSelector,
 }: SdkQuestionDefaultViewProps): ReactElement => {
   const { isLocaleLoading } = useLocale();
@@ -86,13 +84,13 @@ export const SdkQuestionDefaultView = ({
     isQuestionLoading,
     originalQuestion,
     isSaveEnabled,
-    withDownloads,
+    targetCollection,
     onReset,
     onNavigateBack,
     queryQuestion,
   } = useSdkQuestionContext();
 
-  const { isBreadcrumbEnabled, reportLocation } = useSdkBreadcrumbs();
+  const { reportLocation } = useSdkBreadcrumbs();
   const isGuestEmbed = useSdkSelector(getIsGuestEmbed);
 
   const isQuestionSaved = question?.isSaved();
@@ -126,6 +124,7 @@ export const SdkQuestionDefaultView = ({
       !isQuestionLoading &&
       question?.isSaved() &&
       originalId !== "new" &&
+      originalId !== "new-native" &&
       queryResults
     ) {
       reportLocation({
@@ -145,6 +144,13 @@ export const SdkQuestionDefaultView = ({
     onReset,
   ]);
 
+  const { canWrite: canWriteToTargetCollection } = useCollectionData(
+    targetCollection,
+    { skipCollectionFetching: !isSaveEnabled },
+  );
+
+  const { ref: containerRef, isMobile } = useMobileLayout();
+
   if (
     !isEditorOpen &&
     (isLocaleLoading || isQuestionLoading || isQueryResultLoading)
@@ -161,39 +167,50 @@ export const SdkQuestionDefaultView = ({
   }
 
   const showSaveButton =
-    shouldShowSaveButton({ question, originalQuestion }) && isSaveEnabled;
+    shouldShowSaveButton({
+      question,
+      originalQuestion,
+      canWriteToTargetCollection,
+    }) && isSaveEnabled;
 
   return (
     <FlexibleSizeComponent
+      ref={containerRef}
       height={height}
       width={width}
       className={cx(InteractiveQuestionS.Container, className)}
       style={style}
     >
-      <Stack className={InteractiveQuestionS.TopBar} gap="sm" p="md">
-        <Group
+      <RenderIfHasContent
+        component={Stack}
+        className={InteractiveQuestionS.TopBar}
+        gap="sm"
+        p="md"
+      >
+        <RenderIfHasContent
+          component={Group}
           justify="space-between"
           align="flex-end"
           data-testid="interactive-question-top-toolbar"
         >
-          <Group gap="xs">
-            <Box className={InteractiveQuestionS.BackButtonWrapper} mr="sm">
-              <BackButton />
-            </Box>
-            <DefaultViewTitle
-              title={title}
-              withResetButton={withResetButton && !isBreadcrumbEnabled}
-            />
-          </Group>
-          {showSaveButton && <SaveButton onClick={openSaveModal} />}
-        </Group>
+          <RenderIfHasContent component={Group} gap="xs">
+            <Stack align="flex-start">
+              <SdkInternalNavigationBackButton />
+              <DefaultViewTitle title={title} />
+            </Stack>
+          </RenderIfHasContent>
+          {showSaveButton && <SaveButton onClick={openSaveModal} ml="auto" />}
+        </RenderIfHasContent>
         {queryResults && (
-          <ResultToolbar data-testid="interactive-question-result-toolbar">
-            <Group gap="xs">
+          <RenderIfHasContent
+            component={ResultToolbar}
+            data-testid="interactive-question-result-toolbar"
+          >
+            <RenderIfHasContent component={Group} gap="xs">
               {isEditorOpen ? (
                 <PopoverBackButton
                   onClick={toggleEditor}
-                  color="brand"
+                  c="brand"
                   fz="md"
                   ml="sm"
                 >
@@ -208,18 +225,19 @@ export const SdkQuestionDefaultView = ({
                         <QuestionSettingsDropdown />
                       </Button.Group>
 
-                      {!isNativeQuestion && (
+                      {!isNativeQuestion && !isMobile && (
                         <Divider
                           mx="xs"
                           orientation="vertical"
-                          // we have to do this for now because Mantine's divider overrides this color no matter what
-                          color="var(--mb-color-border) !important"
+                          style={{
+                            color: "var(--mb-color-border) !important",
+                          }}
                         />
                       )}
                     </>
                   )}
 
-                  {!isNativeQuestion && (
+                  {!isNativeQuestion && !isMobile && (
                     <>
                       <FilterDropdown />
                       <SummarizeDropdown />
@@ -228,12 +246,17 @@ export const SdkQuestionDefaultView = ({
                   )}
                 </>
               )}
-            </Group>
-            <Group gap="sm">
-              {withDownloads && <DownloadWidgetDropdown />}
+            </RenderIfHasContent>
+            <RenderIfHasContent component={Group} gap="sm" ml="auto">
+              {!isEditorOpen && !isMobile && (
+                <>
+                  <DownloadWidgetDropdown />
+                  <QuestionAlertsButton />
+                </>
+              )}
               <EditorButton isOpen={isEditorOpen} onClick={toggleEditor} />
-            </Group>
-          </ResultToolbar>
+            </RenderIfHasContent>
+          </RenderIfHasContent>
         )}
 
         {isGuestEmbed && (
@@ -241,7 +264,7 @@ export const SdkQuestionDefaultView = ({
             <SdkQuestion.SqlParametersList />
           </Box>
         )}
-      </Stack>
+      </RenderIfHasContent>
 
       <Box
         className={cx(InteractiveQuestionS.Main, "sdk-question-main")}

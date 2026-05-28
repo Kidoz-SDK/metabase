@@ -31,7 +31,7 @@ module.exports = (env) => {
 
     entry: {
       "lib-static-viz": {
-        import: "./static-viz/index.js",
+        import: "./static-viz/index.tsx",
         library: {
           name: "StaticViz",
           type: "var",
@@ -127,13 +127,14 @@ module.exports = (env) => {
         "ee-overrides":
           process.env.MB_EDITION === "ee"
             ? ENTERPRISE_SRC_PATH + "/static-viz-overrides"
-            : SRC_PATH + "/lib/noop",
+            : SRC_PATH + "/utils/noop",
       },
       fallback: {
         crypto: require.resolve("crypto-browserify"),
         stream: require.resolve("stream-browserify"),
         buffer: require.resolve("buffer/"),
         process: require.resolve("process/browser"),
+        querystring: require.resolve("querystring-es3"),
       },
     },
     optimization: {

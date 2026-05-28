@@ -17,6 +17,7 @@ export function SettingsSection({
   titleProps,
   description,
   children,
+  id,
   stackProps,
   ...boxProps
 }: {
@@ -24,10 +25,11 @@ export function SettingsSection({
   titleProps?: TitleProps;
   description?: React.ReactNode;
   children?: React.ReactNode;
+  id?: string;
   stackProps?: StackProps;
 } & BoxProps) {
   return (
-    <Box {...boxProps}>
+    <Box id={id} {...boxProps}>
       {children && (
         <Stack gap="lg" className={S.SettingsSection} {...stackProps}>
           {(title || description) && (
@@ -37,7 +39,7 @@ export function SettingsSection({
                   {title}
                 </Title>
               )}
-              {description && <Text c="text-medium">{description}</Text>}
+              {description && <Text c="text-secondary">{description}</Text>}
             </Box>
           )}
           {children}
@@ -56,14 +58,18 @@ export function SettingsPageWrapper({
   title?: React.ReactNode;
   description?: React.ReactNode;
   children: React.ReactNode;
-} & StackProps) {
+} & Omit<StackProps, "title">) {
   return (
     <Stack gap="lg" {...stackProps}>
       {(title || description) && (
         <Box>
-          {title && <Title order={1}>{title}</Title>}
+          {title && (
+            <Title order={1} display="flex" style={{ alignItems: "center" }}>
+              {title}
+            </Title>
+          )}
           {description && (
-            <Text c="text-medium" maw="40rem">
+            <Text c="text-secondary" maw="40rem">
               {description}
             </Text>
           )}

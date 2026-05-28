@@ -32,7 +32,7 @@ export const BreakoutPickerInner = ({
       <Button
         p="md"
         fz="lg"
-        color="text-medium"
+        color="text-secondary"
         variant="subtle"
         leftSection={<Icon name="chevronleft" />}
         onClick={() => onClose?.()}
@@ -66,18 +66,21 @@ export const BreakoutPicker = ({
   onClose?: () => void;
   breakoutItem?: SDKBreakoutItem;
 }) => {
-  const { question, updateQuestion } = useSdkQuestionContext();
+  const {
+    question,
+    updateAndNormalizeQuestion,
+    lastVisibleStageIndex: stageIndex,
+  } = useSdkQuestionContext();
 
   if (!question) {
     return null;
   }
 
   const query = question.query();
-  const stageIndex = -1;
 
-  const onQueryChange = (query: Lib.Query) => {
+  const onQueryChange = (nextQuery: Lib.Query) => {
     if (question) {
-      updateQuestion(question.setQuery(query), { run: true });
+      updateAndNormalizeQuestion(question.setQuery(nextQuery), { run: true });
     }
   };
 

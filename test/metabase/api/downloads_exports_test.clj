@@ -817,7 +817,7 @@
                                                     :pivot_results true)
                   sheet      (read-xlsx result)]
               (is (= [["Category" "Created At: Month" "Sum of Price" "Average of Rating"]
-                      ["Doohickey" "May 1, 2016, 12:00 AM" "144.12" "2.97"]
+                      ["Doohickey" "May 1, 2016, 12:00 AM" "144.12" "2.966666667"]
                       ["Doohickey" "June 1, 2016, 12:00 AM" "82.92" "3.6"]]
                      (take 3 sheet))))))))))
 
@@ -1119,7 +1119,7 @@
             ;; for now, don't try to read xlsx back in, it will not be correct since we end up writing
             ;; a json blob to the output stream, it creates an invalid xlsx anyway.
             ;; This is not new behaviour, we'll just fix it when a better solution to 'errors in downloaded files' comes along
-            (let [results (mt/user-http-request :rasta :post 200 (format "card/%d/query/%s" card-id export-format)
+            (let [results (mt/user-http-request :rasta :post 500 (format "card/%d/query/%s" card-id export-format)
                                                 {:format_rows true})
                   results-string (if (= "xlsx" export-format)
                                    (read-xlsx results)
@@ -1201,8 +1201,8 @@
                  "January 1, 2018, 12:00 AM"
                  "January 1, 2019, 12:00 AM"
                  "Row totals"]
-                ["Doohickey" "632.14" "854.19" "496.43" "203.13" "2,185.89"]
-                ["Gadget" "679.83" "1,059.11" "844.51" "435.75" "3,019.2"]]
+                ["Doohickey" "632.14" "854.19" "496.43" "203.13" "2185.89"]
+                ["Gadget" "679.83" "1059.11" "844.51" "435.75" "3019.2"]]
                (take 3 (card-download card {:export-format :xlsx :format-rows false :pivot true}))))))))
 
 (deftest unformatted-downloads-and-exports-keep-numbers-as-numbers

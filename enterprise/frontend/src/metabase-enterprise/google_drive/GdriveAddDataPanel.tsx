@@ -3,16 +3,15 @@ import type { PropsWithChildren } from "react";
 import { match } from "ts-pattern";
 import { t } from "ttag";
 
-import { UpsellStorage } from "metabase/admin/upsells";
 import { skipToken } from "metabase/api";
+import { UpsellStorage } from "metabase/common/components/upsells/UpsellStorage";
 import { useHasTokenFeature, useStoreUrl } from "metabase/common/hooks";
-import { useSelector } from "metabase/lib/redux";
-import { getSubpathSafeUrl } from "metabase/lib/urls";
 import {
   CONTENT_MAX_WIDTH,
   ContactAdminAlert,
   INNER_WIDTH,
 } from "metabase/nav/containers/MainNavbar/MainNavbarContainer/AddDataModal/Panels/AddDataModalEmptyStates";
+import { useSelector } from "metabase/redux";
 import { getUserIsAdmin } from "metabase/selectors/user";
 import {
   Alert,
@@ -26,6 +25,7 @@ import {
   Text,
   Title,
 } from "metabase/ui";
+import { getSubpathSafeUrl } from "metabase/urls";
 import { useGetGsheetsFolderQuery } from "metabase-enterprise/api";
 import {
   DriveConnectionDisplay,
@@ -57,7 +57,7 @@ const PanelWrapper = ({
         <Title order={2} size="h4" mb="sm">
           {title}
         </Title>
-        <Text c="text-medium">{subtitle}</Text>
+        <Text c="text-secondary">{subtitle}</Text>
       </Box>
       {children}
     </Stack>
@@ -150,7 +150,7 @@ export const GdriveAddDataPanel = ({
   const folderUrl = folder?.url;
 
   const NO_STORAGE_SUBTITLE = t`To work with spreadsheets, you can add storage to your instance.`;
-  // eslint-disable-next-line no-literal-metabase-strings -- admin only
+  // eslint-disable-next-line metabase/no-literal-metabase-strings -- admin only
   const ERROR_MESSAGE = t`Please check that the folder is shared with the Metabase Service Account.`;
 
   if (!isAdmin) {
@@ -193,7 +193,7 @@ export const GdriveAddDataPanel = ({
   // Finally, all conditions have been met, and all screens below this line depend only
   // on the status of the attempted connection
 
-  if (status === "active") {
+  if (status === "active" || status === "syncing") {
     return (
       <PanelWrapper title={t`Import Google Sheets`}>
         <DriveConnectionDisplay />
@@ -214,7 +214,7 @@ export const GdriveAddDataPanel = ({
     return (
       <PanelWrapper subtitle={NO_STORAGE_SUBTITLE}>
         <ErrorAlert
-          // eslint-disable-next-line no-literal-metabase-strings -- admin only
+          // eslint-disable-next-line metabase/no-literal-metabase-strings -- admin only
           error={t`Metabase Storage is full. Add more storage to continue syncing.`}
         >
           <Group gap="sm" mt="sm" align="center">
@@ -262,7 +262,7 @@ export const GdriveAddDataPanel = ({
   }
 
   const buttonText = match(status)
-    .with("syncing", () => t`Connecting...`)
+    .with("initializing", () => t`Connecting...`)
     .with("error", () => t`Something went wrong`)
     .exhaustive();
 
@@ -308,7 +308,7 @@ const ErrorAlert = ({
         },
         label: {
           fontSize: "var(--mantine-font-size-md)",
-          color: "var(--mb-color-text-dark)",
+          color: "var(--mb-color-text-primary)",
         },
       }}
     >

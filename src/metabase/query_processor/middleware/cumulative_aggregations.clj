@@ -1,5 +1,5 @@
 (ns metabase.query-processor.middleware.cumulative-aggregations
-  "Middlware for handling cumulative count and cumulative sum aggregations in Clojure-land. In 0.50.0+, this middleware
+  "Middleware for handling cumulative count and cumulative sum aggregations in Clojure-land. In 0.50.0+, this middleware
   is only used for drivers that do not have native implementations of `:window-functions/cumulative`; see the driver
   changelog for 0.50.0 for more information.
 
@@ -23,15 +23,15 @@
    [metabase.lib.core :as lib]
    [metabase.lib.metadata :as lib.metadata]
    [metabase.lib.schema :as lib.schema]
-   [metabase.lib.util.match :as lib.util.match]
    [metabase.lib.walk :as lib.walk]
    [metabase.query-processor.schema :as qp.schema]
-   [metabase.util.malli :as mu]))
+   [metabase.util.malli :as mu]
+   [metabase.util.match :as match]))
 
 ;;;; Pre-processing
 
 (defn- diff-indexes
-  "Given two sequential collections, return indecies that are different between the two."
+  "Given two sequential collections, return indices that are different between the two."
   [coll-1 coll-2]
   (into #{}
         (keep-indexed (fn [i transformed?]
@@ -40,11 +40,12 @@
         (map not= coll-1 coll-2)))
 
 (defn- update-clause [clause]
-  (lib.util.match/match-lite clause
+  (match/match-one clause
     ;; cumulative count doesn't necessarily have a field-id arg
     [:cum-count opts]       [:count opts]
     [:cum-count opts field] [:count opts field]
-    [:cum-sum   opts field] [:sum   opts field]))
+    [:cum-sum   opts field] [:sum   opts field]
+    _                       nil))
 
 (defn- update-aggregations [aggregations]
   (lib.walk/walk-clauses* aggregations update-clause))
@@ -60,7 +61,7 @@
 
 (mu/defn rewrite-cumulative-aggregations :- ::lib.schema/query
   "Pre-processing middleware. Rewrite `:cum-count` and `:cum-sum` aggregations as `:count` and `:sum` respectively. Add
-  information about the indecies of the replaced aggregations under the `::replaced-indexes` key."
+  information about the indices of the replaced aggregations under the `::replaced-indexes` key."
   [query :- ::lib.schema/query]
   (if (driver.u/supports? driver/*driver*
                           :window-functions/cumulative

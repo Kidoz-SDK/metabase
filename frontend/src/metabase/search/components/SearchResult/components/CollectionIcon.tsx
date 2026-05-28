@@ -1,4 +1,4 @@
-import { getIcon } from "metabase/lib/icon";
+import { getIcon } from "metabase/common/utils/icon";
 import {
   DEFAULT_ICON_SIZE,
   LARGE_ICON_SIZE,
@@ -10,7 +10,7 @@ import type { IconComponentProps } from "./ItemIcon";
 export function CollectionIcon({ item }: { item: IconComponentProps["item"] }) {
   const icon = getIcon(item);
 
-  icon.color = icon.color ? icon.color : "text-light";
+  icon.color = icon.color ? icon.color : "text-tertiary";
 
   return (
     <Icon

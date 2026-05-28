@@ -57,7 +57,7 @@ describe("issue 6010", () => {
     cy.wait("@dataset");
 
     cy.findByTestId("qb-filters-panel").within(() => {
-      cy.findByText("Created At: Month is Jan 1–31, 2024").should("be.visible");
+      cy.findByText("Created At: Month is Jan 1–31, 2027").should("be.visible");
     });
     // FIXME metrics v2 -- check that the values in column Total are above 150
   });
@@ -111,8 +111,8 @@ describe("issue 11435", () => {
       query: `
   SELECT "PUBLIC"."ORDERS"."ID" AS "ID", "PUBLIC"."ORDERS"."USER_ID" AS "USER_ID", "PUBLIC"."ORDERS"."PRODUCT_ID" AS "PRODUCT_ID", "PUBLIC"."ORDERS"."SUBTOTAL" AS "SUBTOTAL", "PUBLIC"."ORDERS"."TAX" AS "TAX", "PUBLIC"."ORDERS"."TOTAL" AS "TOTAL", "PUBLIC"."ORDERS"."DISCOUNT" AS "DISCOUNT", "PUBLIC"."ORDERS"."CREATED_AT" AS "CREATED_AT", "PUBLIC"."ORDERS"."QUANTITY" AS "QUANTITY"
   FROM "PUBLIC"."ORDERS"
-  WHERE ("PUBLIC"."ORDERS"."CREATED_AT" >= timestamp with time zone '2025-03-12 00:00:00.000+03:00'
-         AND "PUBLIC"."ORDERS"."CREATED_AT" < timestamp with time zone '2025-03-13 00:00:00.000+03:00')
+  WHERE ("PUBLIC"."ORDERS"."CREATED_AT" >= timestamp with time zone '2028-03-12 00:00:00.000+03:00'
+         AND "PUBLIC"."ORDERS"."CREATED_AT" < timestamp with time zone '2028-03-13 00:00:00.000+03:00')
   LIMIT 1048575`,
     },
     visualization_settings: {
@@ -126,7 +126,7 @@ describe("issue 11435", () => {
     },
   };
   const hoverLineDot = ({ index } = {}) => {
-    // eslint-disable-next-line no-unsafe-element-filtering
+    // eslint-disable-next-line metabase/no-unsafe-element-filtering
     H.cartesianChartCircle().eq(index).realHover();
   };
 
@@ -139,12 +139,12 @@ describe("issue 11435", () => {
     H.createNativeQuestion(questionDetails, { visitQuestion: true });
     hoverLineDot({ index: 1 });
     H.assertEChartsTooltip({
-      header: "March 11, 2025, 8:45:17.010 PM",
+      header: "March 11, 2028, 5:55:36.759 PM",
       rows: [
         {
           color: "#F9D45C",
           name: "TOTAL",
-          value: "25.03",
+          value: "135.23",
         },
       ],
     });
@@ -215,7 +215,7 @@ describe("issue 18976, 18817", () => {
   it("should display a pivot table as regular one when pivot columns are missing (metabase#18976)", () => {
     H.visitQuestionAdhoc(questionDetails);
 
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+    // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
     cy.findByText("Showing 1 row");
   });
 
@@ -288,19 +288,19 @@ describe("issue 19373", { tags: "@skip" }, () => {
     cy.findAllByRole("grid").eq(2).as("tableCells");
 
     // Sanity check before we start asserting on this column
-    // eslint-disable-next-line no-unsafe-element-filtering
+    // eslint-disable-next-line metabase/no-unsafe-element-filtering
     cy.get("@columnTitles")
       .findAllByTestId("pivot-table-cell")
       .eq(ROW_TOTALS_INDEX)
       .should("contain", "Row totals");
 
-    // eslint-disable-next-line no-unsafe-element-filtering
+    // eslint-disable-next-line metabase/no-unsafe-element-filtering
     cy.get("@rowTitles")
       .findAllByTestId("pivot-table-cell")
       .eq(GRAND_TOTALS_INDEX)
       .should("contain", "Grand totals");
 
-    // eslint-disable-next-line no-unsafe-element-filtering
+    // eslint-disable-next-line metabase/no-unsafe-element-filtering
     cy.get("@tableCells")
       .findAllByTestId("pivot-table-cell")
       .eq(ROW_TOTALS_INDEX)
@@ -337,7 +337,7 @@ describe("issue 21392", () => {
 
   it("should render a chart with many columns without freezing (metabase#21392)", () => {
     H.visitQuestionAdhoc({ dataset_query: TEST_QUERY, display: "line" });
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+    // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
     cy.findByText("Visualization").should("be.visible");
   });
 });
@@ -406,18 +406,18 @@ describe("issue 23076", () => {
     cy.signInAsAdmin();
 
     cy.request("PUT", `/api/user/${ADMIN_USER_ID}`, {
-      locale: "de",
+      locale: "en-ZZ",
     });
 
     H.createQuestion(questionDetails, { visitQuestion: true });
   });
 
   it("should correctly translate dates (metabase#23076)", () => {
-    cy.findAllByText(/^Summen für/, { timeout: 10000 })
+    cy.findAllByText(/^\[zz\] Totals for/)
       .should("be.visible")
       .eq(1)
       .invoke("text")
-      .should("eq", "Summen für Mai 2023");
+      .should("eq", "[zz] Totals for May 2026");
   });
 });
 
@@ -475,7 +475,7 @@ describe("issue 28304", () => {
   });
 
   it("table should should generate default columns when table.columns entries do not match data.cols (metabase#28304)", () => {
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+    // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
     cy.findByText("Count by Created At: Month").should("be.visible");
 
     H.openVizSettingsSidebar();
@@ -539,12 +539,14 @@ describe("issue 25250", () => {
   });
 
   it("pivot table should show standalone values when collapsed to the sub-level grouping (metabase#25250)", () => {
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+    // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
     cy.findByText("Product ID").should("be.visible");
 
     H.openVizSettingsSidebar();
-    H.moveDnDKitElement(H.getDraggableElements().contains("Product ID"), {
+    H.getDraggableElements().contains("Product ID").as("dragElement");
+    H.moveDnDKitElementByAlias("@dragElement", {
       vertical: -100,
+      useMouseEvents: true,
     });
     H.getDraggableElements().eq(0).should("contain", "Product ID");
   });
@@ -821,9 +823,9 @@ describe("issue 14148", { tags: "@external" }, () => {
       "Reported failing on v0.38.0-rc1 querying Postgres, Redshift and BigQuery. It works on MySQL and H2.",
     );
 
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+    // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
     cy.findByText(/Grand totals/i);
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+    // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
     cy.findByText("2,500");
   });
 });
@@ -1328,33 +1330,6 @@ describe("issue 56771", () => {
   });
 });
 
-describe("issue 57132", () => {
-  beforeEach(() => {
-    H.restore();
-    cy.signInAsAdmin();
-
-    cy.intercept("POST", "/api/dataset", function (req) {
-      req.continue((res) => {
-        // remove description from the CATEGORY column
-        const index = res.body.data.cols.findIndex(
-          (col) => col.name === "CATEGORY",
-        );
-        delete res.body.data.cols[index].description;
-      });
-    });
-  });
-
-  it("should render more values when hovering colum header without description (metabase#57132)", () => {
-    H.openProductsTable();
-    H.tableInteractive().findByText("Category").realHover();
-
-    cy.log("The popover should be wide enough to show at least some values");
-    H.popover()
-      .findByText(/^Doohickey, Gadget, Gizmo/)
-      .should("be.visible");
-  });
-});
-
 describe("issue 52333", () => {
   const baseQuery = `
 SELECT *
@@ -1490,27 +1465,6 @@ describe("issue 55673", () => {
   });
 });
 
-describe("issue 55637", () => {
-  beforeEach(() => {
-    H.restore();
-    cy.signInAsAdmin();
-  });
-
-  it("should not show column metadata popovers when header cell is clicked (metabase#55637)", () => {
-    H.openOrdersTable();
-    H.tableHeaderColumn("ID").realHover();
-    cy.findByTestId("column-info").should("exist");
-
-    H.tableHeaderColumn("ID").click();
-
-    H.tableHeaderColumn("ID").realHover();
-    cy.findByTestId("column-info").should("not.exist");
-
-    H.tableHeaderColumn("Tax").realHover();
-    cy.findByTestId("column-info").should("not.exist");
-  });
-});
-
 describe("issue 63745", () => {
   beforeEach(() => {
     H.restore();
@@ -1598,5 +1552,31 @@ describe("issue 56094", () => {
     H.queryBuilderFooter().findByLabelText("Switch to visualization").click();
 
     H.queryBuilderFooterDisplayToggle().should("exist");
+  });
+});
+
+describe("issue 57685", () => {
+  beforeEach(() => {
+    H.restore();
+    cy.signInAsNormalUser();
+    H.createNativeQuestion(
+      {
+        display: "table",
+        native: {
+          query: 'SELECT id as "" FROM PRODUCTS',
+        },
+      },
+      { visitQuestion: true },
+    );
+  });
+
+  it("should handle empty column names without error (metabase#57685)", () => {
+    cy.findByTestId("visualization-root").icon("warning").should("not.exist");
+
+    cy.findByTestId("qb-header-action-panel")
+      .findByText("Explore results")
+      .click();
+
+    H.tableInteractive().should("be.visible");
   });
 });
