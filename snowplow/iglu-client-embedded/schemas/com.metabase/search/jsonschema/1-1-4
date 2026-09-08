@@ -30,16 +30,27 @@
       "maximum": 2147483647
     },
     "context": {
-      "description": "Source of the search event",
+      "description": "Source of the search event. Non-null in practice (the frontend sends a value on every request), but kept nullable here to avoid a major (MODEL) version bump, which would fork events into a separate warehouse table. \"other\" buckets frontend contexts not yet added to this enum.",
       "type": [
         "string",
         "null"
       ],
       "enum": [
+        "basic-actions",
+        "browse",
+        "command-palette",
+        "data-picker",
+        "dependencies",
+        "document",
+        "embedding-setup",
+        "entity-picker",
+        "library",
+        "model-migration",
         "search-app",
         "search-bar",
-        "command-palette",
-        "entity-picker"
+        "type-filter",
+        "other",
+        null
       ],
       "maxLength": 1024
     },
@@ -88,7 +99,7 @@
         "null"
       ],
       "items": {
-        "description": "An entity type (card, question, dashboard, etc.)",
+        "description": "An entity type (card, question, dashboard, etc.). \"other\" buckets models that aren't tracked content types.",
         "type": "string",
         "enum": [
           "dashboard",
@@ -103,7 +114,8 @@
           "action",
           "indexed-entity",
           "document",
-          "transform"
+          "transform",
+          "other"
         ],
         "maxLength": 1024
       }

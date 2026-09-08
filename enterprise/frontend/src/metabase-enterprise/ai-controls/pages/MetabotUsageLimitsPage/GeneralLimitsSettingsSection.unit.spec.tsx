@@ -15,12 +15,19 @@ import { createMockSettings } from "metabase-types/api/mocks";
 
 import { GeneralLimitsSettingsSection } from "./GeneralLimitsSettingsSection";
 
+type SetupOpts = {
+  limitType?: MetabotLimitType;
+  limitPeriod?: MetabotLimitPeriod;
+  quotaMessage?: string;
+  instanceMaxUsage?: number | null;
+};
+
 function setup({
-  limitType = "tokens" as MetabotLimitType,
-  limitPeriod = "monthly" as MetabotLimitPeriod,
+  limitType = "tokens",
+  limitPeriod = "monthly",
   quotaMessage = "",
   instanceMaxUsage = null as number | null,
-} = {}) {
+}: SetupOpts = {}) {
   setupPropertiesEndpoints(
     createMockSettings({
       "metabot-limit-unit": limitType,
@@ -83,7 +90,7 @@ describe("GeneralLimitsSettingsSection", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText(/Total monthly instance limit \(millions of tokens\)/),
+        screen.getByText("Total monthly instance token limit"),
       ).toBeInTheDocument();
     });
   });
@@ -94,7 +101,7 @@ describe("GeneralLimitsSettingsSection", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText(/instance limit \(message count\)/),
+        screen.getByText("Total monthly instance message limit"),
       ).toBeInTheDocument();
     });
   });
@@ -104,7 +111,7 @@ describe("GeneralLimitsSettingsSection", () => {
     await screen.findByText("How do you want to limit AI usage?");
 
     await waitFor(() => {
-      expect(screen.getByDisplayValue("500 million")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("500")).toBeInTheDocument();
     });
   });
 
@@ -113,6 +120,24 @@ describe("GeneralLimitsSettingsSection", () => {
     await screen.findByText("How do you want to limit AI usage?");
 
     expect(screen.getByPlaceholderText("Unlimited")).toBeInTheDocument();
+  });
+
+  it("shows 'million' unit beside the instance limit input when limit type is tokens", async () => {
+    setup({ limitType: "tokens" });
+    await screen.findByText("How do you want to limit AI usage?");
+
+    await waitFor(() => {
+      expect(screen.getByText("million")).toBeInTheDocument();
+    });
+  });
+
+  it("shows 'messages' unit beside the instance limit input when limit type is messages", async () => {
+    setup({ limitType: "messages" });
+    await screen.findByText("How do you want to limit AI usage?");
+
+    await waitFor(() => {
+      expect(screen.getByText("messages")).toBeInTheDocument();
+    });
   });
 
   it("renders the quota-reached message input with saved value", async () => {
@@ -133,7 +158,7 @@ describe("GeneralLimitsSettingsSection", () => {
     await userEvent.click(screen.getByText("By message count"));
 
     expect(
-      screen.getByText(/instance limit \(message count\)/),
+      screen.getByText("Total monthly instance message limit"),
     ).toBeInTheDocument();
   });
 
@@ -144,7 +169,7 @@ describe("GeneralLimitsSettingsSection", () => {
     await userEvent.click(screen.getByText("Daily"));
 
     await waitFor(() => {
-      expect(screen.getByText(/daily.*instance limit/i)).toBeInTheDocument();
+      expect(screen.getByText(/total daily instance/i)).toBeInTheDocument();
     });
   });
 });

@@ -2,7 +2,8 @@
   (:require
    [clojure.test :refer [are deftest is testing]]
    [metabase-enterprise.metabot-analytics.queries :as analytics.queries]
-   [metabase.metabot.tools :as metabot.tools]))
+   [metabase.metabot.tools :as metabot.tools]
+   [metabase.test :as mt]))
 
 (set! *warn-on-reflection* true)
 
@@ -11,7 +12,7 @@
 ;; the API integration test.
 
 (defn- with-stubbed-tables! [tables thunk]
-  (with-redefs [analytics.queries/referenced-table-names (fn [_db _sql] tables)]
+  (mt/with-dynamic-fn-redefs [analytics.queries/referenced-table-names (fn [_db _sql] tables)]
     (thunk)))
 
 ;;; ------------------------- happy paths -------------------------
@@ -121,11 +122,11 @@
             "database_id should fall back to :query.database for notebook tools")
         (is (= [] (:tables row)))))))
 
-(deftest construct-notebook-query-pmbql-test
-  (testing "pMBQL is passed through to the frontend as-is, without conversion to legacy MBQL"
+(deftest construct-notebook-query-mbql5-test
+  (testing "MBQL 5 is passed through to the frontend as-is, without conversion to legacy MBQL"
     (with-stubbed-tables! []
       (fn []
-        (let [pmbql {:lib/type "mbql/query"
+        (let [mbql5 {:lib/type "mbql/query"
                      :lib/metadata nil
                      :database 1
                      :stages   [{:lib/type     "mbql.stage/mbql"
@@ -140,10 +141,10 @@
                               {:type "tool-output"
                                :id "call-5"
                                :result {:structured-output {:query-id "qid-3"
-                                                            :query    pmbql}}}]}])
+                                                            :query    mbql5}}}]}])
               row   (first rows)]
           (is (= "notebook" (:query_type row)))
-          (is (= pmbql (:mbql row)))
+          (is (= mbql5 (:mbql row)))
           (is (= 1 (:database_id row))))))))
 
 ;;; ------------------------- filtered-out cases -------------------------

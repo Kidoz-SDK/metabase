@@ -88,7 +88,8 @@ export const ErrorDiagnosticModal = ({
 
   const handleSlackSubmit = async (values: Record<string, any>) => {
     setIsSlackSending(true);
-    const { description, ...diagnosticSelections } = values;
+    // attribution is the backend's job; the form only says whether the report should name the reporter
+    const { description, reporter, ...diagnosticSelections } = values;
 
     const selectedKeys = Object.keys(diagnosticSelections).filter(
       (key) => diagnosticSelections[key],
@@ -96,6 +97,7 @@ export const ErrorDiagnosticModal = ({
     const selectedInfo = {
       ..._.pick(errorInfo, ...selectedKeys),
       description,
+      reporter: Boolean(reporter),
     };
 
     try {
@@ -111,7 +113,6 @@ export const ErrorDiagnosticModal = ({
           addUndo({
             message: t`Failed to send diagnostic information to Slack`,
             icon: "warning",
-            variant: "error",
           }),
         );
       }
@@ -121,7 +122,6 @@ export const ErrorDiagnosticModal = ({
         addUndo({
           message: t`Error sending diagnostic information to Slack`,
           icon: "warning",
-          variant: "error",
         }),
       );
     } finally {

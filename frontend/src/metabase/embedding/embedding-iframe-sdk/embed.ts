@@ -1,11 +1,13 @@
 import { MetabaseError, SSO_NOT_ALLOWED } from "embedding-sdk-bundle/errors";
 import * as MetabaseErrors from "embedding-sdk-bundle/errors";
+import type { SqlParameterValues } from "embedding-sdk-bundle/types";
 import { PLUGIN_EMBED_JS_EE } from "metabase/embedding/embedding-iframe-sdk/plugin";
 import type {
   EmbedAuthManager,
   EmbedAuthManagerContext,
 } from "metabase/embedding/embedding-iframe-sdk/types/auth-manager";
 import type { ComponentToAttributes } from "metabase/embedding/embedding-iframe-sdk/types/modular-embedding";
+import type { ParameterValues } from "metabase/embedding-sdk/types/dashboard";
 import { decodeJwt } from "metabase/utils/jwt";
 
 import { debouncedReportAnalytics } from "./analytics";
@@ -23,6 +25,7 @@ import type {
   SdkIframeEmbedSettings,
   SdkIframeEmbedTagMessage,
 } from "./types/embed";
+import { listenForEajsMessages } from "./utils/post-message";
 import { attributeToSettingKey, parseAttributeValue } from "./webcomponents";
 
 // Import EE Iframe Embedding script plugins
@@ -159,6 +162,8 @@ export abstract class MetabaseEmbedElement<T extends string[] = string[]>
     Set<SdkIframeEmbedEventHandler>
   > = new Map();
   private _authManager: EmbedAuthManager | null = null;
+  private _removeMessageListener: (() => void) | null = null;
+
   ["custom-context"]: unknown;
 
   constructor() {
@@ -174,9 +179,9 @@ export abstract class MetabaseEmbedElement<T extends string[] = string[]>
   get properties(): SdkIframeEmbedElementSettings {
     const attributesConverted = this._attributeNames.reduce(
       (acc, attr) => {
-        const attrValue = this.getAttribute(attr as string);
+        const attrValue = this.getAttribute(attr);
         if (attrValue !== null) {
-          const key = attributeToSettingKey(attr as string);
+          const key = attributeToSettingKey(attr);
           acc[key] = parseAttributeValue(attrValue);
         }
         return acc;
@@ -199,7 +204,7 @@ export abstract class MetabaseEmbedElement<T extends string[] = string[]>
     options?: boolean | AddEventListenerOptions,
   ): void {
     if (type === "ready") {
-      const eventType = type as SdkIframeEmbedEvent["type"];
+      const eventType = type;
       const handler = listener as SdkIframeEmbedEventHandler;
       if (!this._eventHandlers.has(eventType)) {
         this._eventHandlers.set(eventType, new Set());
@@ -216,11 +221,7 @@ export abstract class MetabaseEmbedElement<T extends string[] = string[]>
     }
 
     // Fall back to the native HTMLElement event mechanism for all other events.
-    super.addEventListener(
-      type,
-      listener as EventListenerOrEventListenerObject,
-      options,
-    );
+    super.addEventListener(type, listener, options);
   }
 
   removeEventListener(
@@ -229,7 +230,7 @@ export abstract class MetabaseEmbedElement<T extends string[] = string[]>
     options?: boolean | EventListenerOptions,
   ): void {
     if (type === "ready") {
-      const eventType = type as SdkIframeEmbedEvent["type"];
+      const eventType = type;
       const handler = listener as SdkIframeEmbedEventHandler;
       const handlers = this._eventHandlers.get(eventType);
 
@@ -243,11 +244,7 @@ export abstract class MetabaseEmbedElement<T extends string[] = string[]>
       return;
     }
 
-    super.removeEventListener(
-      type,
-      listener as EventListenerOrEventListenerObject,
-      options,
-    );
+    super.removeEventListener(type, listener, options);
   }
 
   /**
@@ -275,7 +272,8 @@ export abstract class MetabaseEmbedElement<T extends string[] = string[]>
   }
 
   destroy() {
-    window.removeEventListener("message", this._handleMessage);
+    this._removeMessageListener?.();
+    this._removeMessageListener = null;
     this._isEmbedReady = false;
     this._eventHandlers.clear();
     this._authManager = null;
@@ -324,16 +322,14 @@ export abstract class MetabaseEmbedElement<T extends string[] = string[]>
     const key = attributeToSettingKey(
       attrName,
     ) as keyof SdkIframeEmbedElementSettings;
-    if (
-      (DISABLE_UPDATE_FOR_KEYS as readonly string[]).includes(key as string)
-    ) {
+    if ((DISABLE_UPDATE_FOR_KEYS as readonly string[]).includes(key)) {
       console.error(`${key} cannot be updated after the embed is created`);
       return;
     }
 
     this._updateSettings({
       [key]: parseAttributeValue(newVal),
-    } as Partial<SdkIframeEmbedElementSettings>);
+    });
   }
 
   private _emitEvent(event: SdkIframeEmbedEvent) {
@@ -364,7 +360,15 @@ export abstract class MetabaseEmbedElement<T extends string[] = string[]>
 
     this._iframe.setAttribute("data-metabase-embed", "true");
 
-    window.addEventListener("message", this._handleMessage);
+    // Chrome blocks the Clipboard API in cross-origin iframes unless the host
+    // explicitly delegates the permission (e.g. copying a Metabot answer).
+    this._iframe.setAttribute("allow", "clipboard-write");
+
+    this._removeMessageListener = listenForEajsMessages({
+      messageSource: "iframe-content",
+      iframe: this._iframe,
+      handler: this._handleMessage,
+    });
 
     this.appendChild(this._iframe);
   }
@@ -415,19 +419,8 @@ export abstract class MetabaseEmbedElement<T extends string[] = string[]>
     }
   }
 
-  private _handleMessage = async (
-    event: MessageEvent<SdkIframeEmbedTagMessage>,
-  ) => {
-    if (event.source !== this._iframe?.contentWindow) {
-      // ignore messages from other iframes
-      return;
-    }
-
-    if (!event.data) {
-      return;
-    }
-
-    if (event.data.type === "metabase.embed.iframeReady") {
+  private _handleMessage = async (message: SdkIframeEmbedTagMessage) => {
+    if (message.type === "metabase.embed.iframeReady") {
       if (this._isEmbedReady) {
         return;
       }
@@ -450,17 +443,16 @@ export abstract class MetabaseEmbedElement<T extends string[] = string[]>
       this._emitEvent({ type: "ready" });
     }
 
-    if (event.data.type === "metabase.embed.requestSessionToken") {
+    if (message.type === "metabase.embed.requestSessionToken") {
       await this._authenticate();
     }
 
-    if (event.data.type === "metabase.embed.requestGuestTokenRefresh") {
-      await this._refreshGuestToken(event.data.data.expiredToken);
+    if (message.type === "metabase.embed.requestGuestTokenRefresh") {
+      await this._refreshGuestToken(message.data.expiredToken);
     }
 
-    // Note: if we wrap other functions like this, let's come up with a generic utility function
-    if (event.data.type === "metabase.embed.handleLink") {
-      const { url, requestId } = event.data.data;
+    if (message.type === "metabase.embed.handleLink") {
+      const { url, requestId } = message.data;
       const handleLink = this.globalSettings.pluginsConfig?.handleLink;
 
       let handled = false;
@@ -479,6 +471,18 @@ export abstract class MetabaseEmbedElement<T extends string[] = string[]>
           data: { requestId, handled },
         },
         "*",
+      );
+    }
+
+    if (message.type === "metabase.embed.parametersChange") {
+      this.dispatchEvent(
+        new CustomEvent("parameters-change", { detail: message.data }),
+      );
+    }
+
+    if (message.type === "metabase.embed.sqlParametersChange") {
+      this.dispatchEvent(
+        new CustomEvent("sql-parameters-change", { detail: message.data }),
       );
     }
   };
@@ -510,7 +514,7 @@ export abstract class MetabaseEmbedElement<T extends string[] = string[]>
     }
   }
 
-  private reportAuthenticationError(error: unknown) {
+  private _reportAuthenticationError(error: unknown) {
     this.sendMessage("metabase.embed.reportAuthenticationError", {
       error:
         error instanceof MetabaseError
@@ -524,7 +528,7 @@ export abstract class MetabaseEmbedElement<T extends string[] = string[]>
 
   private async _authenticate() {
     if (!this._authManager) {
-      this.reportAuthenticationError(SSO_NOT_ALLOWED());
+      this._reportAuthenticationError(SSO_NOT_ALLOWED());
 
       return;
     }
@@ -546,7 +550,7 @@ export abstract class MetabaseEmbedElement<T extends string[] = string[]>
         questionId: undefined,
       });
     } catch (error) {
-      this.reportAuthenticationError(error);
+      this._reportAuthenticationError(error);
       // Send settings without a token so ComponentProvider can mount and display the error.
       this._updateSettings({
         dashboardId: undefined,
@@ -562,7 +566,7 @@ export abstract class MetabaseEmbedElement<T extends string[] = string[]>
         guestToken: token,
       });
     } catch (error) {
-      this.reportAuthenticationError(error);
+      this._reportAuthenticationError(error);
     }
   }
 
@@ -645,20 +649,116 @@ export abstract class MetabaseEmbedElement<T extends string[] = string[]>
 
     return data.jwt;
   }
+
+  // `parameters` and `sqlParameters` are JS properties whose value
+  // lives in the element's attribute of the same name. Reading the
+  // property parses the attribute as JSON; writing the property
+  // serializes the value back into the attribute. So setting the
+  // attribute directly (`<metabase-dashboard parameters='{"state":"NY"}'>`),
+  // assigning the JS property (`el.parameters = ...`).
+
+  /**
+   * Reads the named element attribute and returns it as a plain object.
+   * Uses the same `parseAttributeValue` parser as `attributeChangedCallback`
+   * Returns `undefined` if the attribute isn't set, fails to parse,
+   * or doesn't resolve to a plain object (e.g. a primitive or array).
+   */
+  protected _readJsonAttribute<T>(attributeName: string): T | undefined {
+    const rawValue = this.getAttribute(attributeName);
+
+    if (rawValue === null) {
+      return undefined;
+    }
+
+    const parsed = parseAttributeValue(rawValue);
+
+    if (
+      parsed === null ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed)
+    ) {
+      return undefined;
+    }
+
+    return parsed as T;
+  }
+
+  /**
+   * Serializes a value as JSON and writes it to the named element
+   * attribute. `null` or `undefined` removes the attribute. If the
+   * resulting JSON string equals what's already on the attribute, our
+   * `attributeChangedCallback` short-circuits on `oldVal === newVal`
+   * , so we bypass `setAttribute` and dispatch `_updateSettings` directly to
+   * keep the iframe in sync with the caller's intent.
+   */
+  protected _writeJsonProperty(
+    settingKey: string,
+    attrName: string,
+    value: unknown,
+  ) {
+    // `null` and `undefined` mean "clear this property"; anything else
+    // gets serialized as JSON. `nextJson === null` is the marker for
+    // "the attribute should not exist".
+    const shouldRemoveValue = value === undefined || value === null;
+    const nextJson = shouldRemoveValue ? null : JSON.stringify(value);
+    const currentJson = this.getAttribute(attrName);
+
+    if (nextJson === currentJson) {
+      // Both null: clearing something that was never set. Nothing to do.
+      if (nextJson === null) {
+        return;
+      }
+
+      // Same JSON string is already on the attribute, so calling
+      // `setAttribute` would be a no-op for `attributeChangedCallback`
+      // (it short-circuits on `oldVal === newVal`, see line ~323). The
+      // host explicitly assigned the property, so bypass the attribute
+      // and dispatch `_updateSettings` directly to keep the iframe
+      // synced with the caller's intent.
+      this._updateSettings({
+        [settingKey]: value,
+      });
+
+      return;
+    }
+
+    // Attribute is being added, removed, or replaced — mutating it
+    // fires `attributeChangedCallback`, which then calls `_updateSettings`.
+    if (nextJson === null) {
+      this.removeAttribute(attrName);
+    } else {
+      this.setAttribute(attrName, nextJson);
+    }
+  }
 }
+
+type ConcreteEmbedElementConstructor<U extends string[]> = new (
+  ...args: any[]
+) => MetabaseEmbedElement<U> & {
+  _componentName: string;
+  _attributeNames: U;
+};
 
 function createCustomElement<
   T extends keyof ComponentToAttributes,
   U extends (keyof ComponentToAttributes[T] & string)[],
->(componentName: T, attributeNames: U) {
-  const CustomEmbedElement = class extends MetabaseEmbedElement<U> {
+  C extends ConcreteEmbedElementConstructor<U> =
+    ConcreteEmbedElementConstructor<U>,
+>(
+  componentName: T,
+  attributeNames: U,
+  decorate?: (Base: ConcreteEmbedElementConstructor<U>) => C,
+): C {
+  const Base = class extends MetabaseEmbedElement<U> {
     protected _componentName: string = componentName;
     protected _attributeNames: U = attributeNames;
 
     static get observedAttributes() {
       return attributeNames;
     }
-  };
+  } as unknown as ConcreteEmbedElementConstructor<U>;
+
+  const CustomEmbedElement = (decorate ? decorate(Base) : Base) as C;
 
   if (typeof window !== "undefined" && !customElements.get(componentName)) {
     customElements.define(componentName, CustomEmbedElement);
@@ -667,32 +767,64 @@ function createCustomElement<
   return CustomEmbedElement;
 }
 
-const MetabaseDashboardElement = createCustomElement("metabase-dashboard", [
-  "dashboard-id",
-  "token",
-  "auto-refresh-interval",
-  "with-title",
-  "with-downloads",
-  "with-subscriptions",
-  "drills",
-  "initial-parameters",
-  "hidden-parameters",
-  "enable-entity-navigation",
-]);
+export const MetabaseDashboardElement = createCustomElement(
+  "metabase-dashboard",
+  [
+    "dashboard-id",
+    "token",
+    "auto-refresh-interval",
+    "with-title",
+    "with-downloads",
+    "with-subscriptions",
+    "drills",
+    "initial-parameters",
+    "parameters",
+    "hidden-parameters",
+    "enable-entity-navigation",
+  ],
+  (Base) =>
+    class extends Base {
+      get parameters(): ParameterValues | undefined {
+        return this._readJsonAttribute<ParameterValues>("parameters");
+      }
+      set parameters(values: ParameterValues | undefined) {
+        this._writeJsonProperty("parameters", "parameters", values);
+      }
+    },
+);
+export type MetabaseDashboardElement = InstanceType<
+  typeof MetabaseDashboardElement
+>;
 
-const MetabaseQuestionElement = createCustomElement("metabase-question", [
-  "question-id",
-  "token",
-  "with-title",
-  "with-downloads",
-  "with-alerts",
-  "drills",
-  "initial-sql-parameters",
-  "hidden-parameters",
-  "is-save-enabled",
-  "target-collection",
-  "entity-types",
-]);
+export const MetabaseQuestionElement = createCustomElement(
+  "metabase-question",
+  [
+    "question-id",
+    "token",
+    "with-title",
+    "with-downloads",
+    "with-alerts",
+    "drills",
+    "initial-sql-parameters",
+    "sql-parameters",
+    "hidden-parameters",
+    "is-save-enabled",
+    "target-collection",
+    "entity-types",
+  ],
+  (Base) =>
+    class extends Base {
+      get sqlParameters(): SqlParameterValues | undefined {
+        return this._readJsonAttribute<SqlParameterValues>("sql-parameters");
+      }
+      set sqlParameters(values: SqlParameterValues | undefined) {
+        this._writeJsonProperty("sqlParameters", "sql-parameters", values);
+      }
+    },
+);
+export type MetabaseQuestionElement = InstanceType<
+  typeof MetabaseQuestionElement
+>;
 
 const MetabaseManageContentElement = createCustomElement("metabase-browser", [
   "initial-collection",
@@ -719,9 +851,4 @@ if (typeof window !== "undefined") {
   };
 }
 
-export {
-  MetabaseDashboardElement,
-  MetabaseQuestionElement,
-  MetabaseManageContentElement,
-  MetabaseMetabotElement,
-};
+export { MetabaseManageContentElement, MetabaseMetabotElement };

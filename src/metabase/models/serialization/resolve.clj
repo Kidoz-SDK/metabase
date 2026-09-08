@@ -69,6 +69,14 @@
        (or (entity-id? s)
            (identity-hash? s))))
 
+(defn serialized-query-source-table
+  "Given a serialized query (with portable references), returns the portable reference of the table it is based
+  on. Measures and segments use this to omit the table_id property when it is derivable from the query. This should be
+  an mbql query and not a native query."
+  [serialized-query]
+  (mu/disable-enforcement
+    (lib/primary-source-table-id serialized-query)))
+
 ;;; ============================================================
 ;;; import-mbql — depends only on protocols, match, lib.schema.id
 ;;; ============================================================
@@ -81,11 +89,11 @@
      (import-field-fk resolver fully-qualified-name)]
 
     ;; legacy field refs, still used in parameters and result metadata `field_ref`
-    [#{:field "field"} (fully-qualified-name :guard vector?) (opts :guard (some-fn map? nil))]
+    [#{:field "field"} (fully-qualified-name :guard vector?) (opts :guard (or (map? opts) (nil? opts)))]
     [:field (import-field-fk resolver fully-qualified-name) (some->> opts (mbql-fully-qualified-names->ids* resolver))]
 
     ;; MBQL 3 `:field-id` can (allegedly) still show up sometimes? Support it just in case.
-    [(tag :guard #{:field :field-id "field" "field-id"}) (id :guard vector?)]
+    [#{:field :field-id "field" "field-id"} (id :guard vector?)]
     [:field (import-field-fk resolver id) nil]
 
     ;; source-field is also used within parameter mapping dimensions
@@ -192,7 +200,7 @@
     [:field (mbql-id->fully-qualified-name resolver opts) (export-field-fk resolver id)]
 
     ;; legacy (MBQL 4) field refs are still supported in parameter targets and in result metadata `field_ref`...
-    [:field (id :guard pos-int?) (opts :guard (some-fn map? nil?))]
+    [:field (id :guard pos-int?) (opts :guard (or (map? opts) (nil? opts)))]
     [:field (export-field-fk resolver id) (mbql-id->fully-qualified-name resolver opts)]
 
     ;; MBQL 3 `:field-id` can (allegedly) still show up sometimes? Support it just in case.
@@ -229,7 +237,7 @@
      (mbql-id->fully-qualified-name resolver &match)
 
      (_ :guard sequential?)
-     (mapv export-mbql &match)
+     (mapv (partial export-mbql resolver) &match)
 
      (_ :guard map?)
      (reduce-kv

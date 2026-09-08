@@ -186,6 +186,7 @@ export function QueryEditor({
             }
             onChangeQuery={onChangeQuery}
             parametersAreUserVisible={parametersAreUserVisible}
+            canUseSampleDatabase={uiOptions?.canUseSampleDatabase}
           />
         )}
         {!isNative && uiState.sidebarType === "native-query" && (
@@ -195,7 +196,6 @@ export function QueryEditor({
             convertToNativeButtonLabel={uiOptions?.convertToNativeButtonLabel}
             onConvertToNativeClick={convertToNative}
             readOnly={uiOptions?.readOnly}
-            disableDefaultLimit={uiOptions?.disableDefaultLimit}
           />
         )}
       </Flex>

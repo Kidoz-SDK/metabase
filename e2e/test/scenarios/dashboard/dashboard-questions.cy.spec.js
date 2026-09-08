@@ -275,6 +275,8 @@ describe("Dashboard > Dashboard Questions", () => {
     });
 
     it("should tell users which dashboards will be affected when doing bulk question moves", () => {
+      cy.intercept("PUT", "/api/card/*").as("moveQuestion");
+
       H.createQuestionAndDashboard({
         questionDetails: {
           name: "Sample Question",
@@ -310,11 +312,17 @@ describe("Dashboard > Dashboard Questions", () => {
         cy.button("Move it").should("exist").click();
       });
 
+      // Wait for the move to land before navigating: otherwise Test Dashboard
+      // can load while its dashcard is still present, so the empty state never
+      // renders and the assertion below times out.
+      cy.wait("@moveQuestion");
+      H.modal().should("not.exist");
+
       H.collectionTable().findByText("Test Dashboard").click();
 
       cy.findByTestId("dashboard-empty-state")
         .findByText("This dashboard is empty")
-        .should("exist");
+        .should("be.visible");
 
       H.visitDashboard(S.ORDERS_DASHBOARD_ID);
       H.dashboardCards().findByText("Sample Question").should("exist");
@@ -814,6 +822,17 @@ describe("Dashboard > Dashboard Questions", () => {
         H.selectDataset("Blue Question");
         cy.button("Save").click();
       });
+
+      // The modal-save dispatches a dashcard update; the dashboard's
+      // "dirty" flag only flips once that commits. Wait for the modal to
+      // unmount before H.saveDashboard so the edit-bar Save sees the new
+      // dashcard state — otherwise its early-return-if-unchanged path
+      // skips the PUT (no @saveDashboardCards request ever fires).
+      H.modal().should("not.exist");
+      H.getDashboardCard()
+        .findAllByTestId("legend-item")
+        .filter(':contains("Blue Question")')
+        .should("exist");
 
       H.saveDashboard();
       H.getDashboardCard().within(() => {
@@ -1317,5 +1336,6 @@ function selectCollectionItem(name) {
     .parent()
     .parent()
     .findByRole("checkbox")
+    .closest("button")
     .click();
 }

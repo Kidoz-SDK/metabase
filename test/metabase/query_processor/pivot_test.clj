@@ -1,5 +1,6 @@
 (ns ^:mb/driver-tests metabase.query-processor.pivot-test
   "Tests for pivot table actions for the query processor"
+  {:clj-kondo/config '{:linters {:deprecated-var {:exclude {metabase.test.data/mbql-query {:namespaces [metabase.query-processor.pivot-test]}}}}}}
   (:require
    [clojure.set :as set]
    [clojure.test :refer :all]
@@ -110,9 +111,9 @@
          clojure.lang.ExceptionInfo
          #"Invalid pivot-cols: specified breakout at index 3, but we only have 3 breakouts"
          (#'qp.pivot/breakout-combinations 3 [] [0 1 2 3] true true)))))
-  ;; TODO -- we should require these columns to be distinct as well (I think?)
-  ;; TODO -- require all numbers to be positive
-  ;; TODO -- can you specify something in both pivot-rows and pivot-cols?
+;; TODO -- we should require these columns to be distinct as well (I think?)
+;; TODO -- require all numbers to be positive
+;; TODO -- can you specify something in both pivot-rows and pivot-cols?
 
 (defn- test-query []
   (mt/dataset test-data
@@ -510,6 +511,31 @@
                  {:expressions {"Product Rating + 1" [:+ $product_id->products.rating 1]}
                   :aggregation [[:count]]
                   :breakout    [$user_id->people.source [:expression "Product Rating + 1"]]})))))))
+
+(deftest ^:parallel measure-in-pivot-table-test
+  (testing "a :measure clause used inside a pivot query executes like the equivalent inline aggregation"
+    (mt/test-drivers (qp.pivot.test-util/applicable-drivers)
+      (let [mp         (mt/metadata-provider)
+            total      (lib.metadata/field mp (mt/id :orders :total))
+            quantity   (lib.metadata/field mp (mt/id :orders :quantity))
+            definition (-> (lib/query mp (lib.metadata/table mp (mt/id :orders)))
+                           (lib/aggregate (lib/sum total)))
+            mp         (lib.tu/mock-metadata-provider
+                        mp
+                        {:measures [{:id         1
+                                     :name       "Sum of Total"
+                                     :table-id   (mt/id :orders)
+                                     :definition definition}]})
+            pivot      (fn [agg]
+                         (-> (lib/query mp (lib.metadata/table mp (mt/id :orders)))
+                             (lib/aggregate agg)
+                             (lib/breakout quantity)))
+            measure-pivot (pivot (lib.metadata/measure mp 1))
+            inline-pivot  (pivot (lib/sum total))]
+        ;; the spliced measure must produce the same pivot output (leaf + grand-total rows) as
+        ;; the equivalent inline sum aggregation
+        (is (= (mt/rows (qp.pivot/run-pivot-query inline-pivot))
+               (mt/rows (qp.pivot/run-pivot-query measure-pivot))))))))
 
 (deftest pivot-query-should-work-without-data-permissions-test
   (testing "Pivot queries should work if the current user only has permissions to view the Card -- no data perms (#14989)"

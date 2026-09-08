@@ -9,7 +9,8 @@ import AdminS from "metabase/css/admin.module.css";
 import CS from "metabase/css/core/index.css";
 import { renderMetabotProfileLabel } from "metabase/metabot/constants";
 import { useDispatch } from "metabase/redux";
-import { Badge, Ellipsified, Flex } from "metabase/ui";
+import { Badge, Ellipsified, Flex, Tooltip } from "metabase/ui";
+import { EMPTY_CELL_PLACEHOLDER } from "metabase/utils/constants";
 import { formatNumber } from "metabase/utils/formatting";
 import { getUserName } from "metabase/utils/user";
 import type { SortingOptions } from "metabase-types/api";
@@ -50,8 +51,16 @@ export function ConversationsTable({
     <table className={cx(AdminS.ContentTable, S.table)}>
       <thead>
         <tr>
-          <th>{t`User`}</th>
-          <th>{t`Profile`}</th>
+          <SortableColumnHeader
+            name="user"
+            sortingOptions={sortingOptions}
+            onSortingOptionsChange={onSortingOptionsChange}
+          >{t`User`}</SortableColumnHeader>
+          <SortableColumnHeader
+            name="profile_id"
+            sortingOptions={sortingOptions}
+            onSortingOptionsChange={onSortingOptionsChange}
+          >{t`Profile`}</SortableColumnHeader>
           <SortableColumnHeader
             name="created_at"
             sortingOptions={sortingOptions}
@@ -68,15 +77,30 @@ export function ConversationsTable({
             sortingOptions={sortingOptions}
             onSortingOptionsChange={onSortingOptionsChange}
           >{t`Tokens`}</SortableColumnHeader>
+          <SortableColumnHeader
+            name="cache_read_tokens"
+            sortingOptions={sortingOptions}
+            onSortingOptionsChange={onSortingOptionsChange}
+          >
+            <Tooltip
+              label={t`Portion of tokens served from the provider cache. A subset of Tokens, not an additional count.`}
+            >
+              <span>{t`Cached tokens`}</span>
+            </Tooltip>
+          </SortableColumnHeader>
           <th>{t`Queries`}</th>
           <th>{t`Searches`}</th>
-          <th>{t`IP`}</th>
+          <SortableColumnHeader
+            name="ip_address"
+            sortingOptions={sortingOptions}
+            onSortingOptionsChange={onSortingOptionsChange}
+          >{t`IP`}</SortableColumnHeader>
         </tr>
       </thead>
       <tbody>
         {showLoadingAndError && (
           <tr>
-            <td colSpan={8}>
+            <td colSpan={9}>
               <LoadingAndErrorWrapper loading={isLoading} error={error} />
             </td>
           </tr>
@@ -86,8 +110,8 @@ export function ConversationsTable({
           <>
             {conversations.length === 0 && (
               <tr>
-                <td colSpan={8}>
-                  <Flex c="text-tertiary" justify="center">
+                <td colSpan={9}>
+                  <Flex c="text-disabled" justify="center">
                     {t`No conversations found`}
                   </Flex>
                 </td>
@@ -115,9 +139,10 @@ export function ConversationsTable({
                 </td>
                 <td>{formatNumber(convo.message_count)}</td>
                 <td>{formatNumber(convo.total_tokens)}</td>
+                <td>{formatNumber(convo.cache_read_tokens)}</td>
                 <td>{formatNumber(convo.query_count)}</td>
                 <td>{formatNumber(convo.search_count)}</td>
-                <td>{convo.ip_address ?? "—"}</td>
+                <td>{convo.ip_address ?? EMPTY_CELL_PLACEHOLDER}</td>
               </tr>
             ))}
           </>

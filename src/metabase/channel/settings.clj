@@ -34,7 +34,7 @@
 
 (defsetting slack-cached-channels-and-usernames
   "A cache shared between instances for storing an instance's slack channels and users."
-  :encryption :when-encryption-key-set
+  :encryption :no
   :visibility :internal
   :type       :json
   :doc        false
@@ -56,10 +56,10 @@
   :export?    false)
 
 (defn process-files-channel-name
-  "Converts empty strings to `nil`, and removes leading `#` from the channel name if present."
+  "Converts empty strings to `nil`, and removes a leading `#` (channel) or `@` (user) from the name if present."
   [channel-name]
   (when-not (str/blank? channel-name)
-    (if (str/starts-with? channel-name "#") (subs channel-name 1) channel-name)))
+    (if (contains? #{\# \@} (first channel-name)) (subs channel-name 1) channel-name)))
 
 (defn find-cached-slack-channel-or-username
   "Look up a Slack channel or username by name or ID in [[slack-cached-channels-and-usernames]].
@@ -77,7 +77,7 @@
   (deferred-tru "The name of the channel to which Metabase files should be initially uploaded")
   :deprecated "0.54.0"
   :default "metabase_files"
-  :encryption :no
+  :encryption :when-encryption-key-set
   :visibility :settings-manager
   :audit      :getter
   :setter (fn [channel-name]
@@ -86,7 +86,7 @@
 (defsetting slack-bug-report-channel
   (deferred-tru "The name of the channel where bug reports should be posted")
   :default "metabase-bugs"
-  :encryption :no
+  :encryption :when-encryption-key-set
   :visibility :settings-manager
   :audit      :getter
   :export?    false
@@ -116,7 +116,7 @@
 
 (defsetting notification-link-base-url
   (deferred-tru "By default \"Site Url\" is used in notification links, but can be overridden.")
-  :encryption :no
+  :encryption :when-encryption-key-set
   :visibility :internal
   :type       :string
   :feature    :whitelabel
@@ -126,14 +126,14 @@
 
 (defsetting email-from-address
   (deferred-tru "The email address you want to use for the sender of emails.")
-  :encryption :no
+  :encryption :when-encryption-key-set
   :default    "notifications@metabase.com"
   :visibility :settings-manager
   :audit      :getter)
 
 (defsetting email-from-address-override
   (deferred-tru "The email address you want to use for the sender of emails from your custom SMTP server.")
-  :encryption :no
+  :encryption :when-encryption-key-set
   :feature   :cloud-custom-smtp
   :default    "notifications@metabase.com"
   :visibility :settings-manager
@@ -142,7 +142,7 @@
 
 (defsetting email-from-name
   (deferred-tru "The name you want to use for the sender of emails.")
-  :encryption :no
+  :encryption :when-encryption-key-set
   :visibility :settings-manager
   :audit      :getter
   :setter     (fn [new-value]
@@ -165,7 +165,7 @@
 
 (defsetting email-reply-to
   (deferred-tru "The email address you want the replies to go to, if different from the from address.")
-  :encryption :no
+  :encryption :when-encryption-key-set
   :type       :json
   :visibility :settings-manager
   :audit      :getter
@@ -285,6 +285,16 @@
                 Note that the final email sent before reaching the limit is able to exceed it, if it has multiple recipients.")
   :export?    true
   :type       :integer
+  :visibility :settings-manager
+  :audit      :getter)
+
+(defsetting email-max-recipients-per-message
+  (deferred-tru "The maximum number of recipients allowed on a single email. Notifications with more recipients than
+                this are split into multiple messages. This guards against SMTP providers (e.g. Amazon SES) that reject
+                any message exceeding their per-message recipient cap. Defaults to 50; set to 0 to disable batching.")
+  :export?    true
+  :type       :integer
+  :default    50
   :visibility :settings-manager
   :audit      :getter)
 

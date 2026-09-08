@@ -1,24 +1,26 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { t } from "ttag";
-import _ from "underscore";
 
-import { isPublicCollection } from "metabase/collections/utils";
+import { useListCollectionsQuery } from "metabase/api";
+import { ROOT_COLLECTION } from "metabase/common/collections/constants";
+import getExpandedCollectionsById from "metabase/common/collections/getExpandedCollectionsById";
+import { isPublicCollection } from "metabase/common/collections/utils";
 import { Breadcrumbs } from "metabase/common/components/Breadcrumbs";
 import { Input } from "metabase/common/components/Input";
 import { SelectList } from "metabase/common/components/SelectList";
 import type { BaseSelectListItemProps } from "metabase/common/components/SelectList/BaseSelectListItem";
 import { useDebouncedValue } from "metabase/common/hooks/use-debounced-value";
 import { getCollectionBreadCrumbs } from "metabase/common/utils/collections";
-import { getIcon } from "metabase/common/utils/icon";
 import { useDashboardContext } from "metabase/dashboard/context";
 import { getDashboard } from "metabase/dashboard/selectors";
 import { isEmbeddingSdk } from "metabase/embedding-sdk/config";
-import { Collections, ROOT_COLLECTION } from "metabase/entities/collections";
+import { useGetIcon } from "metabase/hooks/use-icon";
 import { PLUGIN_COLLECTIONS } from "metabase/plugins";
-import { connect, useDispatch, useSelector } from "metabase/redux";
+import { useDispatch, useSelector } from "metabase/redux";
 import {
   canUserCreateNativeQueries,
   canUserCreateQueries,
+  getUserPersonalCollectionId,
 } from "metabase/selectors/user";
 import { Button, Flex, Icon } from "metabase/ui";
 import { SEARCH_DEBOUNCE_DURATION } from "metabase/utils/constants";
@@ -27,21 +29,29 @@ import type { Collection, CollectionId } from "metabase-types/api";
 import { QuestionList } from "./QuestionList";
 import S from "./QuestionPicker.module.css";
 import { addDashboardQuestion } from "./actions";
+import { useCollectionsWithTenants } from "./hooks/use-collections-with-tenants";
 import {
   COLLECTIONS_TOP_LEVEL_ID,
   SHARED_TENANT_COLLECTIONS_ROOT_ID,
-  useCollectionsWithTenants,
-} from "./hooks/use-collections-with-tenants";
+  TENANT_SPECIFIC_COLLECTIONS_ROOT_ID,
+} from "./utils/tenant-collection-tree";
 
-interface QuestionPickerInnerProps {
+interface QuestionPickerProps {
   onSelect: BaseSelectListItemProps["onSelect"];
-  collectionsById: Record<CollectionId, Collection>;
 }
 
-function QuestionPickerInner({
-  onSelect,
-  collectionsById: baseCollectionsById,
-}: QuestionPickerInnerProps) {
+export function QuestionPicker({ onSelect }: QuestionPickerProps) {
+  const { data: allCollectionsList = [] } = useListCollectionsQuery();
+  const userPersonalCollectionId = useSelector(getUserPersonalCollectionId);
+  const baseCollectionsById = useMemo(
+    () =>
+      getExpandedCollectionsById(
+        allCollectionsList,
+        userPersonalCollectionId,
+      ) as Record<CollectionId, Collection>,
+    [allCollectionsList, userPersonalCollectionId],
+  );
+  const getIcon = useGetIcon();
   const dispatch = useDispatch();
   const dashboard = useSelector(getDashboard);
   const dashboardCollection = dashboard?.collection ?? ROOT_COLLECTION;
@@ -54,11 +64,22 @@ function QuestionPickerInner({
     SEARCH_DEBOUNCE_DURATION,
   );
 
-  const collectionsById = useCollectionsWithTenants(baseCollectionsById);
+  // getExpandedCollectionsById always creates a root collection,
+  // but we only want to show it if the user has access to it.
+  const canReadRootCollection = allCollectionsList.some(
+    ({ id }) => id === ROOT_COLLECTION.id,
+  );
+
+  const collectionsById = useCollectionsWithTenants(
+    baseCollectionsById,
+    canReadRootCollection,
+  );
 
   const isAtTopLevel = currentCollectionId === COLLECTIONS_TOP_LEVEL_ID;
   const isAtSharedTenantRoot =
     currentCollectionId === SHARED_TENANT_COLLECTIONS_ROOT_ID;
+  const isAtTenantSpecificRoot =
+    currentCollectionId === TENANT_SPECIFIC_COLLECTIONS_ROOT_ID;
   const collection = collectionsById[currentCollectionId];
   const crumbs = getCollectionBreadCrumbs(
     collection,
@@ -130,7 +151,7 @@ function QuestionPickerInner({
                 const iconColor = PLUGIN_COLLECTIONS.isRegularCollection(
                   collection,
                 )
-                  ? "text-tertiary"
+                  ? "text-disabled"
                   : icon.color;
                 return (
                   <SelectList.Item
@@ -143,7 +164,7 @@ function QuestionPickerInner({
                     }}
                     rightIcon="chevronright"
                     onSelect={(collectionId) =>
-                      setCurrentCollectionId(collectionId as CollectionId)
+                      setCurrentCollectionId(collectionId)
                     }
                   />
                 );
@@ -153,10 +174,11 @@ function QuestionPickerInner({
         </>
       )}
 
-      {/* Hide the question list at top-level "Collections"
-          and "Shared collections" root. These have fake IDs that don't map to
-          real collections, so querying questions against them would fail. */}
-      {((!isAtSharedTenantRoot && !isAtTopLevel) || debouncedSearchText) && (
+      {/* Hide the question list at top-level "Collections" and tenant roots.
+          These have fake IDs that don't map to real collections, so querying
+          questions against them would fail. */}
+      {((!isAtSharedTenantRoot && !isAtTenantSpecificRoot && !isAtTopLevel) ||
+        debouncedSearchText) && (
         <QuestionList
           hasCollections={collections.length > 0}
           searchText={debouncedSearchText}
@@ -168,20 +190,3 @@ function QuestionPickerInner({
     </div>
   );
 }
-
-export const QuestionPicker = _.compose(
-  Collections.load({
-    id: () => "root",
-    entityType: "collections",
-    loadingAndErrorWrapper: false,
-  }),
-  Collections.loadList({
-    entityType: "collections",
-    loadingAndErrorWrapper: false,
-  }),
-  connect((state, props: { entity: any /* collection entity instance */ }) => ({
-    collectionsById: (
-      props.entity || Collections
-    ).selectors.getExpandedCollectionsById(state),
-  })),
-)(QuestionPickerInner);
