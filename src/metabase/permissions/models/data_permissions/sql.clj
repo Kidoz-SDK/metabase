@@ -1,6 +1,7 @@
 (ns metabase.permissions.models.data-permissions.sql
   "Helper functions for models using data permissions to construct `visisble-query` methods from."
   (:require
+   [metabase.permissions.published-tables :as published-tables]
    [metabase.permissions.schema :as permissions.schema]
    [metabase.util.honey-sql-2 :as h2x]
    [metabase.util.malli :as mu])
@@ -104,10 +105,11 @@
             :having   [(perm-condition perm-type required-level (or most-or-least :least))]}])
 
 (def UserInfo
-  "The user-id to use in the visiblity query and their superuser status."
+  "The user-id to use in the visibility query and their superuser status."
   [:map
-   [:user-id       pos-int?]
-   [:is-superuser? :boolean]])
+   [:user-id          pos-int?]
+   [:is-superuser?    :boolean]
+   [:is-data-analyst? {:optional true} :boolean]])
 
 (def PermissionMapping
   "Map of permission-type to either a permission value or tuple of (permission-value, :most/:least) indicating if we want to get the
@@ -119,21 +121,30 @@
 
 (mu/defn visible-table-filter-select
   "Selects a column from tables that are visible to the provided user given a mapping of permission types to the required value or the required
-  value and a directive if we should test against the most or least permissive permission the user has."
-  [select-column                   :- [:enum :id :db_id]
-   {:keys [user-id is-superuser?]} :- UserInfo
-   permission-mapping              :- PermissionMapping]
+  value and a directive if we should test against the most or least permissive permission the user has.
+
+  Options:
+    :active-only? - when true, only include active tables. Default false."
+  [select-column                                    :- [:enum :id :db_id]
+   {:keys [user-id is-superuser? is-data-analyst?]} :- UserInfo
+   permission-mapping                               :- PermissionMapping
+   & [{:keys [active-only?] :or {active-only? false}}]]
   {:select [(case select-column
               :id :mt.id
               :db_id :mt.db_id)]
    :from   [[:metabase_table :mt]]
-   :where  (if is-superuser?
-             [:= [:inline 1] [:inline 1]]
-             (into [:and]
-                   (mapcat (fn [[perm-type perm-level]]
-                             [(apply has-perms-for-table-as-honey-sql? user-id perm-type (cond-> perm-level
-                                                                                           (not (sequential? perm-level)) vector))]))
-                   permission-mapping))})
+   :where  (if (or is-superuser?
+                   (and is-data-analyst?
+                        (contains? permission-mapping :perms/manage-table-metadata)))
+             (if active-only?
+               [:= :mt.active true]
+               [:= [:inline 1] [:inline 1]])
+             (cond-> (into [:and]
+                           (mapcat (fn [[perm-type perm-level]]
+                                     [(apply has-perms-for-table-as-honey-sql? user-id perm-type (cond-> perm-level
+                                                                                                   (not (sequential? perm-level)) vector))]))
+                           permission-mapping)
+               active-only? (conj [:= :mt.active true])))})
 
 (mu/defn- permission-type-having-clause
   "Builds a HAVING clause condition for a single permission type using conditional aggregation."
@@ -175,11 +186,23 @@
    and using :clause in the WHERE clause.
 
    Uses UNION ALL to separate table-level and database-level permission lookups, avoiding
-   inefficient BitmapOr scans that occur with OR joins."
-  [column-or-exp                    :- :any
-   {:keys [user-id is-superuser?]} :- UserInfo
-   permission-mapping               :- PermissionMapping]
-  (if is-superuser?
+   inefficient BitmapOr scans that occur with OR joins.
+
+   Options:
+     :active-only? - when true, only include active tables in the CTE. Default false.
+     :include-published-via-collection? - when true and the EE :library feature is on, treat
+       published tables in collections the user can read as a source of `:perms/create-queries
+       :query-builder` grants by adding a third UNION ALL branch to the table_permissions CTE.
+       View-data is intentionally not synthesized; it must still come from real data_permissions."
+  [column-or-exp                                    :- :any
+   {:keys [user-id is-superuser? is-data-analyst?] :as user-info} :- UserInfo
+   permission-mapping                               :- PermissionMapping
+   & [{:keys [active-only? include-published-via-collection?]
+       :or {active-only? false include-published-via-collection? false}}]]
+  ;; Superusers see all tables. Data analysts see all tables when checking manage-table-metadata.
+  (if (or is-superuser?
+          (and is-data-analyst?
+               (contains? permission-mapping :perms/manage-table-metadata)))
     {:clause [:= [:inline 1] [:inline 1]]}
     (let [perm-types (keys permission-mapping)
           perm-type-filter (into [:or]
@@ -192,26 +215,32 @@
                                                                        [perm-level :least])]
                                            (permission-type-having-clause perm-type level most-or-least)))
                                        permission-mapping))
-          user-groups-clause (user-in-group-clause user-id)]
+          user-groups-clause (user-in-group-clause user-id)
+          published-grant-rows (when include-published-via-collection?
+                                 (published-tables/published-table-perm-grant-rows
+                                  user-info perm-types active-only?))
+          active-clause (when active-only? [:= :mt.active true])
+          permission-branches (cond-> [;; Table-level permissions (direct grant to table)
+                                       {:select [:mt.id :dp.perm_type :dp.perm_value]
+                                        :from   [[:data_permissions :dp]]
+                                        :join   [[:metabase_table :mt] [:= :mt.id :dp.table_id]]
+                                        :where  (into [:and
+                                                       [:not= :dp.table_id nil]
+                                                       user-groups-clause
+                                                       perm-type-filter]
+                                                      (when active-clause [active-clause]))}
+                                       ;; Database-level permissions (applies to all tables in db)
+                                       {:select [:mt.id :dp.perm_type :dp.perm_value]
+                                        :from   [[:data_permissions :dp]]
+                                        :join   [[:metabase_table :mt] [:= :mt.db_id :dp.db_id]]
+                                        :where  (into [:and
+                                                       [:= :dp.table_id nil]
+                                                       user-groups-clause
+                                                       perm-type-filter]
+                                                      (when active-clause [active-clause]))}]
+                                published-grant-rows (conj published-grant-rows))]
       {:with [;; First CTE: collect all permission grants that apply to each table
-              [:table_permissions
-               {:union-all
-                [;; Table-level permissions (direct grant to table)
-                 {:select [:mt.id :dp.perm_type :dp.perm_value]
-                  :from   [[:data_permissions :dp]]
-                  :join   [[:metabase_table :mt] [:= :mt.id :dp.table_id]]
-                  :where  [:and
-                           [:not= :dp.table_id nil]
-                           user-groups-clause
-                           perm-type-filter]}
-                 ;; Database-level permissions (applies to all tables in db)
-                 {:select [:mt.id :dp.perm_type :dp.perm_value]
-                  :from   [[:data_permissions :dp]]
-                  :join   [[:metabase_table :mt] [:= :mt.db_id :dp.db_id]]
-                  :where  [:and
-                           [:= :dp.table_id nil]
-                           user-groups-clause
-                           perm-type-filter]}]}]
+              [:table_permissions {:union-all permission-branches}]
               ;; Second CTE: aggregate and filter by permission requirements
               [:permitted_tables
                {:select   [:dp.id]
@@ -270,11 +299,14 @@
 (mu/defn visible-database-filter-select
   "Selects database IDs that are visible to the provided user given a mapping of permission types to the required value.
    Similar to visible-table-filter-select but for databases."
-  [{:keys [user-id is-superuser?]} :- UserInfo
+  [{:keys [user-id is-superuser? is-data-analyst?]} :- UserInfo
    permission-mapping :- PermissionMapping]
   {:select [:md.id]
    :from [[:metabase_database :md]]
-   :where (if is-superuser?
+   ;; Superusers see all databases. Data analysts see all databases when checking manage-table-metadata.
+   :where (if (or is-superuser?
+                  (and is-data-analyst?
+                       (contains? permission-mapping :perms/manage-table-metadata)))
             [:= [:inline 1] [:inline 1]]
             (into [:and]
                   (mapcat (fn [[perm-type perm-level]]

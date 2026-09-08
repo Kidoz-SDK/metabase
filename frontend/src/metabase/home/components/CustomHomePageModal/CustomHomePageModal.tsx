@@ -2,11 +2,11 @@ import { useCallback, useState } from "react";
 import { jt, t } from "ttag";
 
 import { trackCustomHomepageDashboardEnabled } from "metabase/admin/settings/analytics";
-import { updateSettings } from "metabase/admin/settings/settings";
 import { DashboardSelector } from "metabase/common/components/DashboardSelector/DashboardSelector";
-import Link from "metabase/common/components/Link";
+import { Link } from "metabase/common/components/Link";
 import CS from "metabase/css/core/index.css";
-import { useDispatch } from "metabase/lib/redux";
+import { useDispatch } from "metabase/redux";
+import { updateSettings } from "metabase/redux/settings";
 import { addUndo, dismissUndo } from "metabase/redux/undo";
 import { refreshCurrentUser } from "metabase/redux/user";
 import { Box, Button, Flex, Modal, Text } from "metabase/ui";
@@ -44,12 +44,12 @@ export const CustomHomePageModal = ({
           <Box ml="0.5rem" mr="2.5rem">
             <Text
               span
-              c="text-white"
+              c="text-primary-inverse"
               fw={700}
             >{t`This dashboard has been set as your homepage.`}</Text>
             <Text
               span
-              c="text-white"
+              c="text-primary-inverse"
             >{t`You can change this in Admin > Settings > General.`}</Text>
           </Box>
         ),
@@ -92,7 +92,7 @@ export const CustomHomePageModal = ({
         <Text>
           {t`If anyone lacks permission to see the dashboard you pick, they'll be redirected to the default homepage.`}
         </Text>
-        <Text mt="sm">{jt`You can always change the homepage in ${(<Link key="link" className={CS.link} to="/admin/settings/general" style={{ textDecoration: "underline" }}>{t`admin settings`}</Link>)} under General.`}</Text>
+        <Text mt="sm">{jt`You can always change the homepage in ${<Link key="link" className={CS.link} to="/admin/settings/general" style={{ textDecoration: "underline" }}>{t`admin settings`}</Link>} under General.`}</Text>
         <Box mt="lg">
           <DashboardSelector
             value={dashboardId}

@@ -1,16 +1,17 @@
 import type { ComponentType, PropsWithChildren } from "react";
 
 import { Badge } from "metabase/common/components/Badge";
+import { getIcon } from "metabase/common/utils/icon";
 import { Collections } from "metabase/entities/collections";
-import { getIcon } from "metabase/lib/icon";
-import { modelToUrl } from "metabase/lib/urls/modelToUrl";
+import { useTranslateContent } from "metabase/i18n/hooks";
 import { PLUGIN_COLLECTIONS } from "metabase/plugins";
+import type { State } from "metabase/redux/store";
+import { modelToUrl } from "metabase/urls/modelToUrl";
 import type {
   CollectionId,
   Collection as CollectionType,
 } from "metabase-types/api";
 import type { WrappedEntity } from "metabase-types/entities";
-import type { State } from "metabase-types/store";
 
 const IRREGULAR_ICON_WIDTH = 16;
 const IRREGULAR_ICON_PROPS = {
@@ -34,6 +35,8 @@ const CollectionBadgeInner = ({
   isSingleLine,
   onClick,
 }: CollectionBadgeProps) => {
+  const tc = useTranslateContent();
+
   if (!collection) {
     return null;
   }
@@ -52,11 +55,11 @@ const CollectionBadgeInner = ({
       className={className}
       icon={icon}
       activeColor={icon.color}
-      inactiveColor="text-light"
+      inactiveColor="text-tertiary"
       isSingleLine={isSingleLine}
       {...clickActionProps}
     >
-      {collection.getName()}
+      {tc(collection.getName())}
     </Badge>
   );
 };

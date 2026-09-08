@@ -29,7 +29,12 @@ import type {
   WritebackAction,
   WritebackActionId,
 } from "./actions";
-import type { Card, CardId, VisualizationSettings } from "./card";
+import type {
+  Card,
+  CardId,
+  ColumnSettings,
+  VisualizationSettings,
+} from "./card";
 import type { Dataset } from "./dataset";
 import type { ModerationReview } from "./moderation";
 import type { SearchModel } from "./search";
@@ -65,6 +70,7 @@ export interface Dashboard {
   can_write: boolean;
   can_restore: boolean;
   can_delete: boolean;
+  can_set_cache_policy?: boolean;
   cache_ttl: number | null;
   "last-edit-info": {
     id: number;
@@ -87,6 +93,7 @@ export interface Dashboard {
   param_fields?: Record<ParameterId, Field[]>;
 
   moderation_reviews: ModerationReview[];
+  view_count?: number;
 
   /* Indicates whether static embedding for this dashboard has been published */
   enable_embedding: boolean;
@@ -135,6 +142,7 @@ export type DashCardVisualizationSettings = {
   [key: string]: unknown;
   virtual_card?: VirtualCard;
   iframe?: string;
+  column_settings?: Record<string, ColumnSettings>;
 };
 
 export type BaseDashboardCard = DashboardCardLayoutAttrs & {

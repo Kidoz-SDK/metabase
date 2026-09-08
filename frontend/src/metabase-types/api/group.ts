@@ -23,11 +23,12 @@ export type Member = {
 export type GroupInfo = {
   id: GroupId;
   name: string;
-  member_count: number;
+  member_count?: number;
   magic_group_type:
     | "all-internal-users"
     | "admin"
     | "all-external-users"
+    | "data-analyst"
     | null;
   is_tenant_group?: boolean;
 };

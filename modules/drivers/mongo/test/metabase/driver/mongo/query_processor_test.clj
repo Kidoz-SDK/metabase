@@ -9,11 +9,11 @@
    [metabase.lib.core :as lib]
    [metabase.lib.metadata :as lib.metadata]
    [metabase.lib.test-util :as lib.tu]
-   [metabase.query-processor :as qp]
    [metabase.query-processor.alternative-date-test :as qp.alternative-date-test]
    [metabase.query-processor.compile :as qp.compile]
    [metabase.query-processor.date-time-zone-functions-test :as qp.datetime-test]
    [metabase.query-processor.pivot :as qp.pivot]
+   [metabase.query-processor.test :as qp]
    [metabase.query-processor.timezone :as qp.timezone]
    [metabase.test :as mt]
    [metabase.util.json :as json]))
@@ -257,7 +257,7 @@
                    (qp.compile/compile
                     (mt/mbql-query tips
                       {:aggregation [[:count]]
-                       :breakout    [[:field "_id.offerId"]]})))))
+                       :breakout    [[:field "_id.offerId" {:base-type :type/Text}]]})))))
           (testing "Nested fields in join condition aliases are transformed to use `_` instead of a `.` (#32182)"
             (let [query (mt/mbql-query tips
                           {:joins [{:alias "Tips"
@@ -272,7 +272,7 @@
   (mt/test-driver :mongo
     (testing "Projecting _id.* fields should avoid _id path collisions"
       (let [compiled (qp.compile/compile
-                      (mt/mbql-query venues {:fields [[:field "_id.offerId"]]}))]
+                      (mt/mbql-query venues {:fields [[:field "_id.offerId" {:base-type :type/Text}]]}))]
         (is (= {"_id" false
                 "offerId" "$_id.offerId"}
                (get-in compiled [:query 0 "$project"])))))))
@@ -281,8 +281,8 @@
   (mt/test-driver :mongo
     (testing "Projecting _id and _id.* together returns both without collisions"
       (let [compiled (qp.compile/compile
-                      (mt/mbql-query venues {:fields [[:field "_id"]
-                                                      [:field "_id.offerId"]]}))]
+                      (mt/mbql-query venues {:fields [[:field "_id" {:base-type :type/MongoBSONID}]
+                                                      [:field "_id.offerId" {:base-type :type/Text}]]}))]
         (is (= {"_id" "$_id"
                 "offerId" "$_id.offerId"}
                (get-in compiled [:query 0 "$project"])))))))
@@ -638,7 +638,7 @@
 (deftest ^:parallel parse-query-string-missing-bracket-test
   (testing "`parse-query-string` tolerates a missing closing bracket"
     (let [parsed (mongo.qp/parse-query-string "[{\"limit\": 1000}")]
-      (is (= 1000 (get-in parsed [0 "limit"])))))))
+      (is (= 1000 (get-in parsed [0 "limit"]))))))
 
 (deftest ^:parallel parse-query-string-test-2
   (mt/test-driver :mongo
@@ -797,7 +797,6 @@
                     :base_type                :type/Float
                     :effective_type           :type/Float}
                    {:lib/desired-column-alias "pivot-grouping"
-                    :field_ref                [:expression "pivot-grouping"]
                     :base_type                :type/Integer
                     :effective_type           :type/Integer}
                    {:lib/desired-column-alias "count"

@@ -1,15 +1,15 @@
 (ns metabase.query-processor.middleware.add-implicit-clauses
-  "Middlware for adding an implicit `:fields` and `:order-by` clauses to certain queries."
+  "Middleware for adding an implicit `:fields` and `:order-by` clauses to certain queries."
   (:refer-clojure :exclude [every? empty? not-empty])
   (:require
    [metabase.lib.core :as lib]
    [metabase.lib.metadata :as lib.metadata]
    [metabase.lib.schema :as lib.schema]
-   [metabase.lib.util.match :as lib.util.match]
    [metabase.lib.walk :as lib.walk]
    [metabase.query-processor.error-type :as qp.error-type]
    [metabase.util.i18n :refer [tru]]
    [metabase.util.malli :as mu]
+   [metabase.util.match :as match]
    [metabase.util.performance :refer [every? empty? not-empty]]))
 
 (mu/defn- should-add-implicit-fields?
@@ -61,8 +61,8 @@
           (lib.walk/apply-f-for-stage-at-path updated-stage (assoc-in query path stage) path))))))
 
 (defn- has-window-function-aggregations? [stage]
-  (or (lib.util.match/match (mapcat stage [:aggregation :expressions])
-        #{:cum-sum :cum-count :offset}
+  (or (match/match-one (mapcat stage [:aggregation :expressions])
+        [#{:cum-sum :cum-count :offset} & _]
         true)
       ;; FIXME
       (when-let [source-query (:source-query stage)]

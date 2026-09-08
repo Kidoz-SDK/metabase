@@ -2,8 +2,9 @@ const { H } = cy;
 import { SAMPLE_DATABASE } from "e2e/support/cypress_sample_database";
 import { ORDERS_DASHBOARD_ID } from "e2e/support/cypress_sample_instance_data";
 import { questionAsPinMapWithTiles } from "e2e/test/scenarios/embedding/shared/embedding-questions";
-import { defer } from "metabase/lib/promise";
-const { PRODUCTS, PRODUCTS_ID, ORDERS, ORDERS_ID } = SAMPLE_DATABASE;
+import { defer } from "metabase/utils/promise";
+const { PRODUCTS, PRODUCTS_ID, ORDERS, ORDERS_ID, FEEDBACK, FEEDBACK_ID } =
+  SAMPLE_DATABASE;
 
 describe("issue 15860", { tags: "@skip" }, () => {
   const q1IdFilter = {
@@ -157,7 +158,7 @@ describe("issue 15860", { tags: "@skip" }, () => {
 
     H.visitIframe();
 
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+    // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
     cy.findByText("Q1 Category").click();
 
     H.popover().within(() => {
@@ -166,7 +167,7 @@ describe("issue 15860", { tags: "@skip" }, () => {
         .and("contain", "Gizmo");
     });
 
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+    // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
     cy.findByText("Q2 Category").click();
 
     H.popover().within(() => {
@@ -333,7 +334,7 @@ describe("locked parameters in embedded question (metabase#20634)", () => {
         });
     });
 
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+    // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
     cy.findByText("Locked").click();
 
     H.modal().within(() => {
@@ -349,7 +350,7 @@ describe("locked parameters in embedded question (metabase#20634)", () => {
     H.visitIframe();
 
     // verify that the Text parameter doesn't show up but that its value is reflected in the dashcard
-    // eslint-disable-next-line no-unscoped-text-selectors -- deprecated usage
+    // eslint-disable-next-line metabase/no-unscoped-text-selectors -- deprecated usage
     cy.findByText("Text").should("not.exist");
     cy.get(".CardVisualization").within(() => {
       cy.contains("foo");
@@ -1074,8 +1075,8 @@ describe("issue 8490", () => {
             filter: [
               "between",
               ["field", PRODUCTS.CREATED_AT, { "base-type": "type/DateTime" }],
-              "2024-01-01",
-              "2025-01-01",
+              "2027-01-01",
+              "2028-01-01",
             ],
           },
           limit: 100,
@@ -1108,8 +1109,8 @@ describe("issue 8490", () => {
               [
                 "between",
                 ["field", ORDERS.CREATED_AT, { "base-type": "type/DateTime" }],
-                "2024-10-01",
-                "2024-12-01",
+                "2027-10-01",
+                "2027-12-01",
               ],
               [
                 "=",
@@ -1338,7 +1339,7 @@ describe("issue 50373", () => {
         url: /^\/app\/dist\/(.*)\.js$/,
       },
       (req) => {
-        // When running in development (e.g. with `yarn dev`),
+        // When running in development (e.g. with `bun run dev`),
         // the *.hot.bundle.js hot-reloaded file is served by the dev server.
         if (req.url.includes("hot.bundle.js")) {
           return;
@@ -1557,6 +1558,89 @@ describe("issue 63687", () => {
 
     cy.wait("@getTiles").then(({ response: tileResponse }) => {
       expect(tileResponse?.statusCode).to.equal(200);
+    });
+  });
+});
+
+describe("issue 57028", () => {
+  const lockedContainsBodyFilter = {
+    name: "locked_contains_body",
+    slug: "locked_contains_body",
+    id: "e6588080",
+    type: "string/contains",
+    sectionId: "string",
+    isMultiSelect: true,
+    values_query_type: "none",
+  };
+
+  const emailFilter = {
+    name: "Email",
+    slug: "email",
+    id: "d31e550f",
+    type: "string/=",
+    sectionId: "string",
+    values_query_type: "list",
+  };
+
+  beforeEach(() => {
+    H.restore();
+    cy.signInAsAdmin();
+  });
+
+  it("static embedded editable filter should load dropdown values when a string/contains locked param has multiple values (metabase#57028)", () => {
+    H.createQuestionAndDashboard({
+      questionDetails: {
+        name: "Feedback",
+        query: { "source-table": FEEDBACK_ID },
+      },
+      dashboardDetails: {
+        parameters: [lockedContainsBodyFilter, emailFilter],
+        enable_embedding: true,
+        embedding_params: {
+          [lockedContainsBodyFilter.slug]: "locked",
+          [emailFilter.slug]: "enabled",
+        },
+      },
+    }).then(({ body: { card_id, dashboard_id } }) => {
+      H.addOrUpdateDashboardCard({
+        dashboard_id,
+        card_id,
+        card: {
+          parameter_mappings: [
+            {
+              card_id,
+              parameter_id: lockedContainsBodyFilter.id,
+              target: ["dimension", ["field", FEEDBACK.BODY, null]],
+            },
+            {
+              card_id,
+              parameter_id: emailFilter.id,
+              target: ["dimension", ["field", FEEDBACK.EMAIL, null]],
+            },
+          ],
+        },
+      });
+
+      cy.intercept(
+        "GET",
+        `/api/embed/dashboard/*/params/${emailFilter.id}/values`,
+      ).as("emailValues");
+
+      H.visitEmbeddedPage({
+        resource: { dashboard: dashboard_id },
+        params: {
+          [lockedContainsBodyFilter.slug]: ["March", "damp", "somewhat"],
+        },
+      });
+    });
+
+    H.filterWidget().contains("Email").click();
+
+    cy.wait("@emailValues").its("response.statusCode").should("eq", 200);
+
+    H.popover().within(() => {
+      cy.findByPlaceholderText("Search the list").should("be.visible");
+      cy.findAllByRole("checkbox").its("length").should("be.greaterThan", 0);
     });
   });
 });

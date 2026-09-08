@@ -1,7 +1,6 @@
 (ns metabase.driver.druid.query-processor
   (:refer-clojure :exclude [every? mapv some get-in])
   (:require
-   [clojure.core.match :refer [match]]
    [clojure.string :as str]
    [metabase.driver-api.core :as driver-api]
    [metabase.driver.common :as driver.common]
@@ -307,7 +306,7 @@
 (defn- parse-filter [filter-clause]
   ;; strip out all the filters against temporal fields. Those are handled separately, as intervals
   (-> (driver-api/replace filter-clause
-        [_ [:field _ (_ :guard :temporal-unit)] & _]
+        [_ [:field _ {:temporal-unit &truthy}] & _]
         nil)
       ;; TODO (Cam 8/18/25) -- I am 90% sure this is serving no useful purpose.
       #_{:clj-kondo/ignore [:deprecated-var]}
@@ -351,12 +350,12 @@
 
 (defmulti ^:private filter-clause->intervals
   "Generate query intervals as appropriate from a `filter-clause` containing a temporal `:field`. `:intervals` are
-  specified seperately from other things we think of as filter clauses in Druid. For temporal filter clauses, this
+  specified separately from other things we think of as filter clauses in Druid. For temporal filter clauses, this
   returns a sequence of min/max datetime tuples; like `[#t 2019-01-01 #t 2019-10-01]`; for irrelevant filter
   clauses, the methods are skipped entirely."
   {:arglists '([filter-clause])}
   (fn [filter-clause]
-    (when (driver-api/match-one filter-clause [:field _ (_ :guard :temporal-unit)])
+    (when (driver-api/match-one filter-clause [:field _ {:temporal-unit &truthy}] true)
       (driver-api/dispatch-by-clause-name-or-class filter-clause))))
 
 (defmethod filter-clause->intervals :default
@@ -627,7 +626,7 @@
 (defn- create-aggregation-clause
   [output-name ag-type ag-field args]
   (let [output-name-kwd (keyword output-name)]
-    (match [ag-type ag-field]
+    (driver-api/match-one [ag-type ag-field]
       ;; For 'distinct values' queries (queries with a breakout by no aggregation) just aggregate by count, but name
       ;; it :___count so it gets discarded automatically
       [nil     nil]    [[(or output-name-kwd :___count)] {:aggregations [(ag:count (or output-name :___count))]}]
@@ -672,7 +671,8 @@
       [:min      _]    [[(or output-name-kwd :min)]
                         {:aggregations [(ag:doubleMin ag-field (or output-name :min))]}]
       [:max      _]    [[(or output-name-kwd :max)]
-                        {:aggregations [(ag:doubleMax ag-field (or output-name :max))]}])))
+                        {:aggregations [(ag:doubleMax ag-field (or output-name :max))]}]
+      _                (throw (ex-info (str "Unknown aggregation tuple: " [ag-type ag-field]) {})))))
 
 (defn ^:private ^:dynamic *query-unique-name-fn*
   [& _]
@@ -684,7 +684,7 @@
    druid-query]
   (let [output-name               (*query-unique-name-fn* (driver-api/aggregation-name *query* ag-clause))
         [ag-type ag-field & args] (driver-api/match-one ag-clause
-                                    [:aggregation-options ag & _] #_:clj-kondo/ignore (recur ag)
+                                    [:aggregation-options ag & _] (&recur ag)
                                     _                             &match)]
     (if-not (isa? query-type ::ag-query)
       druid-query
@@ -733,8 +733,7 @@
   (driver-api/match-one expression
     ;; If it's a named expression, we want to preserve the included name, so recurse, but merge in the name
     [:aggregation-options ag _]
-    (merge (expression-post-aggregation (second expression))
-           {:name (driver-api/aggregation-name *query* expression)})
+    (assoc (expression-post-aggregation ag) :name (driver-api/aggregation-name *query* expression))
 
     _
     {:type   :arithmetic
@@ -742,13 +741,13 @@
      :fn     operator
      :fields (vec (for [arg args]
                     (driver-api/match-one arg
-                      number?
+                      (_ :guard number?)
                       {:type :constant, :name (str &match), :value &match}
 
-                      [:aggregation-options ag (options :guard :name)]
-                      {:type (post-aggregator-type ag), :fieldName (:name options)}
+                      [:aggregation-options ag {:name name}]
+                      {:type (post-aggregator-type ag), :fieldName name}
 
-                      #{:+ :- :/ :*}
+                      [#{:+ :- :/ :*} & _]
                       (expression-post-aggregation &match)
 
                       ;; we should never get here unless our code is B U S T E D
@@ -798,14 +797,14 @@
     (reduce
      (fn [druid-query aggregation]
        (driver-api/match-one aggregation
-         [:aggregation-options [(_ :guard #{:+ :- :/ :*}) & _] _]
+         [:aggregation-options [#{:+ :- :/ :*} & _] _]
          (handle-expression-aggregation query-type &match druid-query)
 
-         #{:+ :- :/ :*}
+         [#{:+ :- :/ :*} & _]
          (handle-expression-aggregation query-type &match druid-query)
 
          _
-         (handle-aggregation query-type &match druid-query)))
+         (handle-aggregation query-type aggregation druid-query)))
      druid-query
      aggregations)))
 
@@ -1004,20 +1003,13 @@
         breakout-field    (->rvalue breakout-field)
         sort-by-breakout? (= field breakout-field)
         ag-field          (driver-api/match-one ag
-                            :distinct
-                            :distinct___count
-
-                            [:aggregation-options _ (options :guard :name)]
-                            (:name options)
-
-                            [:aggregation-options wrapped-ag _]
-                            #_:clj-kondo/ignore (recur wrapped-ag)
-
-                            [(ag-type :guard keyword?) & _]
-                            ag-type)]
+                            [:distinct & _]                       :distinct___count
+                            [:aggregation-options _ {:name name}] name
+                            [:aggregation-options wrapped-ag _]   (&recur wrapped-ag)
+                            [(ag-type :guard keyword?) & _]       ag-type)]
     (when-not sort-by-breakout?
       (assert ag-field))
-    (assoc-in druid-query [:query :metric] (match [sort-by-breakout? direction]
+    (assoc-in druid-query [:query :metric] (driver-api/match-one [sort-by-breakout? direction]
                                              [true  :asc]  {:type :alphaNumeric}
                                              [true  :desc] {:type :inverted, :metric {:type :alphaNumeric}}
                                              [false :asc]  {:type :inverted, :metric ag-field}
@@ -1036,13 +1028,13 @@
   [field]
   (when field
     (driver-api/match-one field
-      [:field _id-or-name (_opts :guard :temporal-unit)]
+      [:field _id-or-name {:temporal-unit &truthy}]
       true
 
       [:field (id :guard pos-int?) _opts]
       (driver-api/temporal? (driver-api/field (driver-api/metadata-provider) id)))))
 
-;; Handle order by timstamp field
+;; Handle order by timestamp field
 (defmethod handle-order-by ::grouped-timeseries
   [_ {[[direction field]] :order-by} druid-query]
   (let [can-sort? (if (temporal-field? field)
@@ -1089,7 +1081,7 @@
    (fn
      ([druid-query]
       ;; If you specify nil or empty `:columns` Druid will just return all of the ones available. In cases where
-      ;; we don't want anything to be returned in one or the other, we'll ask for a `:___dummy` column intead.
+      ;; we don't want anything to be returned in one or the other, we'll ask for a `:___dummy` column instead.
       ;; Druid happily returns `nil` for the column in every row, and it will get auto-filtered out of the results
       ;; so the User will never see it.
       (update-in druid-query [:query :columns] #(or (seq %) [:___dummy])))
@@ -1174,12 +1166,12 @@
         ts?       (boolean
                    (and
                     ;; Checks whether the query is a timeseries
-                    (driver-api/match-one (first breakout-fields) [:field _ (_ :guard :temporal-unit)])
+                    (driver-api/match-one (first breakout-fields) [:field _ {:temporal-unit &truthy}] true)
                     ;; (excludes x-of-y type breakouts)
                     (contains? timeseries-units (:unit (first breakout-fields)))
                     ;; (excludes queries with LIMIT)
                     (nil? limit)))]
-    (match [breakouts agg? ts?]
+    (driver-api/match-one [breakouts agg? ts?]
       [:none  false    _] ::scan
       [:none  true     _] ::total
       [:one   _     true] ::grouped-timeseries

@@ -3,13 +3,13 @@
    [medley.core :as m]
    [metabase.driver :as driver]
    [metabase.lib.schema.id :as lib.schema.id]
-   [metabase.lib.util.match :as lib.util.match]
    [metabase.models.interface :as mi]
    [metabase.query-processor.preprocess :as qp.preprocess]
    [metabase.util :as u]
    [metabase.util.i18n :refer [tru]]
    [metabase.util.malli :as mu]
    [metabase.util.malli.schema :as ms]
+   [metabase.util.match :as match]
    [metabase.warehouse-schema.models.table :as table]
    [metabase.xrays.domain-entities.core :as de :refer [Bindings DimensionBindings SourceEntity SourceName]]
    [metabase.xrays.domain-entities.specs :as domain-entities.specs :refer [*domain-entity-specs* DomainEntitySpec]]
@@ -30,7 +30,7 @@
 
 (defn- mbql-reference->col-name
   [field-clause]
-  (lib.util.match/match-one field-clause
+  (match/match-one field-clause
     [:field (field-name :guard string?) _]
     field-name
 
@@ -199,7 +199,7 @@
   The algorithm is as follows:
   1) Try to find a set of tables in the given schema that have required domain entities.
   2) If found, use these tables and their fields as the initial bindings.
-  3) Go through the transform steps, materialize them as cards, and accure these and their result
+  3) Go through the transform steps, materialize them as cards, and accrue these and their result
      cols to the bindings.
   4) Check that all output cards have the expected result shape.
   5) Return the output cards."

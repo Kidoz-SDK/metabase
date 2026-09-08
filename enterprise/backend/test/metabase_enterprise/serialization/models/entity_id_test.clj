@@ -32,7 +32,10 @@
   - not exported in serialization; or
   - exported as a child of something else (eg. timeline_event under timeline)
   so they don't need a generated entity_id."
-  #{:model/ApiKey
+  #{:model/AiUsageLog
+    :model/AnalysisFinding
+    :model/AnalysisFindingError
+    :model/ApiKey
     :model/AuthIdentity
     :model/HTTPAction
     :model/ImplicitAction
@@ -46,16 +49,23 @@
     :model/CollectionBookmark
     :model/ContentTranslation
     :model/DashboardBookmark
+    :model/DataComplexityScore
     :model/DataPermissions
     :model/DatabaseRouter
     :model/Dependency
+    :model/DependencyStatus
     :model/DocumentBookmark
     :model/CollectionPermissionGraphRevision
     :model/DashboardCardSeries
     :model/LoginHistory
     :model/FieldValues
     :model/MetabotConversation
+    :model/MetabotFeedback
+    :model/MetabotGroupLimit
+    :model/MetabotInstanceLimit
     :model/MetabotMessage
+    :model/MetabotPermissions
+    :model/MetabotSourceFeedback
     :model/ModelIndex
     :model/ModelIndexValue
     :model/ModerationReview
@@ -64,12 +74,17 @@
     :model/NotificationSubscription
     :model/NotificationHandler
     :model/NotificationRecipient
+    :model/OAuthAccessToken
+    :model/OAuthAuthorizationCode
+    :model/OAuthClient
+    :model/OAuthRefreshToken
     :model/ParameterCard
     :model/Permissions
     :model/PermissionsGroup
     :model/PermissionsGroupMembership
     :model/PermissionsRevision
     :model/PersistedInfo
+    :model/PremiumFeaturesCache
     :model/Pulse
     :model/PulseCard
     :model/PulseChannel
@@ -80,6 +95,7 @@
     :model/QueryField
     :model/QueryTable
     :model/RecentViews
+    :model/ReplacementRun
     :model/RemoteSyncObject
     :model/RemoteSyncTask
     :model/Revision
@@ -89,6 +105,7 @@
     :model/Session
     :model/SupportAccessGrantLog
     :model/TaskHistory
+    :model/TaskRun
     :model/Tenant
     :model/TimelineEvent
     ;; TODO we should remove these models from here once serialization is supported
@@ -97,7 +114,6 @@
     :model/TransformJobRun
     :model/TransformJobTransformTag
     :model/TransformTransformTag
-    :model/PythonLibrary
     :model/Undo
     :model/User
     :model/UserParameterValue
@@ -105,6 +121,7 @@
     :model/ViewLog
     :model/Sandbox
     :model/ConnectionImpersonation
+    :model/SecurityAdvisory
     :model/CloudMigration
     :model/Comment
     :model/CommentReaction})

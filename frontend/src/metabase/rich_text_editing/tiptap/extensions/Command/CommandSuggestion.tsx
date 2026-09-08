@@ -21,7 +21,11 @@ import {
   SuggestionPaper,
 } from "metabase/documents/components/Editor/shared/SuggestionPaper";
 import { getCurrentDocument } from "metabase/documents/selectors";
-import { useSelector } from "metabase/lib/redux";
+import {
+  useMetabotName,
+  useUserMetabotPermissions,
+} from "metabase/metabot/hooks";
+import { useSelector } from "metabase/redux";
 import { getBrowseAllItemIndex } from "metabase/rich_text_editing/tiptap/extensions/shared/suggestionUtils";
 import type { SuggestionPickerViewMode } from "metabase/rich_text_editing/tiptap/extensions/shared/types";
 import {
@@ -78,7 +82,7 @@ const CommandMenuItem = forwardRef<
     >
       <Group gap="sm" wrap="nowrap" align="center">
         {option.icon ? (
-          <Icon name={option.icon} size={16} color="inherit" />
+          <Icon name={option.icon} size={16} c="inherit" />
         ) : option.text ? (
           <Box w={16} h={16} className={CommandS.iconContainer}>
             <Text size="xs" fw={700} c="inherit">
@@ -101,6 +105,8 @@ export const CommandSuggestion = forwardRef<
   CommandSuggestionProps
 >(function CommandSuggestionComponent({ command, editor, query }, ref) {
   const document = useSelector(getCurrentDocument);
+  const { canUseMetabot: isMetabotEnabled } = useUserMetabotPermissions();
+  const metabotName = useMetabotName();
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   const [viewMode, setViewMode] = useState<SuggestionPickerViewMode>(null);
@@ -111,8 +117,8 @@ export const CommandSuggestion = forwardRef<
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const allCommandSections: CommandSection[] = useMemo(
-    getAllCommandSections,
-    [],
+    () => getAllCommandSections(isMetabotEnabled, metabotName),
+    [isMetabotEnabled, metabotName],
   );
 
   const allCommandOptions = useMemo(
@@ -481,7 +487,7 @@ export const CommandSuggestion = forwardRef<
           ) : (
             <>
               <Box p="sm" ta="center">
-                <Text size="md" c="text-medium">{t`No results found`}</Text>
+                <Text size="md" c="text-secondary">{t`No results found`}</Text>
               </Box>
               {query && (
                 <>

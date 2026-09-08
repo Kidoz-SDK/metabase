@@ -4,7 +4,7 @@ describe("scenarios > modular embedding settings", { tags: "@EE" }, () => {
   beforeEach(() => {
     H.restore();
     cy.signInAsAdmin();
-    H.activateToken("bleeding-edge");
+    H.activateToken("pro-self-hosted");
   });
 
   it("should link to user strategy when tenants are disabled", () => {
@@ -27,6 +27,6 @@ describe("scenarios > modular embedding settings", { tags: "@EE" }, () => {
       .scrollIntoView()
       .should("be.visible")
       .closest("a")
-      .should("have.attr", "href", "/admin/tenants");
+      .should("have.attr", "href", "/admin/people/tenants");
   });
 });

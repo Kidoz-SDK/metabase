@@ -5,16 +5,16 @@
 
   Api is quite simple: [[setup!]] and [[shutdown!]]. After that you can retrieve metrics from
   http://localhost:<prometheus-server-port>/metrics."
-  (:refer-clojure :exclude [set!])
   (:require
    [clojure.java.jmx :as jmx]
+   [clojure.string :as str]
    [iapetos.collector :as collector]
    [iapetos.collector.ring :as collector.ring]
    [iapetos.core :as prometheus]
    [iapetos.registry.collectors :as collectors]
    [jvm-alloc-rate-meter.core :as alloc-rate-meter]
    [jvm-hiccup-meter.core :as hiccup-meter]
-   [metabase.analytics.settings :refer [prometheus-server-port]]
+   [metabase.analytics-interface.core :as analytics.interface]
    [metabase.util :as u]
    [metabase.util.i18n :refer [trs]]
    [metabase.util.log :as log]
@@ -136,12 +136,12 @@
 
 (defn- conn-pool-bean-diag-info [acc ^ObjectName jmx-bean]
   ;; We should not be using specific driver implementations
-  (let [pool-var (requiring-resolve 'metabase.driver.sql-jdbc.connection/database-id->connection-pool)]
+  (let [pool-var (requiring-resolve 'metabase.driver.sql-jdbc.connection/pool-cache-key->connection-pool)]
     ;; Using this `locking` is non-obvious but absolutely required to avoid the deadlock inside c3p0 implementation. The
     ;; act of JMX attribute reading first locks a DynamicPooledDataSourceManagerMBean object, and then a
     ;; PoolBackedDataSource object. Conversely, the act of creating a pool (with
     ;; com.mchange.v2.c3p0.DataSources/pooledDataSource) first locks PoolBackedDataSource and then
-    ;; DynamicPooledDataSourceManagerMBean. We have to lock a common monitor (which `database-id->connection-pool` is)
+    ;; DynamicPooledDataSourceManagerMBean. We have to lock a common monitor (which `pool-cache-key->connection-pool` is)
     ;; to prevent the deadlock. Hopefully.
     ;; Issue against c3p0: https://github.com/swaldman/c3p0/issues/95
     (locking @pool-var
@@ -208,13 +208,13 @@
    (prometheus/gauge :jetty/dispatched-active
                      {:description "Number of active requests being handled"})
    (prometheus/gauge :jetty/dispatched-active-max
-                     {:descrption "Maximum number of active requests handled"})
+                     {:description "Maximum number of active requests handled"})
    (prometheus/gauge :jetty/dispatched-time-max
                      {:description "Maximum time spent dispatching a request"})
    (prometheus/counter :jetty/dispatched-time-seconds-total
-                       {:descrption "Total time spent handling requests"})
+                       {:description "Total time spent handling requests"})
    (prometheus/counter :jetty/async-requests-total
-                       {:descrption "Totql number of async requests"})
+                       {:description "Total number of async requests"})
    (prometheus/gauge :jetty/async-requests-waiting
                      {:description "Currently waiting async requests"})
    (prometheus/gauge :jetty/async-requests-waiting-max
@@ -222,9 +222,9 @@
    (prometheus/counter :jetty/async-dispatches-total
                        {:description "Number of requests that have been asynchronously dispatched"})
    (prometheus/counter :jetty/expires-total
-                       {:descpription "Number of async requests that have expired"})
+                       {:description "Number of async requests that have expired"})
    (prometheus/counter :jetty/responses-total
-                       {:descrption "Total response grouped by status code"
+                       {:description "Total response grouped by status code"
                         :labels [:code]})
    (prometheus/counter :jetty/responses-bytes-total
                        {:description "Total number of bytes across all responses"})])
@@ -235,12 +235,20 @@
   [(prometheus/gauge :metabase-info/build
                      {:description "An info metric used to attach build info like version, which is high cardinality."
                       :labels [:tag :hash :date :version :major-version]})
+   (prometheus/gauge :metabase-startup/jvm-to-complete-millis
+                     {:description "Duration in milliseconds from JVM start to Metabase initialization complete."})
+   (prometheus/gauge :metabase-startup/init-duration-millis
+                     {:description "Duration in milliseconds of the init!* function execution."})
    (prometheus/counter :metabase-csv-upload/failed
                        {:description "Number of failures when uploading CSV."})
    (prometheus/counter :metabase-email/messages
                        {:description "Number of emails sent."})
    (prometheus/counter :metabase-email/message-errors
                        {:description "Number of errors when sending emails."})
+   (prometheus/counter :metabase-geocoding/requests
+                       {:description "Number of successful IP geocoding requests via GeoJS."})
+   (prometheus/counter :metabase-geocoding/errors
+                       {:description "Number of errors when geocoding IP addresses via GeoJS."})
    (prometheus/counter :metabase-scim/response-ok
                        {:description "Number of successful responses from SCIM endpoints"})
    (prometheus/counter :metabase-scim/response-error
@@ -257,7 +265,7 @@
                        {:description "Number of times this instance converted a card's MBQL 4 to 5 and `clean` made a real change"})
    (prometheus/gauge :metabase-database/status
                      {:description "Does a given database using driver pass a health check."
-                      :labels [:driver :healthy :reason]})
+                      :labels [:driver :healthy :reason :connection-type]})
    (prometheus/counter :metabase-query-processor/query
                        {:description "Did a query run by a specific driver succeed or fail"
                         :labels [:driver :status]})
@@ -293,6 +301,12 @@
                         :labels      [:model]})
    (prometheus/counter :metabase-search/index-error
                        {:description "Number of errors encountered when indexing for search"})
+   (prometheus/counter :metabase-search/appdb-index-batches-skipped
+                       {:description "Number of search index batches skipped because the upsert errored."
+                        :labels      [:table-type]})
+   (prometheus/counter :metabase-search/index-documents-skipped
+                       {:description "Number of individual search documents skipped because building the document errored."
+                        :labels      [:model]})
    (prometheus/counter :metabase-search/index-update-ms
                        {:description "Total number of ms updating the index"})
    (prometheus/histogram :metabase-search/index-update-duration-ms
@@ -349,6 +363,9 @@
    (prometheus/counter :metabase-search/semantic-fallback-triggered
                        {:description "Number of times semantic search triggered fallback to appdb search due to insufficient results"
                         :labels [:fallback-engine]})
+   (prometheus/counter :metabase-search/semantic-error-fallback
+                       {:description "Number of times semantic search failed with an error and fell back to another engine"
+                        :labels [:fallback-engine]})
    (prometheus/histogram :metabase-search/semantic-results-before-fallback
                          {:description "Distribution of result counts from semantic search when fallback is triggered"
                           :buckets [0 1 5 10 20 50 100]})
@@ -389,6 +406,16 @@
    (prometheus/counter :metabase-search/semantic-indexer-dlq-failures
                        {:description "Number of failed semantic search DLQ retries"})
 
+   ;; data-complexity-score timing
+   ;; 1ms → 1min buckets; widen later if real-world runs push past a minute.
+   (prometheus/histogram :metabase-data-complexity/scoring-duration-ms
+                         {:description "Duration (ms) of a full Data Complexity Score run end-to-end (enumerate + score for all three catalogs + Snowplow publish)."
+                          :buckets     [1 10 50 100 500 1000 5000 10000 30000 60000]})
+   (prometheus/histogram :metabase-data-complexity/phase-duration-ms
+                         {:description "Duration (ms) of one stage (`enumerate` = DB fetch, `score` = in-memory scoring, `publish` = Snowplow emit) for one catalog within a Data Complexity Score run."
+                          :labels      [:stage :catalog]
+                          :buckets     [1 10 50 100 500 1000 5000 10000 30000 60000]})
+
 ;; notification metrics
    (prometheus/counter :metabase-notification/send-ok
                        {:description "Number of successful notification sends."
@@ -423,6 +450,15 @@
                         :labels [:payload-type :channel-type]})
    (prometheus/gauge :metabase-notification/concurrent-tasks
                      {:description "Number of concurrent notification sends."})
+   (prometheus/counter :metabase-notification/template-render
+                       {:description "Number of notification template render attempts."
+                        :labels [:template-type :channel-type]})
+   (prometheus/counter :metabase-notification/template-create
+                       {:description "Number of notification templates created."
+                        :labels [:channel-type]})
+   (prometheus/counter :metabase-notification/template-update
+                       {:description "Number of notification templates updated."
+                        :labels [:channel-type]})
    (prometheus/counter :metabase-gsheets/connection-creation-began
                        {:description "How many times the instance has initiated a Google Sheets connection creation."})
    (prometheus/counter :metabase-gsheets/connection-creation-error
@@ -433,6 +469,18 @@
                         :labels [:status]})
    (prometheus/counter :metabase-embedding-iframe/response
                        {:description "Number of iframe embedding responses by status code."
+                        :labels [:status]})
+   (prometheus/counter :metabase-embedding-iframe-full-app/response
+                       {:description "Number of full-app iframe embedding responses by status code."
+                        :labels [:status]})
+   (prometheus/counter :metabase-embedding-iframe-static/response
+                       {:description "Number of static iframe embedding responses by status code."
+                        :labels [:status]})
+   (prometheus/counter :metabase-embedding-public/response
+                       {:description "Number of public embedding responses by status code."
+                        :labels [:status]})
+   (prometheus/counter :metabase-embedding-simple/response
+                       {:description "Number of simple (modular) embedding responses by status code."
                         :labels [:status]})
    (prometheus/counter :metabase-gsheets/connection-deleted
                        {:description "How many times the instance has deleted their Google Sheets connection."})
@@ -486,7 +534,134 @@
                           :buckets [100 500 1000 5000 10000 30000 60000 300000 1800000 7200000 14400000 21600000]})
    (prometheus/counter :metabase-transforms/python-api-calls-total
                        {:description "Total number of Python runner API calls."
-                        :labels [:status]})])
+                        :labels [:status]})
+   (prometheus/counter :metabase-transforms/inspector-discovery
+                       {:description "Transform Inspector lens discovery calls."
+                        :labels [:status]})
+   (prometheus/counter :metabase-transforms/inspector-lens
+                       {:description "Transform Inspector lens retrievals."
+                        :labels [:lens-type :complexity :status]})
+   (prometheus/histogram :metabase-transforms/inspector-query-duration-ms
+                         {:description "Duration in ms of Transform Inspector lens query execution."
+                          :labels [:lens-type :status]
+                          ;; 1ms -> 10 minutes
+                          :buckets [1 500 1000 5000 10000 30000 60000 120000 300000 600000]})
+   (prometheus/counter :metabase-token-check/attempt
+                       {:description "Total number of token checks. Includes a status label."
+                        :labels [:status]})
+   ;; Write-connection telemetry
+   (prometheus/counter :metabase-db-connection/write-op
+                       {:description "JDBC connection pool acquisitions by connection type (default or write-data)."
+                        :labels [:connection-type]})
+   (prometheus/counter :metabase-db-connection/type-resolved
+                       {:description "Write-data details resolved by effective-details (driver-agnostic). Only incremented when write-data-details are genuinely used, not on fallback or workspace swap."
+                        :labels [:connection-type]})
+   ;; SQL parsing metrics
+   (prometheus/counter :metabase-sql-parsing/context-timeouts
+                       {:description "Number of Python/GraalVM SQL parsing execution timeouts."})
+   (prometheus/counter :metabase-sql-parsing/context-acquisitions
+                       {:description "Number of Python contexts acquired from the pool."})
+   (prometheus/counter :metabase-sql-parsing/context-creations
+                       {:description "Number of new Python contexts created."})
+   (prometheus/counter :metabase-sql-parsing/context-disposals-expired
+                       {:description "Number of Python contexts disposed due to TTL expiry."})
+   ;; SQL tools operation metrics
+   (prometheus/counter :metabase-sql-tools/operations-total
+                       {:description "Total number of sql-tools operations started."
+                        :labels [:parser :operation]})
+   (prometheus/counter :metabase-sql-tools/operations-completed
+                       {:description "Number of sql-tools operations completed successfully."
+                        :labels [:parser :operation]})
+   (prometheus/counter :metabase-sql-tools/operations-failed
+                       {:description "Number of sql-tools operations that threw an exception."
+                        :labels [:parser :operation]})
+   (prometheus/histogram :metabase-sql-tools/operation-duration-ms
+                         {:description "Duration in milliseconds of sql-tools operations."
+                          :labels [:parser :operation]
+                          :buckets [1 5 10 25 50 100 250 500 1000 2500 5000 10000 30000]})
+   ;; slackbot metrics
+   (prometheus/counter :metabase-slackbot/responses-generated
+                       {:description "Number of responses generated by the Slack bot."
+                        :labels [:source :result]})
+   (prometheus/histogram :metabase-slackbot/response-duration-ms
+                         {:description "Duration in milliseconds of Slack bot response generation."
+                          :labels [:source]
+                          ;; 100ms -> 5 minutes
+                          :buckets [100 500 1000 2500 5000 10000 30000 60000 120000 300000]})
+   (prometheus/counter :metabase-slackbot/responses-deleted
+                       {:description "Number of Slack bot responses deleted by users."})
+   (prometheus/counter :metabase-slackbot/file-uploads
+                       {:description "Number of file uploads via the Slack bot."
+                        :labels [:result]})
+   ;; metabot / LLM agent metrics
+   (prometheus/counter :metabase-metabot/llm-requests
+                       {:description "LLM provider API requests"
+                        :labels [:model :source]})
+   (prometheus/counter :metabase-metabot/llm-retries
+                       {:description "LLM provider retry attempts"
+                        :labels [:model :source]})
+   (prometheus/counter :metabase-metabot/llm-errors
+                       {:description "LLM provider API errors (excluding retries)"
+                        :labels [:model :source :error-type]})
+   (prometheus/histogram :metabase-metabot/llm-duration-ms
+                         {:description "LLM request duration (ms)"
+                          :labels [:model :source]
+                          ;; 100 ms -> 2 minutes
+                          :buckets [100 500 1000 2000 5000 10000 20000 30000 60000 120000]})
+   (prometheus/counter :metabase-metabot/llm-input-tokens
+                       {:description "LLM input tokens"
+                        :labels [:model :source]})
+   (prometheus/counter :metabase-metabot/llm-output-tokens
+                       {:description "LLM output tokens"
+                        :labels [:model :source]})
+   (prometheus/counter :metabase-metabot/llm-cache-creation-tokens
+                       {:description "LLM cache creation input tokens (Anthropic prompt caching)"
+                        :labels [:model :source]})
+   (prometheus/counter :metabase-metabot/llm-cache-read-tokens
+                       {:description "LLM cache read input tokens (Anthropic prompt caching)"
+                        :labels [:model :source]})
+   (prometheus/histogram :metabase-metabot/llm-tokens-per-call
+                         {:description "Tokens per LLM call"
+                          :labels [:model :source]
+                          :buckets [1000 2500 5000 10000 20000 50000 100000 200000]})
+   (prometheus/counter :metabase-metabot/agent-requests
+                       {:description "Agent loop invocations"
+                        :labels [:profile-id]})
+   (prometheus/counter :metabase-metabot/agent-errors
+                       {:description "Agent loop errors"
+                        :labels [:profile-id]})
+   (prometheus/histogram :metabase-metabot/agent-iterations
+                         {:description "Iterations per agent run"
+                          :labels [:profile-id]
+                          :buckets [1 2 3 5 7 10 15 20 30 40]})
+   (prometheus/histogram :metabase-metabot/agent-duration-ms
+                         {:description "Full agent loop duration (ms)"
+                          :labels [:profile-id]
+                          ;; 100ms -> 10 minutes
+                          :buckets [100 500 1000 5000 10000 30000 60000 120000 300000 600000]})
+   (prometheus/histogram :metabase-metabot/message-persist-bytes
+                         {:description "Size in bytes of persisted metabot message data (JSON)"
+                          :labels [:profile-id]
+                          ;; 1KB -> 5MB
+                          :buckets [1000 5000 10000 50000 100000 500000 1000000 5000000]})
+   (prometheus/counter :metabase-metabot/turn-started
+                       {:description "A metabot turn was started (user row + assistant placeholder inserted)"
+                        :labels [:profile-id]})
+
+   ;; release dashboard metrics
+   (prometheus/counter :metabase-sync/failures
+                       {:description "Number of sync operation failures."
+                        :labels [:driver]})
+   (prometheus/counter :metabase-api/unhandled-errors
+                       {:description "Number of unhandled API errors (500s without explicit status code)."})
+   (prometheus/counter :metabase-frontend/errors
+                       {:description "Number of frontend errors reported by the browser."
+                        :labels [:type]})
+   (prometheus/counter :metabase-frontend/analytics-events-dropped
+                       {:description "Number of frontend analytics events dropped before being POSTed to the backend, because the client-side buffer was full."})
+   (prometheus/counter :metabase-export/errors
+                       {:description "Number of errors during data export."
+                        :labels [:format]})])
 
 (defn- quartz-collectors
   []
@@ -540,8 +715,6 @@
                                 [@c3p0-collector]
                                 (product-collectors)
                                 (quartz-collectors)))]
-    (doseq [{:keys [metric labels value]} (initial-labelled-metric-values)]
-      (prometheus/inc registry metric (qualified-vals labels) value))
     (when @jvm-hiccup-thread (@jvm-hiccup-thread))
     (reset! jvm-hiccup-thread
             (hiccup-meter/start-hiccup-meter
@@ -568,17 +741,41 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Public API: call [[setup!]] once, call [[shutdown!]] on shutdown
 
+(defn- parse
+  [x]
+  (when-not (str/blank? x)
+    (let [value (parse-long x)]
+      (when-not value
+        (log/warn "MB_PROMETHEUS_SERVER_PORT had a value but did not parse to an integer"))
+      value)))
+
+(declare install-real-reporter!)
+
 (defn setup!
-  "Start the prometheus metric collector and web-server."
+  "Start the prometheus metric collector and web-server. Port is optional, read from `MB_PROMETHEUS_SERVER_PORT`"
+  ([] (setup! (parse (System/getenv "MB_PROMETHEUS_SERVER_PORT"))))
+  ([port]
+   (when (not system)
+     (when-not port
+       (log/info "Running prometheus metrics without a webserver"))
+     (locking #'system
+       (when-not system
+         (let [sys (make-prometheus-system port "metabase-registry")]
+           (alter-var-root #'system (constantly sys))
+           (install-real-reporter!)))))))
+
+(defn observe-initial-values
+  "Observe initial values. Some values need a baseline otherwise their first observed value won't register as a
+  deviation from that baseline. See #52834. It's possible that before setting these baselines, some of these values
+  will be observed. Most initial values are 0 and `(inc r m ls 0)` is a no-op as to the value, but ensures the metric
+  will be scraped. Search engine uses a bit field 1 or 0 for active and default. But this is the only place these are
+  observed so it's not a double inc."
   []
-  (when-not system
-    (let [port (prometheus-server-port)]
-      (when-not port
-        (log/info "Running prometheus metrics without a webserver"))
-      (locking #'system
-        (when-not system
-          (let [sys (make-prometheus-system port "metabase-registry")]
-            (alter-var-root #'system (constantly sys))))))))
+  (let [registry (:registry system)]
+    (if-not registry
+      (log/warn "Observe initial values called without initializing registry")
+      (doseq [{:keys [metric labels value]} (initial-labelled-metric-values)]
+        (prometheus/inc registry metric (qualified-vals labels) value)))))
 
 (defn shutdown!
   "Stop the prometheus metrics web-server if it is running."
@@ -606,8 +803,6 @@
      (observe! metric nil labels-or-amount)
      (observe! metric labels-or-amount 1)))
   ([metric labels amount]
-   (when-not system
-     (setup!))
    (prometheus/observe (:registry system) metric (qualified-vals labels) amount)))
 
 (defn inc!
@@ -619,8 +814,6 @@
      (inc! metric nil labels-or-amount)
      (inc! metric labels-or-amount 1)))
   ([metric labels amount]
-   (when-not system
-     (setup!))
    (prometheus/inc (:registry system) metric (qualified-vals labels) amount)))
 
 (defn dec!
@@ -634,8 +827,6 @@
      (dec! metric nil labels-or-amount)
      (dec! metric labels-or-amount 1)))
   ([metric labels amount]
-   (when-not system
-     (setup!))
    (prometheus/dec (:registry system) metric (qualified-vals labels) amount)))
 
 (defn set!
@@ -646,8 +837,6 @@
    ;; Escape var to avoid confusing it with the special form of the same name.
    (#'set! metric nil amount))
   ([metric labels amount]
-   (when-not system
-     (setup!))
    (prometheus/set (:registry system) metric (qualified-vals labels) amount)))
 
 (defn clear!
@@ -655,7 +844,29 @@
   [metric]
   (when-not system
     (setup!))
-  (.clear ^SimpleCollector (:raw (collectors/lookup (.-collectors ^iapetos.registry.IapetosRegistry (:registry system)) metric nil))))
+  (when system
+    (.clear ^SimpleCollector (:raw (collectors/lookup (.-collectors ^iapetos.registry.IapetosRegistry (:registry system)) metric nil)))))
+
+(def ^:private real-reporter
+  "A real analytics.interface/Reporter that reports here"
+  (reify analytics.interface/Reporter
+    (-inc! [_ metric labels amount]
+      (inc! metric labels amount))
+    (-dec-gauge! [_ metric labels amount]
+      (dec! metric labels amount))
+    (-set-gauge! [_ metric labels amount]
+      ;; set! in first position hits the special form
+      (metabase.analytics.prometheus/set! metric labels amount))
+    (-observe! [_ metric labels amount]
+      (observe! metric labels amount))
+    (-clear! [_ metric]
+      (clear! metric))))
+
+(defn- install-real-reporter!
+  "Called after setup to wire up the real reporter"
+  []
+  (log/info "Installing real prometheus reporter")
+  (analytics.interface/set-reporter! real-reporter))
 
 (comment
   ;; want to see what's in the registry?

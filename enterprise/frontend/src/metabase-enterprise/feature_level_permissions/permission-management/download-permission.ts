@@ -7,10 +7,9 @@ import {
   getPermissionWarningModal,
 } from "metabase/admin/permissions/selectors/confirmations";
 import {
-  DataPermission,
   DataPermissionType,
-  DataPermissionValue,
   type EntityId,
+  type PermissionOption,
   type PermissionSectionConfig,
   type PermissionSubject,
   type SchemaEntityId,
@@ -22,7 +21,12 @@ import {
   getTablesPermission,
 } from "metabase/admin/permissions/utils/graph";
 import { getGroupFocusPermissionsUrl } from "metabase/admin/permissions/utils/urls";
-import type { Group, GroupsPermissions } from "metabase-types/api";
+import {
+  DataPermission,
+  DataPermissionValue,
+  type Group,
+  type GroupsPermissions,
+} from "metabase-types/api";
 
 const getTooltipMessage = (isAdmin: boolean, isBlockedAccess: boolean) => {
   if (isAdmin) {
@@ -36,7 +40,7 @@ const getTooltipMessage = (isAdmin: boolean, isBlockedAccess: boolean) => {
   return null;
 };
 
-export const DOWNLOAD_PERMISSION_OPTIONS = {
+export const DOWNLOAD_PERMISSION_OPTIONS: Record<string, PermissionOption> = {
   none: {
     // eslint-disable-next-line ttag/no-module-declaration -- see metabase#55045
     label: t`No`,

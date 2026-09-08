@@ -2,7 +2,6 @@
   "Functions for working with native queries."
   (:refer-clojure :exclude [some select-keys mapv every? empty? not-empty])
   (:require
-   [clojure.core.match :refer [match]]
    [clojure.set :as set]
    [clojure.string :as str]
    [medley.core :as m]
@@ -24,69 +23,15 @@
    [metabase.util.i18n :as i18n]
    [metabase.util.malli :as mu]
    [metabase.util.malli.registry :as mr]
+   [metabase.util.match :as match]
    [metabase.util.performance :refer [every? mapv select-keys some empty? not-empty]]))
-
-;; Template Tags: Variables
-
-(def ^:private variable-tag-regex
-  #"\{\{\s*([A-Za-z0-9_\.]+)\s*\}\}")
-
-(defn- normalize-variable-tag
-  "Matches and normalizes a variable tag like {{my_var}}.
-   Returns normalized-name or nil if not a variable tag."
-  [full-tag]
-  (when-let [[_ content] (re-matches variable-tag-regex full-tag)]
-    content))
-
-;; Template Tags: Snippets
-
-(def ^:private snippet-tag-regex
-  ;; any spaces, snippet:, any spaces, name, any trailing spaces
-  #"\{\{\s*(snippet:\s*[^}]*[^}\s])\s*\}\}")
-
-(defn- tag-name->snippet-name [tag-name]
-  (when (str/starts-with? tag-name "snippet:")
-    (str/trim (subs tag-name (count "snippet:")))))
-
-(defn- normalize-snippet-tag
-  "Normalizes a snippet tag like {{snippet: foo}}. E.g., 'snippet:  foo ' -> 'snippet: foo'.
-   Returns normalized string or nil if not a snippet tag."
-  [full-tag]
-  (when-let [[_ content] (re-matches snippet-tag-regex full-tag)]
-    (let [snippet-name (tag-name->snippet-name content)]
-      (str "snippet: " snippet-name))))
-
-;; Template Tags: Cards
-
-(def ^:private card-tag-regex
-  #"\{\{\s*(#([0-9]*)(-[a-z0-9-]*)?)\s*\}\}")
-
-(defn- tag-name->card-id [tag-name]
-  (when-let [[_ id-str] (re-matches #"^#(\d+)(-[a-z0-9-]*)?$" tag-name)]
-    (parse-long id-str)))
-
-(defn- normalize-card-tag
-  "Matches and normalizes a card tag like {{#123}} or {{#123-slug}}.
-   Normalizes '#123-slug' -> '#123'.
-   Returns normalized-name or nil if not a card tag."
-  [full-tag]
-  (when-let [[_ content _card-id _slug] (re-matches card-tag-regex full-tag)]
-    ;; TODO: see tech debt issue #39378 and `native-test/card-tag-test`
-    content))
-
-(def ^:private match-and-normalize-tag-name
-  "Matches a full tag string against tag normalizer functions and returns
-   normalized-name or nil if no match."
-  (some-fn normalize-variable-tag
-           normalize-snippet-tag
-           normalize-card-tag))
 
 (defn- finish-tag [{tag-name :name :as tag}]
   (merge tag
-         (when-let [card-id (tag-name->card-id tag-name)]
+         (when-let [card-id (lib.params.parse/tag-name->card-id tag-name)]
            {:type    :card
             :card-id card-id})
-         (when-let [snippet-name (tag-name->snippet-name tag-name)]
+         (when-let [snippet-name (lib.params.parse/tag-name->snippet-name tag-name)]
            {:type         :snippet
             :snippet-name snippet-name})
          (when-not (:display-name tag)
@@ -104,21 +49,23 @@
   (let [parsed (lib.parse/parse {} query-text)]
     (loop [found            {}
            [current & more] parsed]
-      (match [current]
-        [nil]              found
-        [_ :guard string?] (recur found more)
+      (let [[found more] (match/match-one current
+                           (_ :guard string?) [found more]
 
-        [{:type ::lib.parse/param, :name tag-name}]
-        (let [full-tag        (str "{{" tag-name "}}")
-              normalized-name (match-and-normalize-tag-name full-tag)]
-          (recur (cond-> found
-                   (and normalized-name (not (found normalized-name)))
-                   (assoc normalized-name (fresh-tag normalized-name)))
-                 more))
+                           {:type ::lib.parse/param, :name tag-name}
+                           (let [normalized-name (lib.params.parse/match-and-normalize-tag-name tag-name)]
+                             [(cond-> found
+                                (and normalized-name (not (found normalized-name)))
+                                (assoc normalized-name (fresh-tag normalized-name)))
+                              more])
 
-        [{:type     ::lib.parse/optional
-          :contents contents}]
-        (recur found (into more contents))))))
+                           {:type ::lib.parse/optional, :contents contents}
+                           [found (into more contents)]
+
+                           _ [found nil])]
+        (if more
+          (recur found more)
+          found)))))
 
 (defn- rename-template-tag
   [existing-tags old-name new-name]
@@ -246,7 +193,7 @@
 (mu/defn native-query :- ::lib.schema/query
   "Create a new native query.
 
-  Native in this sense means a pMBQL query with a first stage that is a native query."
+  Native in this sense means a MBQL 5 query with a first stage that is a native query."
   ([metadata-providerable     :- ::lib.schema.metadata/metadata-providerable
     sql-or-other-native-query :- ::common/non-blank-string]
    (native-query metadata-providerable sql-or-other-native-query nil nil))
@@ -370,7 +317,7 @@
 
 (mu/defn- validate-template-tag :- [:sequential [:map [:error/message :string] [:tag-name :string]]]
   "Validate a single template tag, returning a list of errors."
-  [_query {tag-type :type tag-name :name, :keys [display-name dimension]}]
+  [_query {tag-type :type tag-name :name, :keys [display-name dimension table-id]}]
   (cond-> []
     (empty? display-name)
     (conj {:error/message (i18n/tru "Missing widget label: {0}" tag-name)
@@ -378,6 +325,10 @@
 
     (and (#{:dimension :temporal-unit} tag-type) (nil? dimension))
     (conj {:error/message (i18n/tru "The variable \"{0}\" needs to be mapped to a field." tag-name)
+           :tag-name tag-name})
+
+    (and (#{:table} tag-type) (nil? table-id))
+    (conj {:error/message (i18n/tru "The variable \"{0}\" needs to be mapped to a table." tag-name)
            :tag-name tag-name})))
 
 (mu/defn validate-template-tags :- [:sequential [:map [:error/message :string] [:tag-name :string]]]
@@ -507,3 +458,13 @@
     (if (and template-tags-map raw-native-query-string)
       (boolean (fully-parameterized-text? raw-native-query-string template-tags-map))
       true)))
+
+(mu/defn native-query-table-references :- [:set [:map [:table ::lib.schema.id/table]]]
+  "Given a native query, find any table tags and convert them to {:table id} objects"
+  [query]
+  (let [tags (->> (lib.walk.util/all-template-tags query)
+                  (filter #(= (:type %) :table)))]
+    (into #{}
+          (map (fn [{:keys [table-id]}]
+                 {:table table-id}))
+          tags)))

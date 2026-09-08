@@ -7,7 +7,7 @@
     :as gsheets.settings
     :refer [gsheets gsheets!]]
    [metabase-enterprise.harbormaster.client :as hm.client]
-   [metabase.analytics.core :as analytics]
+   [metabase.analytics-interface.core :as analytics]
    [metabase.analytics.snowplow :as snowplow]
    [metabase.api.common :as api]
    [metabase.api.macros :as api.macros]
@@ -62,7 +62,7 @@
 ;; We need to sync the attached datawarehouse to make sure that the data from the Google Drive folder is available to
 ;; the user in Metabase. Once the gdrive connection's status is set to 'active' by HM, they will call MB's
 ;; `api/notify/db/attached_datawarehouse` endpoint to trigger a sync. The data from the Google Drive folder is already
-;; availiable in the attached datawarehouse, and when MB finishes the sync (and puts an item into :model/TaskHistory
+;; available in the attached datawarehouse, and when MB finishes the sync (and puts an item into :model/TaskHistory
 ;; saying so), the user can start using their Google Sheets data in Metabase.
 ;;
 ;; ## Why do we check for multiple gdrive connections in the delete endpoint? We check for multiple gdrive connections
@@ -278,15 +278,24 @@
       (let [{:keys [status status-reason error last-sync-at last-sync-started-at]
              :as   _} (normalize-gdrive-conn hm-body)]
         (cond
+          (and (= "active" status)
+               last-sync-started-at
+               last-sync-at
+               (t/< (t/instant last-sync-at) (t/instant last-sync-started-at)))
+          (assoc (setting->response saved-setting)
+                 :status "syncing"
+                 :last_sync_at (.getEpochSecond ^Instant (t/instant last-sync-at))
+                 :sync_started_at (.getEpochSecond ^Instant (t/instant last-sync-started-at)))
+
           (= "active" status)
           (assoc (setting->response saved-setting)
                  :status "active"
                  :last_sync_at (when last-sync-at (.getEpochSecond ^Instant (t/instant last-sync-at)))
                  :next_sync_at (when last-sync-at (.getEpochSecond ^Instant (t/+ (t/instant last-sync-at) (t/minutes 15)))))
 
-          (or (= "syncing" status) (= "initializing" status))
+          (= "initializing" status)
           (assoc (setting->response saved-setting)
-                 :status "syncing"
+                 :status "initializing"
                  :last_sync_at (if last-sync-at (.getEpochSecond ^Instant (t/instant last-sync-at)) nil)
                  :sync_started_at (.getEpochSecond ^Instant (t/instant (or last-sync-started-at (t/instant)))))
 

@@ -26,12 +26,12 @@
     `DatabaseMetaData`) describing the columns (or equivalent) currently present in the table (or equivalent) that we're
     syncing.
 
-  *  `field-metadata` is a map of information describing a single columnn currently present in the table being synced
+  *  `field-metadata` is a map of information describing a single column currently present in the table being synced
 
   *  `our-metadata` is a set of maps of Field metadata reconstructed from the Metabase application database.
 
   *  `metabase-field` is a single map of Field metadata reconstructed from the Metabase application database; there is
-     a 1:1 correspondance between this metadata and a row in the `Field` table. Unlike `field-metadata`, these entries
+     a 1:1 correspondence between this metadata and a row in the `Field` table. Unlike `field-metadata`, these entries
      always have an `:id` associated with them (because they are present in the Metabase application DB).
 
   Other notes:
@@ -121,14 +121,14 @@
           (transduce (comp
                       (map (fn [schema]
                              (log/infof "Fetching field metadata for %s.%s" (:name database) schema)
-                             (fetch-metadata/fields-metadata database
-                                                             :schema-names [schema])))
+                             (into [] (fetch-metadata/fields-metadata database
+                                                                      :schema-names [schema]))))
                       (map sync!))
                      (completing (partial merge-with +))
                      {:total-fields   0
                       :updated-fields 0}
                      (sync-util/sync-schemas database))
-          (sync! (fetch-metadata/fields-metadata database)))))))
+          (sync! (into [] (fetch-metadata/fields-metadata database))))))))
 
 (mu/defn sync-fields-for-table!
   "Sync the Fields in the Metabase application database for a specific `table`."
