@@ -3,10 +3,10 @@ import _ from "underscore";
 
 import type { DashboardSubscriptionData } from "metabase/redux/store";
 import { getEmailDomain } from "metabase/utils/email";
-import { formatDateTimeWithUnit } from "metabase/utils/formatting/date";
 import { formatTimeWithUnit } from "metabase/utils/formatting/time";
 import MetabaseSettings from "metabase/utils/settings";
 import { formatFrame } from "metabase/utils/time-dayjs";
+import { formatDateTimeWithUnit } from "metabase/visualizations/lib/formatting/date";
 import {
   getDefaultValuePopulatedParameters,
   normalizeParameterValue,
@@ -139,7 +139,7 @@ export function cleanPulse<T extends DashboardSubscriptionData>(
     ...pulse,
     channels: cleanPulseChannels(pulse.channels, channelSpecs),
     parameters: cleanPulseParameters(getPulseParameters(pulse)),
-  } as T;
+  };
 }
 
 function cleanPulseChannels(

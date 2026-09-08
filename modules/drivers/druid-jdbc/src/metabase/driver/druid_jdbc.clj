@@ -26,6 +26,14 @@
 
 (driver/register! :druid-jdbc :parent :sql-jdbc)
 
+(defmethod driver/host-carrying-parameters :druid-jdbc
+  [_driver]
+  ["url" "LB_URLS"])
+
+(defmethod driver/non-host-parameters :druid-jdbc
+  [_driver]
+  ["HOSTNAME_VERIFICATION"])
+
 (doseq [[feature supported?] {:set-timezone            true
                               :expression-aggregations true
                               :expression-literals     true}]
@@ -68,7 +76,8 @@
 (defmethod sql-jdbc.execute/read-column-thunk [:druid-jdbc Types/TIMESTAMP]
   [_driver ^ResultSet rs _rsmeta ^Long i]
   (fn []
-    (t/instant (.getObject rs i))))
+    (when-let [ts (.getObject rs i)]
+      (t/instant ts))))
 
 ;; Druid's COMPLEX<...> types are encoded as JDBC's other -- 1111. Values are rendered as string.
 (defmethod sql-jdbc.execute/read-column-thunk [:druid-jdbc Types/OTHER]

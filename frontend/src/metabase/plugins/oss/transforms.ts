@@ -1,10 +1,7 @@
 import type { ComponentType, ReactNode } from "react";
 
 import type { OmniPickerItem } from "metabase/common/components/Pickers";
-import {
-  NotFoundPlaceholder,
-  PluginPlaceholder,
-} from "metabase/plugins/components/PluginPlaceholder";
+import { PluginPlaceholder } from "metabase/plugins/components/PluginPlaceholder";
 import type { PythonTransformSourceDraft, Transform } from "metabase-types/api";
 
 // Types
@@ -50,6 +47,7 @@ export type PythonTransformSourceValidationResult = {
 
 export type PythonTransformsPlugin = {
   isEnabled: boolean;
+  shouldShowInspectTab: boolean;
   getPythonTransformsRoutes: () => ReactNode;
   getInspectorRoutes: () => ReactNode;
   getPythonSourceValidationResult: (
@@ -72,18 +70,13 @@ export const PLUGIN_TRANSFORMS = getDefaultPluginTransforms();
 
 const getDefaultPluginTransformsPython = (): PythonTransformsPlugin => ({
   isEnabled: false,
+  shouldShowInspectTab: false,
   getPythonTransformsRoutes: () => null,
-  getInspectorRoutes: () => {
-    const {
-      getDefaultInspectorRoutes,
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-    } = require("metabase/transforms/pages/TransformInspectorUpsellPage/routes");
-    return getDefaultInspectorRoutes();
-  },
+  getInspectorRoutes: () => null,
   getPythonSourceValidationResult: () => ({ isValid: true }),
   TransformEditor: PluginPlaceholder,
   SourceSection: PluginPlaceholder,
-  PythonRunnerSettingsPage: NotFoundPlaceholder,
+  PythonRunnerSettingsPage: PluginPlaceholder,
   getAdminRoutes: () => null,
   getTransformsNavLinks: () => null,
   sharedLibImportPath: "",

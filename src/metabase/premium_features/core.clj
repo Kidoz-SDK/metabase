@@ -16,9 +16,8 @@
  [metabase.premium-features.defenterprise
   defenterprise
   defenterprise-schema]
-
  [metabase.premium-features.token-check
-   ;; TODO: move airgap code to a dedicated namespace?
+  ;; TODO: move airgap code to a dedicated namespace?
   assert-valid-airgap-user-count!
   assert-airgap-allows-user-creation!
   assert-has-feature
@@ -29,6 +28,9 @@
   has-any-features?
   has-feature?
   log-enabled?
+  query-transforms-enabled?
+  python-transforms-enabled?
+  any-transforms-enabled?
   max-users-allowed
   meters
   plan-alias
@@ -38,7 +40,6 @@
   token-check-url
   transform-metered-as
   transform-stats]
-
  (metabase.premium-features.settings
   active-users-count
   airgap-enabled
@@ -55,18 +56,22 @@
   enable-config-text-file?
   enable-content-translation?
   enable-content-verification?
+  enable-custom-viz?
   enable-data-complexity-score?
   enable-dashboard-subscription-filters?
   enable-database-auth-providers?
   enable-database-routing?
   enable-library?
+  enable-library-retrieval?
   enable-metabase-ai-managed?
   enable-metabot-v3?
   enable-dependencies?
+  enable-schema-viewer?
   enable-email-allow-list?
   enable-email-restrict-recipients?
   enable-embedding-sdk-origins?
   enable-embedding-simple-feature?
+  enable-multi-factor-auth?
   enable-official-collections?
   enable-preemptive-caching?
   enable-query-reference-validation?
@@ -86,6 +91,7 @@
   enable-basic-transforms?
   enable-python-transforms?
   enable-upload-management?
+  enable-workspaces?
   enable-whitelabeling?
   enable-writable-connection?
   has-attached-dwh?

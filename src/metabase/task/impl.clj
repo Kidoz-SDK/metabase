@@ -79,7 +79,7 @@
       (log/info "Initializing task" (u/format-color 'green (name k)) (u/emoji "📆"))
       (f k)
       (catch Throwable e
-        (log/errorf e "Error initializing task %s" k)))))
+        (log/errorf "Error initializing task %s: %s" k (ex-message e))))))
 
 ;;; +----------------------------------------------------------------------------------------------------------------+
 ;;; |                                          STARTING/STOPPING SCHEDULER                                           |
@@ -177,13 +177,13 @@
                        (.getName replaced-key)
                        (.getName new-trigger-key)
                        (when (> (count triggers) 1)
-                           ;; We probably want more intuitive rescheduling semantics for multi-trigger jobs...
-                           ;; Ideally we would pass *all* the new triggers at once, so we can match them up atomically.
-                           ;; The current behavior is especially confounding if replacing N triggers with M ones.
+                         ;; We probably want more intuitive rescheduling semantics for multi-trigger jobs...
+                         ;; Ideally we would pass *all* the new triggers at once, so we can match them up atomically.
+                         ;; The current behavior is especially confounding if replacing N triggers with M ones.
                          (str " (chosen randomly from " (count triggers) " existing ones)"))))
           (.rescheduleJob scheduler replaced-key new-trigger))))
     (catch Throwable e
-      (log/error e "Error rescheduling job"))))
+      (log/errorf "Error rescheduling job: %s" (ex-message e)))))
 
 (mu/defn reschedule-trigger!
   "Reschedule a trigger with the same key as the given trigger.
@@ -215,7 +215,7 @@
     (when-let [scheduler (scheduler)]
       (.triggerJob scheduler job-key))
     (catch Throwable e
-      (log/errorf e "Failed to trigger immediate execution of task %s" job-key))))
+      (log/errorf "Failed to trigger immediate execution of task %s: %s" job-key (ex-message e)))))
 
 (mu/defn delete-task!
   "Delete a task from the scheduler"
@@ -284,10 +284,8 @@
    ((get-method trigger->info Trigger) trigger)
    :schedule
    (.getCronExpression trigger)
-
    :timezone
    (.getID (.getTimeZone trigger))
-
    :misfire-instruction
    ;; not 100% sure why `case` doesn't work here...
    (condp = (.getMisfireInstruction trigger)
@@ -325,7 +323,7 @@
         (catch ClassNotFoundException _
           (log/infof "Class not found for Quartz Job %s. This probably means that this job was removed or renamed." (.getName job-key)))
         (catch Throwable e
-          (log/warnf e "Error fetching details for Quartz Job: %s" (.getName job-key)))))))
+          (log/warnf "Error fetching details for Quartz Job %s: %s" (.getName job-key) (ex-message e)))))))
 
 (defn- jobs-info []
   (->> (some-> (scheduler) (.getJobKeys nil))
@@ -353,7 +351,7 @@
      (try
        ~@body
        (catch Exception e#
-         (log/error e# msg#)
+         (log/error msg# (ex-message e#))
          (throw (JobExecutionException. msg# e# true))))))
 
 #_{:clj-kondo/ignore [:discouraged-var]}

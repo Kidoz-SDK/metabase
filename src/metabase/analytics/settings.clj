@@ -44,9 +44,26 @@
   :visibility :public
   :doc        false)
 
+(defsetting metaplow-tracking-enabled
+  (deferred-tru
+   (str "Boolean indicating whether analytics events are being sent to Metaplow. "
+        "True if anonymous tracking is enabled for this instance, and a Metaplow collector URL is set."))
+  :type       :boolean
+  :getter     (fn [] (boolean (and (anon-tracking-enabled)
+                                   (setting/get-value-of-type :string :metaplow-url))))
+  :visibility :public
+  :doc        false)
+
+(defsetting metaplow-url
+  (deferred-tru "The URL of the Metaplow collector to send analytics events to.")
+  :encryption :when-encryption-key-set
+  :visibility :public
+  :audit      :never
+  :doc        false)
+
 (defsetting snowplow-url
   (deferred-tru "The URL of the Snowplow collector to send analytics events to.")
-  :encryption :no
+  :encryption :when-encryption-key-set
   :default    (if config/is-prod?
                 "https://sp.metabase.com"
                 ;; See the iglu-schema-registry repo for instructions on how to run Snowplow Micro locally for development
@@ -67,11 +84,12 @@
     ;; is first read.
     (let [value (or (first-user-creation) (t/offset-date-time))]
       (setting/set-value-of-type! :timestamp :instance-creation value)
-      ((requiring-resolve 'metabase.analytics.snowplow/track-event!) :snowplow/account {:event :new_instance_created} nil)))
+      ((requiring-resolve 'metabase.analytics.event/track-event!) :snowplow/account {:event :new_instance_created} nil)))
   (u.date/format-rfc3339 (setting/get-value-of-type :timestamp :instance-creation)))
 
 (defsetting instance-creation
   (deferred-tru "The approximate timestamp at which this instance of Metabase was created, for inclusion in analytics.")
+  :encryption :no
   :visibility :public
   :setter     :none
   :getter     #'-instance-creation

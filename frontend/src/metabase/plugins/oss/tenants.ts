@@ -1,11 +1,11 @@
 import type React from "react";
 import type { SetStateAction } from "react";
 
+import type { CollectionTreeItem } from "metabase/common/collections/utils";
 import type {
   OmniPickerCollectionItem,
   OmniPickerItem,
 } from "metabase/common/components/Pickers";
-import type { CollectionTreeItem } from "metabase/entities/collections/utils";
 import type {
   Collection,
   CollectionId,
@@ -41,9 +41,15 @@ export type UseListActiveTenantsResult = {
   error: unknown;
 };
 
+type UseListActiveTenantsOptions = {
+  skip?: boolean;
+};
+
 const getDefaultPluginTenants = () => ({
   isEnabled: false,
-  useListActiveTenants: (): UseListActiveTenantsResult => ({
+  useListActiveTenants: (
+    _options?: UseListActiveTenantsOptions,
+  ): UseListActiveTenantsResult => ({
     data: undefined,
     isLoading: false,
     error: undefined,
@@ -118,7 +124,9 @@ const getDefaultPluginTenants = () => ({
 
 export const PLUGIN_TENANTS: {
   isEnabled: boolean;
-  useListActiveTenants: () => UseListActiveTenantsResult;
+  useListActiveTenants: (
+    options?: UseListActiveTenantsOptions,
+  ) => UseListActiveTenantsResult;
   userStrategyRoute: React.ReactElement | null;
   useTenantMainNavbarData: () => {
     canAccessTenantSpecificCollections: boolean;

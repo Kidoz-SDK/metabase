@@ -123,7 +123,7 @@
                              :direction       "export"
                              :source          "cli"
                              :duration_ms     (int (/ (- (System/nanoTime) start) 1e6))
-                             :count           (count (:seen report))
+                             :count           (reduce + 0 (vals (:entity-counts report)))
                              :error_count     (count (:errors report))
                              :collection      (str/join "," collection-ids)
                              :all_collections (and (empty? collection-ids)
@@ -131,7 +131,8 @@
                              :data_model      (not (:no-data-model opts))
                              :settings        (not (:no-settings opts))
                              :field_values    (boolean (:include-field-values opts))
-                             :secrets         (boolean (:include-database-secrets opts))
+                             ;; Database connection secrets are never exported; kept in the schema for compatibility.
+                             :secrets         false
                              :success         (nil? @err)
                              :error_message   (when @err
                                                 (u/strip-error @err nil))})

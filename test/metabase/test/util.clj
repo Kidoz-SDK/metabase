@@ -8,6 +8,7 @@
    [clojure.walk :as walk]
    [clojurewerkz.quartzite.scheduler :as qs]
    [colorize.core :as colorize]
+   [diehard.core :as dh]
    [environ.core :as env]
    [iapetos.operations :as ops]
    [iapetos.registry :as registry]
@@ -15,6 +16,8 @@
    [mb.hawk.assert-exprs.approximately-equal :as =?]
    [mb.hawk.parallel]
    [metabase.analytics.prometheus :as prometheus]
+   [metabase.app-db.core :as mdb]
+   [metabase.app-db.transient-error :as transient-error]
    [metabase.audit-app.core :as audit]
    [metabase.classloader.core :as classloader]
    [metabase.collections.models.collection :as collection]
@@ -37,6 +40,7 @@
    [metabase.test.data :as data]
    [metabase.test.fixtures :as fixtures]
    [metabase.test.initialize :as initialize]
+   [metabase.test.util.dynamic-redefs :as dynamic-redefs]
    [metabase.test.util.log]
    [metabase.timeline.models.timeline-event :as timeline-event]
    [metabase.util :as u]
@@ -390,9 +394,21 @@
    (fn [_] {:first_name (u.random/random-name)
             :last_name (u.random/random-name)
             :email (u.random/random-email)
-            :password (u.random/random-name)
             :date_joined (t/zoned-date-time)
-            :updated_at (t/zoned-date-time)})})
+            :updated_at (t/zoned-date-time)})
+
+   :model/Workspace
+   (fn [_] (default-timestamped
+            {:name       (u.random/random-name)
+             :creator_id (rasta-id)}))
+
+   :model/WorkspaceDatabase
+   (fn [_] (default-timestamped
+            {:database_id      (data/id)
+             :database_details {}
+             :input_schemas    []
+             :output_namespace ""
+             :status           :unprovisioned}))})
 
 ;; `with-temp` cleanup calls `t2/delete!` directly, which would hit our before-delete guard.
 ;; Bind `*allow-direct-deletion*` so with-temp cleanup works.
@@ -463,6 +479,7 @@
 (setting/defsetting with-temp-env-var-value-test-setting
   "Setting for the `with-temp-env-var-value-test` test."
   :visibility :internal
+  :encryption :no
   :setter :none
   :default "abc")
 
@@ -483,7 +500,6 @@
     (testing "Setting value"
       (is (= "abc"
              (with-temp-env-var-value-test-setting)))))
-
   (testing "override multiple env vars"
     (with-temp-env-var-value! [some-fake-env-var 123, "ANOTHER_FAKE_ENV_VAR" "def"]
       (testing "Should convert values to strings"
@@ -492,7 +508,6 @@
       (testing "should handle CAPITALS/SNAKE_CASE"
         (is (= "def"
                (:another-fake-env-var env/env))))))
-
   (testing "validation"
     (are [form] (thrown?
                  clojure.lang.Compiler$CompilerException
@@ -552,7 +567,7 @@
             (if raw-setting?
               (upsert-raw-setting! original-value setting-k value)
               ;; bypass the feature check when setting up mock data
-              (with-redefs [metabase.settings.models.setting/has-feature? (constantly true)]
+              (dynamic-redefs/with-dynamic-fn-redefs [metabase.settings.models.setting/has-feature? (constantly true)]
                 (setting/set! setting-k value :bypass-read-only? true)))
             (catch Throwable e
               (throw (ex-info (str "Error in with-temporary-setting-values: " (ex-message e))
@@ -567,7 +582,7 @@
               (if raw-setting?
                 (restore-raw-setting! original-value setting-k)
                 ;; bypass the feature check when reset settings to the original value
-                (with-redefs [metabase.settings.models.setting/has-feature? (constantly true)]
+                (dynamic-redefs/with-dynamic-fn-redefs [metabase.settings.models.setting/has-feature? (constantly true)]
                   (setting/set! setting-k original-value :bypass-read-only? true)))
               (catch Throwable e
                 (throw (ex-info (str "Error restoring original Setting value: " (ex-message e))
@@ -772,10 +787,10 @@
         (assert (not (qs/started? temp-scheduler))
                 "temp in-memory scheduler already started: did you use it elsewhere without shutting it down?")
         (binding [task.impl/*quartz-scheduler* (atom temp-scheduler)]
-          (with-redefs [qs/initialize (constantly temp-scheduler)
-                        ;; prevent shutting down scheduler during thunk because some custom migration shutdown scheduler
-                        ;; after it's done, but we need the scheduler for testing
-                        qs/shutdown (constantly nil)]
+          (dynamic-redefs/with-dynamic-fn-redefs [qs/initialize (constantly temp-scheduler)
+                                                  ;; prevent shutting down scheduler during thunk because some custom migration shutdown scheduler
+                                                  ;; after it's done, but we need the scheduler for testing
+                                                  qs/shutdown (constantly nil)]
             (thunk)))
         (finally
           (qs/shutdown temp-scheduler))))))
@@ -875,6 +890,15 @@
     model
     [model (first (t2/primary-keys model))]))
 
+(defn- reindex-search-index! []
+  ;; Wiping and repopulating the whole index table can deadlock against a concurrent writer — search ingestion from
+  ;; another test's writes, or another test's cleanup doing this same thing. The loser of a deadlock has lost nothing
+  ;; that matters here, so run it again.
+  (dh/with-retry {:max-retries 2
+                  :retry-if    (fn [_result e]
+                                 (transient-error/transient-error? (mdb/db-type) e))}
+    (search/reindex! {:in-place? true :async? false})))
+
 ;; It is safe to call `search/reindex!` when we are in a `with-temp-index-table` scope.
 #_{:clj-kondo/ignore [:metabase/test-helpers-use-non-thread-safe-functions]}
 (defn do-with-model-cleanup [models f]
@@ -907,7 +931,7 @@
            {:delete-from (t2/table-name model)
             :where where-clause}))
         ;; TODO we don't (currently) have index update hooks on deletes, so we need this to ensure rollback happens.
-        (search/reindex! {:in-place? true :async? false})))))
+        (reindex-search-index!)))))
 
 (defmacro with-model-cleanup
   "Execute `body`, then delete any *new* rows created for each model in `models`.
@@ -957,6 +981,26 @@
           (is (not (t2/exists? :model/Card :name card-name)))
           (testing "Shouldn't delete other Cards"
             (is (pos? (t2/count :model/Card)))))))))
+
+(deftest reindex-search-index!-test
+  (testing "a transient appdb failure is retried"
+    (let [attempts (atom 0)]
+      ;; Diehard also consults `:retry-if` on success, with a nil exception — a `(constantly true)` stub would retry
+      ;; the successful attempt too. The real predicate returns false for nil.
+      (with-redefs [transient-error/transient-error? (fn [_db-type e] (some? e))
+                    search/reindex!                  (fn [& _]
+                                                       (when (= 1 (swap! attempts inc))
+                                                         (throw (java.sql.SQLException. "Deadlock detected"))))]
+        (#'reindex-search-index!)
+        (is (= 2 @attempts)))))
+  (testing "any other failure is not"
+    (let [attempts (atom 0)]
+      (with-redefs [transient-error/transient-error? (constantly false)
+                    search/reindex!                  (fn [& _]
+                                                       (swap! attempts inc)
+                                                       (throw (java.sql.SQLException. "Syntax error")))]
+        (is (thrown? java.sql.SQLException (#'reindex-search-index!)))
+        (is (= 1 @attempts))))))
 
 (defn do-with-verified!
   "Impl for [[with-verified!]]."
@@ -1021,6 +1065,7 @@
         called-query? (promise)
         pause-query (promise)
         query-thunk (fn []
+                      #_{:clj-kondo/ignore [:deprecated-var]}
                       (data/run-mbql-query checkins
                         {:aggregation [[:count]]}))
         ;; When the query is ran via the datasets endpoint, it will run in a future. That future can be canceled,
@@ -1111,31 +1156,25 @@
     [:model/Card {card-id :id :as card} {:name "A Card"}
      :model/Dashboard {dash-id :id :as dash} {:name "A Dashboard"}]
     (let [count-aux-method-before (set (methodical/aux-methods t2.before-update/before-update :model/Card :before))]
-
       (testing "with single model"
         (with-discard-model-updates! [:model/Card]
           (t2/update! :model/Card card-id {:name "New Card name"})
           (testing "the changes takes affect inside the macro"
             (is (= "New Card name" (t2/select-one-fn :name :model/Card card-id)))))
-
         (testing "outside macro, the changes should be reverted"
           (is (= card (t2/select-one :model/Card card-id)))))
-
       (testing "with multiple models"
         (with-discard-model-updates! [:model/Card :model/Dashboard]
           (testing "the changes takes affect inside the macro"
             (t2/update! :model/Card card-id {:name "New Card name"})
             (is (= "New Card name" (t2/select-one-fn :name :model/Card card-id)))
-
             (t2/update! :model/Dashboard dash-id {:name "New Dashboard name"})
             (is (= "New Dashboard name" (t2/select-one-fn :name :model/Dashboard dash-id)))))
-
         (testing "outside macro, the changes should be reverted"
           (is (= (dissoc card :updated_at)
                  (dissoc (t2/select-one :model/Card card-id) :updated_at)))
           (is (= (dissoc dash :updated_at)
                  (dissoc (t2/select-one :model/Dashboard dash-id) :updated_at)))))
-
       (testing "make sure that we cleaned up the aux methods after"
         (is (= count-aux-method-before
                (set (methodical/aux-methods t2.before-update/before-update :model/Card :before))))))))
@@ -1317,6 +1356,7 @@
          (= (first x) 'values-of))
     (let [[_ table+field] x
           [table field] (str/split (str table+field) #"\.")]
+      #_{:clj-kondo/ignore [:deprecated-var]}
       `(into {} (get-in (data/run-mbql-query ~(symbol table)
                           {:fields [~'$id ~(symbol (str \$ field))]})
                         [:data :rows])))
@@ -1447,7 +1487,6 @@
         (reset! temp-filename filename))
       (testing "File should be deleted at end of macro form"
         (is (not (.exists (io/file @temp-filename)))))))
-
   (testing "explicit filename"
     (with-temp-file [filename "parrot-list.txt"]
       (is (string? filename))
@@ -1457,7 +1496,6 @@
       (testing "should delete existing file"
         (with-temp-file [filename "parrot-list.txt"]
           (is (not (.exists (io/file filename))))))))
-
   (testing "multiple bindings"
     (with-temp-file [filename nil, filename-2 "parrot-list.txt"]
       (is (string? filename))
@@ -1466,13 +1504,11 @@
       (is (not (.exists (io/file filename-2))))
       (is (not (str/ends-with? filename "parrot-list.txt")))
       (is (str/ends-with? filename-2 "parrot-list.txt"))))
-
   (testing "should delete existing file"
     (with-temp-file [filename "parrot-list.txt"]
       (spit filename "wow")
       (with-temp-file [filename "parrot-list.txt"]
         (is (not (.exists (io/file filename)))))))
-
   (testing "validation"
     (are [form] (thrown?
                  clojure.lang.Compiler$CompilerException
@@ -1573,7 +1609,7 @@
                      actual)
 
         (map? expected)
-    ;; recursive case (ex: to turn value that might be a flatland.ordered.map into a regular Clojure map)
+        ;; recursive case (ex: to turn value that might be a flatland.ordered.map into a regular Clojure map)
         (select-keys actual (keys expected))
 
         :else

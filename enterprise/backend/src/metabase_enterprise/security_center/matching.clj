@@ -91,7 +91,7 @@
       (try
         (boolean (seq (query-read-only! query)))
         (catch Throwable e
-          (log/warnf e "Matching query failed: %s" (pr-str query))
+          (log/warnf "Matching query failed: %s" (ex-message e))
           :error))
       (do
         (log/warnf "No matching query for dialect %s or default" (name (mdb/db-type)))
@@ -102,24 +102,28 @@
 (mu/defn evaluate-advisory :- ::schema/match-status
   "Resolve a match status from a version-range check and a matching-query result.
 
+   Affected means in-range AND matched, so `:error` (couldn't determine) only
+   survives when the version check didn't already settle it — the same way SQL
+   gives `FALSE AND NULL` = `FALSE`.
+
+     in-range?    = false  → :resolved if matched, else :not_affected
      query-result = :error → :error
      query-result = false  → :not_affected
-     in-range?    = true   → :active
-     otherwise             → :resolved"
+     otherwise             → :active"
   [in-range?    :- boolean?
    query-result :- QueryResult]
   (cond
+    (not in-range?)
+    (if (true? query-result) :resolved :not_affected)
+
     (= query-result :error)
     :error
 
     (not query-result)
     :not_affected
 
-    in-range?
-    :active
-
     :else
-    :resolved))
+    :active))
 
 (defn evaluate-advisory!
   "Evaluate a single advisory: run the matching query, resolve the status, and
@@ -160,7 +164,7 @@
              (try
                (evaluate-advisory! advisory instance-version)
                (catch Exception e
-                 (log/warnf e "Error evaluating advisory %s" (:advisory_id advisory))
+                 (log/warnf "Error evaluating advisory %s: %s" (:advisory_id advisory) (ex-message e))
                  (t2/update! :model/SecurityAdvisory (:id advisory)
                              {:match_status      :error
                               :last_evaluated_at (mi/now)}))))))))

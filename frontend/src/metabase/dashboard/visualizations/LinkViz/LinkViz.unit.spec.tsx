@@ -16,7 +16,7 @@ import {
 } from "__support__/ui";
 import { createMockDashboardState } from "metabase/redux/store/mocks";
 import * as iframeUtils from "metabase/utils/iframe";
-import registerVisualizations from "metabase/visualizations/register";
+import { registerVisualizations } from "metabase/visualizations/register";
 import type {
   LinkCardSettings,
   Parameter,
@@ -361,6 +361,47 @@ describe("LinkViz", () => {
             name: "Question Uno",
             model: "card",
             display: "pie",
+          }),
+        },
+      });
+    });
+
+    it("should find Documents when searching (UXW-4440)", async () => {
+      const documentSearchDashcard = createMockLinkDashboardCard({
+        url: "Quarterly",
+      });
+      const searchDocumentItem = createMockCollectionItem({
+        id: 2,
+        model: "document",
+        name: "Quarterly Plan Doc",
+        collection: searchCardCollection,
+      });
+      setupSearchEndpoints([searchDocumentItem]);
+      setupUserRecipientsEndpoint({ users: [createMockUser()] });
+      setupCollectionByIdEndpoint({
+        collections: [searchCardCollection],
+      });
+
+      const { changeSpy } = setup({
+        isEditing: true,
+        dashcard: documentSearchDashcard,
+        settings:
+          documentSearchDashcard.visualization_settings as LinkCardVizSettings,
+      });
+
+      const searchInput = screen.getByPlaceholderText("https://example.com");
+
+      await userEvent.click(searchInput);
+      await waitForLoaderToBeRemoved();
+
+      await userEvent.click(await screen.findByText("Quarterly Plan Doc"));
+
+      expect(changeSpy).toHaveBeenCalledWith({
+        link: {
+          entity: expect.objectContaining({
+            id: 2,
+            name: "Quarterly Plan Doc",
+            model: "document",
           }),
         },
       });

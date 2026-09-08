@@ -66,7 +66,8 @@
 (defn- bookmarks-union-query
   [user-id]
   (let [as-null (when (= (mdb/db-type) :postgres) (h2x/->integer nil))
-        base-queries [{:select [:card_id
+        base-queries [^:allow-subquery
+                      {:select [:card_id
                                 [as-null :dashboard_id]
                                 [as-null :collection_id]
                                 [as-null :document_id]
@@ -75,6 +76,7 @@
                                 :created_at]
                        :from   [:card_bookmark]
                        :where  [:= :user_id user-id]}
+                      ^:allow-subquery
                       {:select [[as-null :card_id]
                                 :dashboard_id
                                 [as-null :collection_id]
@@ -84,6 +86,7 @@
                                 :created_at]
                        :from   [:dashboard_bookmark]
                        :where  [:= :user_id user-id]}
+                      ^:allow-subquery
                       {:select [[as-null :card_id]
                                 [as-null :dashboard_id]
                                 :collection_id
@@ -93,7 +96,9 @@
                                 :created_at]
                        :from   [:collection_bookmark]
                        :where [:= :user_id user-id]}]]
+    ^:allow-subquery
     {:union-all (conj base-queries
+                      ^:allow-subquery
                       {:select [[as-null :card_id]
                                 [as-null :dashboard_id]
                                 [as-null :collection_id]
@@ -128,7 +133,7 @@
                        [:document.archived (mdb/qualify :model/Document :archived)]]
         left-joins [[:report_card :card] [:= :bookmark.card_id :card.id]
                     [:report_dashboard :dashboard]          [:= :bookmark.dashboard_id :dashboard.id]
-             ;; use of [[h2x/identifier]] here is a workaround for https://github.com/seancorfield/honeysql/issues/450
+                    ;; use of [[h2x/identifier]] here is a workaround for https://github.com/seancorfield/honeysql/issues/450
                     [:collection :collection]               [:in :collection.id [(h2x/identifier :field :bookmark :collection_id)
                                                                                  (h2x/identifier :field :dashboard :collection_id)]]
                     [:bookmark_ordering :bookmark_ordering] [:and
@@ -146,8 +151,8 @@
            :left-join left-joins
            :where where-conditions
            :order-by  [[:bookmark_ordering.ordering (case (mdb/db-type)
-                                                    ;; NULLS LAST is not supported by MySQL, but this is default
-                                                    ;; behavior for MySQL anyway
+                                                      ;; NULLS LAST is not supported by MySQL, but this is default
+                                                      ;; behavior for MySQL anyway
                                                       (:postgres :h2) :asc-nulls-last
                                                       :mysql          :asc)]
                        [:created_at :desc]]})

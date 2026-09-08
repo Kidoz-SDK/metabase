@@ -1,4 +1,5 @@
 (ns metabase.query-processor.preprocess-test
+  {:clj-kondo/config '{:linters {:deprecated-var {:exclude {metabase.test.data/mbql-query {:namespaces [metabase.query-processor.preprocess-test]}}}}}}
   (:require
    [clojure.string :as str]
    [clojure.test :refer :all]
@@ -636,3 +637,8 @@
                     :lib/source-column-alias  "count"
                     :lib/desired-column-alias "count"}]
                   (qp.preprocess/query->expected-cols query))))))))
+
+(deftest ^:parallel remove-internal-keys-test
+  (testing "an internal namespaced key supplied in an incoming query does not survive preprocessing"
+    (is (not (contains? (qp.preprocess/preprocess (assoc (mt/mbql-query venues) :a/b 1))
+                        :a/b)))))

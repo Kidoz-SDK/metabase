@@ -2,6 +2,7 @@ import crossfilter from "crossfilter";
 import * as d3 from "d3";
 import _ from "underscore";
 
+import { data_image_uri_pattern } from "cljs/metabase.util.markdown.image";
 import { isNotNull } from "metabase/utils/types";
 import { getColumnKey } from "metabase-lib/v1/queries/utils/column-key";
 import {
@@ -33,7 +34,7 @@ const SPLIT_AXIS_MAX_DEPTH = 8;
 // NOTE Atte Keinänen 8/3/17: Moved from settings.js because this way we
 // are able to avoid circular dependency errors in e2e tests
 export function columnsAreValid(
-  colNames: (string | undefined)[] | undefined,
+  colNames: (string | null | undefined)[] | undefined,
   data: DatasetData,
   filter: (column: DatasetColumn) => boolean = () => true,
 ): boolean {
@@ -563,5 +564,4 @@ export const segmentIsValid = (
   return allowOpenEnded ? hasMin || hasMax : hasMin && hasMax;
 };
 
-export const DATA_IMAGE_URI_PATTERN =
-  /^data:image\/(png|jpeg|jpg|gif|svg\+xml|webp);base64,/i;
+export const DATA_IMAGE_URI_PATTERN: RegExp = data_image_uri_pattern;

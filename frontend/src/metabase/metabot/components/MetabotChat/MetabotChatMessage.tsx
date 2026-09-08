@@ -27,11 +27,10 @@ import {
   Flex,
   type FlexProps,
   Icon,
-  type IconName,
   Text,
   Tooltip,
 } from "metabase/ui";
-import type { MetabotFeedback } from "metabase-types/api";
+import type { IconName, MetabotFeedback } from "metabase-types/api";
 
 import { AIMarkdown } from "../AIMarkdown/AIMarkdown";
 
@@ -46,6 +45,7 @@ const isUserVisibleDataPart = (part: MetabotDataPart): boolean =>
     .with({ type: "transform_suggestion" }, () => true)
     .with({ type: "navigate_to" }, () => true)
     .with({ type: "code_edit" }, () => true)
+    .with({ type: "generated_entity" }, () => true)
     .with({ type: "adhoc_viz" }, () => false)
     .with({ type: "static_viz" }, () => false)
     .exhaustive();
@@ -159,7 +159,7 @@ const FeedbackButton = forwardRef<HTMLButtonElement, FeedbackButtonProps>(
         <Icon
           name={icon}
           size="1rem"
-          c={hasBeenClicked ? "brand" : "currentColor"}
+          c={hasBeenClicked ? "core-brand" : "currentColor"}
         />
       </ActionIcon>
     );
@@ -172,7 +172,6 @@ interface AgentMessageProps extends Omit<BaseMessageProps, "message"> {
   readonly: boolean;
   onRetry?: (messageId: string) => void;
   getCopyText: () => string;
-  showFeedbackButtons: boolean;
   setFeedbackMessage?: (data: { messageId: string; positive: boolean }) => void;
   submittedFeedback: "positive" | "negative" | undefined;
   onInternalLinkClick?: (link: string) => void;
@@ -185,7 +184,6 @@ export const AgentMessage = ({
   readonly,
   getCopyText,
   onRetry,
-  showFeedbackButtons,
   setFeedbackMessage,
   submittedFeedback,
   onInternalLinkClick,
@@ -193,11 +191,7 @@ export const AgentMessage = ({
   ...props
 }: AgentMessageProps) => {
   const messageId = "externalId" in message ? (message.externalId ?? "") : "";
-  const canGiveFeedback = !!(
-    showFeedbackButtons &&
-    setFeedbackMessage &&
-    messageId
-  );
+  const canGiveFeedback = !!(setFeedbackMessage && messageId);
   const clipboard = useClipboard({ timeout: 2000 });
 
   return (
@@ -295,15 +289,15 @@ const AgentTurnAlert = ({
     direction="column"
     gap="xs"
     p="sm"
-    bd="1px solid var(--mb-color-border)"
+    bd="1px solid var(--mb-color-border-neutral)"
     bdrs="sm"
     data-testid="metabot-chat-message-turn-alert"
-    bg="background-primary"
+    bg="background_page-primary"
   >
     <Flex align="center" gap="sm">
       <Icon
         name={variant === "error" ? "warning" : "info"}
-        c={variant === "error" ? "error" : "text-secondary"}
+        c={variant === "error" ? "feedback-negative" : "text-secondary"}
         size="1rem"
         flex="0 0 auto"
       />
@@ -416,7 +410,6 @@ export const Messages = ({
   isDoingScience,
   debug,
   readonly = false,
-  showFeedbackButtons = false,
   onInternalLinkClick,
 }: {
   messages: MetabotChatMessage[];
@@ -424,7 +417,6 @@ export const Messages = ({
   isDoingScience: boolean;
   debug: boolean;
   readonly?: boolean;
-  showFeedbackButtons?: boolean;
   onInternalLinkClick?: (navigateToPath: string) => void;
 }) => {
   const visibleMessages = useMemo(
@@ -474,17 +466,6 @@ export const Messages = ({
     [messages],
   );
 
-  const setFeedbackModal = useCallback(
-    (data: { messageId: string; positive: boolean } | undefined) => {
-      if (!showFeedbackButtons) {
-        return;
-      }
-
-      setFeedbackState((prev) => ({ ...prev, modal: data }));
-    },
-    [showFeedbackButtons],
-  );
-
   return (
     <>
       {visibleMessages.map((message, index) => {
@@ -498,8 +479,9 @@ export const Messages = ({
             readonly={readonly}
             onRetry={onRetryMessage}
             getCopyText={() => getAgentReplyCopyText(message.id)}
-            showFeedbackButtons={showFeedbackButtons}
-            setFeedbackMessage={setFeedbackModal}
+            setFeedbackMessage={(data) =>
+              setFeedbackState((prev) => ({ ...prev, modal: data }))
+            }
             submittedFeedback={
               "externalId" in message && message.externalId
                 ? feedbackState.submitted[message.externalId]
@@ -521,7 +503,9 @@ export const Messages = ({
       {feedbackState.modal && (
         <MetabotFeedbackModal
           {...feedbackState.modal}
-          onClose={() => setFeedbackModal(undefined)}
+          onClose={() =>
+            setFeedbackState((prev) => ({ ...prev, modal: undefined }))
+          }
           onSubmit={submitFeedback}
         />
       )}

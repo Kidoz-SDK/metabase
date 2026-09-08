@@ -1,4 +1,3 @@
-import type { FocusEvent } from "react";
 import { t } from "ttag";
 
 import {
@@ -26,14 +25,8 @@ export const CurrencyPicker = ({
   comboboxProps,
   value,
   onChange,
-  onFocus,
   ...props
 }: Props) => {
-  const handleFocus = (event: FocusEvent<HTMLInputElement>) => {
-    event.target.select();
-    onFocus?.(event);
-  };
-
   return (
     <Select
       comboboxProps={{
@@ -60,7 +53,7 @@ export const CurrencyPicker = ({
               <span>{item.option.label}</span>
 
               <Text
-                c="text-tertiary"
+                c="text-disabled"
                 className={S.symbol}
                 flex="0 0 auto"
                 lh="1rem"
@@ -73,7 +66,7 @@ export const CurrencyPicker = ({
       }}
       rightSection={
         <Flex align="center" gap="xs" pos="relative">
-          <Text c="text-tertiary" pos="absolute" px="sm" right="100%">
+          <Text c="text-disabled" pos="absolute" px="sm" right="100%">
             {SYMBOLS[value]}
           </Text>
 
@@ -83,7 +76,6 @@ export const CurrencyPicker = ({
       searchable
       value={value}
       onChange={(value) => onChange(value)}
-      onFocus={handleFocus}
       {...props}
     />
   );

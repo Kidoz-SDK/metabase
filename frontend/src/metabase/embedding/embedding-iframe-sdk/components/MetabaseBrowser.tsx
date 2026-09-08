@@ -92,7 +92,7 @@ export function MetabaseBrowser({ settings }: MetabaseBrowserProps) {
               withDownloads
               isSaveEnabled={!isReadOnly}
               entityTypes={settings.dataPickerEntityTypes}
-              targetCollection={targetCollection}
+              initialCollection={targetCollection}
             />
           </Box>
         ))
@@ -166,6 +166,7 @@ export function MetabaseBrowser({ settings }: MetabaseBrowserProps) {
               collectionId={view.id}
               visibleColumns={settings.collectionVisibleColumns}
               visibleEntityTypes={settings.collectionEntityTypes}
+              showDashboardQuestions={settings.collectionShowDashboardQuestions}
               pageSize={settings.collectionPageSize}
               onClick={(item) => {
                 const type = match<string, SdkBreadcrumbItemType>(item.model)

@@ -4,6 +4,7 @@
    [metabase.api.common :as api]
    [metabase.api.macros :as api.macros]
    [metabase.collections.models.collection :as collection]
+   [metabase.lib-be.schema :as lib-be.schema]
    [metabase.lib-metric.core :as lib-metric]
    [metabase.lib-metric.schema :as lib-metric.schema]
    [metabase.metrics.core :as metrics]
@@ -36,9 +37,9 @@
   [:merge
    ::Metric
    [:map
-    [:dimensions           {:optional true} [:maybe [:sequential :map]]]
-    [:dimension_mappings   {:optional true} [:maybe [:sequential :map]]]
-    [:dataset_query        {:optional true} :map]
+    [:dimensions           {:optional true} [:maybe [:sequential ms/Map]]]
+    [:dimension_mappings   {:optional true} [:maybe [:sequential ms/Map]]]
+    [:dataset_query        {:optional true} ::lib-be.schema/maybe-legacy-query]
     [:database_id          {:optional true} [:maybe ms/PositiveInt]]
     [:result_column_name   {:optional true} [:maybe :string]]]])
 
@@ -187,6 +188,15 @@
      :projections       (or projections [])
      :metadata-provider provider}))
 
+(defn- with-metric-exec-info
+  "Attach `:executed-by`/`:context` to a metric-plan MBQL query so that
+  [[metabase.query-processor.middleware.process-userland-query]] will write a
+  `QueryExecution` row. Without this, the middleware logs
+  \"Cannot save QueryExecution, missing :context\" and skips the insert."
+  [query]
+  (update query :info merge {:executed-by api/*current-user-id*
+                             :context     :metric}))
+
 (defn- execute-leaf-queries
   "Execute all leaf queries in parallel, collecting results eagerly.
    Must be called OUTSIDE streaming context to avoid JSON writer conflicts.
@@ -194,7 +204,7 @@
   [leaves]
   (let [uuid->future (into {}
                            (map (fn [[uuid leaf-plan]]
-                                  [uuid (future (qp/process-query (qp/userland-query (:leaf/mbql leaf-plan))))]))
+                                  [uuid (future (qp/process-query (qp/userland-query (with-metric-exec-info (:leaf/mbql leaf-plan)))))]))
                            leaves)]
     (into {}
           (map (fn [[uuid f]] [uuid @f]))
@@ -226,7 +236,7 @@
         plan       (lib-metric/->query-plan definition {:limit 10000})]
     (if (= :leaf (:plan/type plan))
       (qp.streaming/streaming-response [rff :api]
-        (qp/process-query (qp/userland-query (:plan/mbql plan)) rff))
+        (qp/process-query (qp/userland-query (with-metric-exec-info (:plan/mbql plan))) rff))
       ;; Arithmetic: execute leaf queries BEFORE streaming to avoid JSON writer conflicts
       (let [uuid->result (execute-leaf-queries (:plan/leaves plan))]
         (qp.streaming/streaming-response [rff :api]
@@ -250,7 +260,7 @@
    {:keys [definition]} :- ::DatasetRequest]
   (let [definition (from-api-definition (lib-metric/metadata-provider) definition)
         plan       (lib-metric/->query-plan definition {:limit 100 :values-only true})
-        result     (qp/process-query (qp/userland-query (:plan/mbql plan)))
+        result     (qp/process-query (qp/userland-query (with-metric-exec-info (:plan/mbql plan))))
         col        (first (get-in result [:data :cols]))
         values     (mapv first (get-in result [:data :rows]))]
     {:values values

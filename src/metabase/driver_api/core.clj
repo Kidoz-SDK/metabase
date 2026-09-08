@@ -101,6 +101,7 @@
  lib.metadata/transforms
  lib.schema.common/instance-of-class
  lib.schema.temporal-bucketing/date-bucketing-units
+ lib.schema.temporal-bucketing/datetime-interval-units
  lib.types.isa/temporal?
  match/match-one
  match/match-many
@@ -125,14 +126,11 @@
  logger/level-enabled?
  mbql.u/aggregation-at-index
  mbql.u/assoc-field-options
- mbql.u/desugar-filter-clause
  mbql.u/expression-with-name
  mbql.u/field-options
- mbql.u/negate-filter-clause
  mbql.u/normalize-token
  mbql.u/query->max-rows-limit
  mbql.u/query->source-table-id
- mbql.u/simplify-compound-filter
  mbql.u/update-field-options
  mdb/clob->str
  mdb/data-source
@@ -167,14 +165,14 @@
  qp.util.transformations.nest-breakouts/nest-breakouts-in-stages-with-window-aggregation
  qp.util/default-query->remark
  qp.util/query->remark
- qp.wrap-value-literals/unwrap-value-literal
- qp.wrap-value-literals/wrap-value-literals-in-mbql
+ qp.wrap-value-literals/wrap-value-literals-in-mbql5
  qp.writeback/execute-write-sql!
  qp/process-query
  secrets/clean-secret-properties-from-details
  secrets/uploaded-base-64-prefix-pattern
  setting/defsetting
  sync-util/name-for-logging
+ sync-util/reducible-sync-tables
  system/site-uuid
  upload.db/current-database)
 
@@ -196,12 +194,15 @@
 
 (p/import-fn lib/unique-name-generator-with-options unique-name-generator)
 
+(p/import-def qp.error-type/connection-pool-checkout-queue-full qp.error-type.connection-pool-checkout-queue-full)
+(p/import-def qp.error-type/connection-pool-checkout-timeout qp.error-type.connection-pool-checkout-timeout)
 (p/import-def qp.error-type/db qp.error-type.db)
 (p/import-def qp.error-type/driver qp.error-type.driver)
 (p/import-def qp.error-type/invalid-parameter qp.error-type.invalid-parameter)
 (p/import-def qp.error-type/invalid-query qp.error-type.invalid-query)
 (p/import-def qp.error-type/missing-required-parameter qp.error-type.missing-required-parameter)
 (p/import-def qp.error-type/qp qp.error-type.qp)
+(p/import-def qp.error-type/unable-to-acquire-connection qp.error-type.unable-to-acquire-connection)
 (p/import-def qp.error-type/unsupported-feature qp.error-type.unsupported-feature)
 
 (def schema.common.non-blank-string
@@ -342,7 +343,7 @@
 
 (def MBQLQuery
   "Schema for a legacy MBQL inner query."
-  ::mbql.s/MBQLQuery)
+  ::mbql.s/MBQLInnerQuery)
 
 (def Join
   "Schema for a legacy MBQL join."

@@ -1,5 +1,6 @@
 (ns metabase.measures.api-test
   "Tests for /api/measure endpoints."
+  {:clj-kondo/config '{:linters {:deprecated-var {:exclude {metabase.test.data/mbql-query {:namespaces [metabase.measures.api-test]}}}}}}
   (:require
    [clojure.test :refer :all]
    [metabase.api.response :as api.response]
@@ -39,7 +40,6 @@
 (deftest authentication-test
   (is (= (get api.response/response-unauthentic :body)
          (client/client :get 401 "measure")))
-
   (is (= (get api.response/response-unauthentic :body)
          (client/client :put 401 "measure/13"))))
 
@@ -49,30 +49,28 @@
   (testing "POST /api/measure"
     (testing "Test security. Requires superuser perms."
       (is (= "You don't have permissions to do that."
-             (mt/user-http-request :rasta :post 403 "measure" {:name       "abc"
-                                                               :table_id   (mt/id :venues)
-                                                               :definition {}}))))))
+             (mt/user-http-request :rasta :post 403 "measure"
+                                   {:name       "abc"
+                                    :table_id   (mt/id :venues)
+                                    :definition (mbql5-measure-definition (mt/id :venues) (mt/id :venues :price))}))))))
 
 (deftest create-measure-input-validation-test
   (testing "POST /api/measure"
     (is (=? {:errors {:name "value must be a non-blank string."}}
             (mt/user-http-request :crowberto :post 400 "measure" {})))
-
     (is (=? {:errors {:table_id "value must be an integer greater than zero."}}
             (mt/user-http-request :crowberto :post 400 "measure" {:name "abc"})))
-
     (is (=? {:errors {:table_id "value must be an integer greater than zero."}}
             (mt/user-http-request :crowberto :post 400 "measure" {:name     "abc"
                                                                   :table_id "foobar"})))
-
-    (is (=? {:errors {:definition "Value must be a map."}}
+    (is (=? {:errors {:definition "value must be a valid MBQL query with a source table."}}
             (mt/user-http-request :crowberto :post 400 "measure" {:name     "abc"
                                                                   :table_id 123})))
-
-    (is (=? {:errors {:definition "Value must be a map."}}
-            (mt/user-http-request :crowberto :post 400 "measure" {:name       "abc"
-                                                                  :table_id   123
-                                                                  :definition "foobar"})))))
+    (testing "a non-map definition is rejected while decoding, so the body is the message rather than :errors"
+      (is (=? "value must be a valid MBQL query."
+              (mt/user-http-request :crowberto :post 400 "measure" {:name       "abc"
+                                                                    :table_id   123
+                                                                    :definition "foobar"}))))))
 
 (deftest create-measure-test
   (testing "POST /api/measure"
@@ -101,22 +99,19 @@
         (is (= "You don't have permissions to do that."
                (mt/user-http-request :rasta :put 403 (str "measure/" (:id measure))
                                      {:name             "abc"
-                                      :definition       {}
+                                      :definition       (mbql5-measure-definition (mt/id :venues) (mt/id :venues :price))
                                       :revision_message "something different"})))))))
 
 (deftest update-input-validation-test
   (testing "PUT /api/measure/:id"
     (is (=? {:errors {:name "nullable value must be a non-blank string."}}
             (mt/user-http-request :crowberto :put 400 "measure/1" {:name "" :revision_message "abc"})))
-
     (is (=? {:errors {:revision_message "value must be a non-blank string."}}
             (mt/user-http-request :crowberto :put 400 "measure/1" {:name "abc"})))
-
     (is (=? {:errors {:revision_message "value must be a non-blank string."}}
             (mt/user-http-request :crowberto :put 400 "measure/1" {:name             "abc"
                                                                    :revision_message ""})))
-
-    (is (=? {:errors {:definition "nullable map"}}
+    (is (=? "value must be a valid MBQL query."
             (mt/user-http-request :crowberto :put 400 "measure/1" {:name             "abc"
                                                                    :revision_message "123"
                                                                    :definition       "foobar"})))))
@@ -184,6 +179,30 @@
         (mt/with-no-data-perms-for-all-users!
           (is (= "You don't have permissions to do that."
                  (mt/user-http-request :rasta :get 403 (str "measure/" (u/the-id measure))))))))))
+
+(deftest data-analyst-readonly-measure-access-test
+  (testing "a data-analyst role (manage-table-metadata, not superuser) can read but not write measures
+           without unrestricted view-data on the underlying table"
+    (mt/with-no-data-perms-for-all-users!
+      (mt/with-temp [:model/Measure {measure-id :id} {:table_id   (mt/id :venues)
+                                                      :definition (mbql5-measure-definition (mt/id :venues) (mt/id :venues :price))}]
+        (mt/with-data-analyst-role! (mt/user->id :lucky)
+          (testing "GET /api/measure/:id succeeds"
+            (is (=? {:id measure-id}
+                    (mt/user-http-request :lucky :get 200 (str "measure/" measure-id)))))
+          (testing "GET /api/measure (list) succeeds and includes the measure"
+            (is (some #(= measure-id (:id %))
+                      (mt/user-http-request :lucky :get 200 "measure/"))))
+          (testing "POST /api/measure is still blocked"
+            (is (= "You don't have permissions to do that."
+                   (mt/user-http-request :lucky :post 403 "measure"
+                                         {:name       "New Measure"
+                                          :table_id   (mt/id :venues)
+                                          :definition (mbql5-measure-definition (mt/id :venues) (mt/id :venues :price))}))))
+          (testing "PUT /api/measure/:id is still blocked"
+            (is (= "You don't have permissions to do that."
+                   (mt/user-http-request :lucky :put 403 (str "measure/" measure-id)
+                                         {:name "Updated Name" :revision_message "attempted edit"})))))))))
 
 (deftest fetch-measure-test
   (testing "GET /api/measure/:id"
@@ -283,15 +302,13 @@
 (deftest api-accepts-mbql4-on-post-test
   (testing "POST /api/measure accepts MBQL4 definitions and returns MBQL5"
     (mt/with-model-cleanup [:model/Measure]
-      (testing "MBQL4 fragment format"
-        (let [response (mt/user-http-request
-                        :crowberto :post 200 "measure"
-                        {:name       "Fragment Measure"
-                         :table_id   (mt/id :venues)
-                         :definition (mbql4-fragment-definition (mt/id :venues) [[:count]])})]
-          (is (some? (:id response)))
-          (is (mbql5-definition? (:definition response))
-              "Returned definition should be MBQL5")))
+      (testing "an MBQL4 fragment is rejected with the specific normalization error"
+        (is (= "Query must include :lib/type or :type"
+               (mt/user-http-request
+                :crowberto :post 400 "measure"
+                {:name       "Fragment Measure"
+                 :table_id   (mt/id :venues)
+                 :definition (mbql4-fragment-definition (mt/id :venues) [[:count]])}))))
       (testing "MBQL4 full query format"
         (let [response (mt/user-http-request
                         :crowberto :post 200 "measure"
@@ -306,14 +323,12 @@
   (testing "PUT /api/measure/:id accepts MBQL4 definitions and returns MBQL5"
     (mt/with-temp [:model/Measure {measure-id :id} {:table_id   (mt/id :venues)
                                                     :definition (mbql5-measure-definition (mt/id :venues) (mt/id :venues :price))}]
-      (testing "MBQL4 fragment format"
-        (let [response (mt/user-http-request
-                        :crowberto :put 200 (str "measure/" measure-id)
-                        {:revision_message "Update with fragment"
-                         :definition       (mbql4-fragment-definition (mt/id :venues) [[:count]])})]
-          (is (= measure-id (:id response)))
-          (is (mbql5-definition? (:definition response))
-              "Returned definition should be MBQL5")))
+      (testing "an MBQL4 fragment is rejected -- see `api-accepts-mbql4-on-post-test`"
+        (is (= "Query must include :lib/type or :type"
+               (mt/user-http-request
+                :crowberto :put 400 (str "measure/" measure-id)
+                {:revision_message "Update with fragment"
+                 :definition       (mbql4-fragment-definition (mt/id :venues) [[:count]])}))))
       (testing "MBQL4 full query format"
         (let [response (mt/user-http-request
                         :crowberto :put 200 (str "measure/" measure-id)
@@ -330,7 +345,7 @@
                               :crowberto :post 200 "measure"
                               {:name       "Venue Count"
                                :table_id   (mt/id :venues)
-                               :definition (mbql4-fragment-definition (mt/id :venues) [[:count]])})
+                               :definition (legacy-mbql-measure-definition (mt/id) (mt/id :venues) [[:count]])})
             measure-query (mt/mbql-query venues {:aggregation [[:measure measure-id]]})
             direct-query  (mt/mbql-query venues {:aggregation [[:count]]})]
         (is (= (mt/rows (qp/process-query direct-query))

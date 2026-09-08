@@ -2,8 +2,8 @@ import type { Location } from "history";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "ttag";
 
+import { AdminSettingsLayout } from "metabase/admin/components/AdminLayout/AdminSettingsLayout";
 import { useSyncSecurityAdvisoriesMutation } from "metabase/api";
-import { AdminSettingsLayout } from "metabase/common/components/AdminLayout/AdminSettingsLayout";
 import { EmptyState } from "metabase/common/components/EmptyState";
 import { useSetting, useToast } from "metabase/common/hooks";
 import { useIsSmallScreen } from "metabase/common/hooks/use-is-small-screen";
@@ -81,7 +81,7 @@ export function SecurityCenterPage({ location }: SecurityCenterPageProps = {}) {
     } catch {
       sendToast({
         icon: "warning_triangle_filled",
-        iconColor: "warning",
+        iconColor: "feedback-warning",
         message: t`Failed to check for security advisories`,
       });
     }
@@ -108,7 +108,7 @@ export function SecurityCenterPage({ location }: SecurityCenterPageProps = {}) {
       setIsPolling(false);
       sendToast({
         icon: "warning_triangle_filled",
-        iconColor: "warning",
+        iconColor: "feedback-warning",
         message: t`Security advisory check is taking longer than expected. Results will appear when ready.`,
       });
     }

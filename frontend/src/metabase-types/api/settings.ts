@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
 
-import type { SdkIframeEmbedSetupSettings } from "metabase/embedding/embedding-iframe-sdk-setup/types";
 import type { CurrencyStyle } from "metabase/utils/formatting";
 
 import type { InputSettingType } from "./actions";
 import type { DashboardId } from "./dashboard";
 import type { DatabaseId } from "./database";
+import type { SdkIframeEmbedSetupTheme } from "./embedding-theme";
 import type { GroupId } from "./group";
 import type { MetabotLimitPeriod, MetabotLimitType } from "./metabot";
 import type { NotificationRecipient } from "./notification";
@@ -112,6 +112,7 @@ export interface Engine {
   "details-fields"?: DatabaseFieldOrGroup[];
   source: EngineSource;
   "superseded-by": string | null;
+  "creatable?"?: boolean;
   "extra-info": {
     "db-routing-info": {
       text: string;
@@ -254,6 +255,7 @@ export type GdrivePayload = {
 const tokenStatusFeatures = [
   "advanced-config",
   "advanced-permissions",
+  "attached-dwh",
   "audit-app",
   "cache-granular-controls",
   "collection-cleanup",
@@ -333,6 +335,8 @@ export const tokenFeatures = [
   "cloud_custom_smtp",
   "content_translation",
   "content_verification",
+  "custom-viz",
+  "custom-viz-available",
   "data-complexity-score",
   "disable_password_login",
   "embedding",
@@ -342,6 +346,7 @@ export const tokenFeatures = [
   "offer-metabase-ai-managed",
   "metabase-ai-managed",
   "metabot-v3",
+  "multi-factor-auth",
   "official_collections",
   "sandboxes",
   "scim",
@@ -361,9 +366,6 @@ export const tokenFeatures = [
   "upload_management",
   "collection_cleanup",
   "cache_preemptive",
-  "ai_sql_fixer",
-  "ai_sql_generation",
-  "ai_entity_analysis",
   "database_routing",
   "development_mode",
   "etl_connections",
@@ -371,15 +373,18 @@ export const tokenFeatures = [
   "table_data_editing",
   "remote_sync",
   "dependencies",
+  "schema-viewer",
   "semantic_search",
   "transforms-python",
   "transforms-basic",
   "library",
+  "library_retrieval",
   "support-users",
   "tenants",
   "writable_connection",
   "admin_security_center",
   "ai_controls",
+  "workspaces",
 ] as const;
 
 export type TokenFeature = (typeof tokenFeatures)[number];
@@ -516,6 +521,7 @@ interface AdminSettings {
   "system-timezone"?: string;
   "embedding-homepage": EmbeddingHomepageStatus;
   "setup-license-active-at-setup": boolean;
+  "setup-embedding-autoenabled": boolean;
   "embedding-hub-test-embed-snippet-created": boolean;
   "embedding-hub-production-embed-snippet-created": boolean;
   "embedding-hub-sso-auth-manual-tested": boolean;
@@ -532,6 +538,14 @@ interface SettingsManagerSettings {
   "llm-anthropic-api-key"?: string | null;
   "llm-anthropic-api-base-url"?: string | null;
   "llm-openrouter-api-key"?: string | null;
+  "llm-zai-api-key"?: string | null;
+  "llm-mistral-api-key"?: string | null;
+  "llm-azure-api-key"?: string | null;
+  "llm-azure-api-base-url"?: string | null;
+  "llm-bedrock-access-key-id"?: string | null;
+  "llm-bedrock-secret-access-key"?: string | null;
+  "llm-bedrock-region"?: string | null;
+  "llm-bedrock-session-token"?: string | null;
   "openai-api-key": string | null;
   "openai-available-models"?: OpenAiModel[];
   "openai-model": string | null;
@@ -546,10 +560,14 @@ type PrivilegedSettings = AdminSettings & SettingsManagerSettings;
 
 interface PublicSettings {
   "allowed-iframe-hosts": string;
+  "csp-img-allowed-hosts": string;
+  "csp-img-enabled": boolean;
   "ai-features-enabled?": boolean;
   "agent-api-enabled?": boolean;
   "analytics-uuid": string;
   "anon-tracking-enabled": boolean;
+  "metaplow-tracking-enabled": boolean;
+  "metaplow-url": string | null;
   "application-font": string;
   "application-font-files": FontFile[] | null;
   "application-name": string;
@@ -568,6 +586,7 @@ interface PublicSettings {
   "llm-metabot-configured?"?: boolean | null;
   "email-configured?": boolean;
   "embedding-app-origin": string | null;
+  "mfa-enforcement"?: "off" | "optional";
   "embedding-app-origins-sdk": string | null;
   "embedding-app-origins-interactive": string | null;
   "enable-password-login": boolean;
@@ -621,6 +640,7 @@ interface PublicSettings {
   "metabot-limit-unit": MetabotLimitType;
   "metabot-limit-reset-rate": MetabotLimitPeriod;
   "metabot-quota-reached-message": string | null;
+  "ai-usage-max-retention-days": number | null;
   "metabot-chat-system-prompt": string | null;
   "metabot-nlq-system-prompt": string | null;
   "metabot-sql-system-prompt": string | null;
@@ -639,6 +659,8 @@ interface PublicSettings {
   version: Version;
   "version-info-last-checked": string | null;
   "airgap-enabled": boolean;
+  "custom-viz-enabled": boolean;
+  "custom-viz-plugin-dev-mode-enabled": boolean;
   "non-table-chart-generated": boolean;
   "use-tenants": boolean;
 }
@@ -659,10 +681,12 @@ export type UserSettings = {
   "show-updated-permission-modal": boolean;
   "show-updated-permission-banner": boolean;
   "trial-banner-dismissal-timestamp"?: string | null;
-  "sdk-iframe-embed-setup-settings"?: Pick<
-    SdkIframeEmbedSetupSettings,
-    "theme" | "useExistingUserSession"
-  > | null;
+  // The persisted subset of the embed setup wizard's
+  // `SdkIframeEmbedSetupSettings` state.
+  "sdk-iframe-embed-setup-settings"?: {
+    theme?: SdkIframeEmbedSetupTheme;
+    useExistingUserSession?: boolean;
+  } | null;
   "color-scheme"?: string;
 };
 
@@ -690,10 +714,8 @@ export type UserSettings = {
  * Each new scope is more strict than the previous one.
  *
  * To further complicate things, there are two endpoints for fetching settings:
- *  - `GET /api/setting` that _can only be used by admins!_
- *  - `GET /api/session/properties` that can be used by any user, but some settings might be omitted (unavailable).
- *
- * SettingsApi will return `403` for non-admins, while SessionApi will return `200`!
+ *  - `GET /api/setting` that _can only be used by admins!_ — returns `403` for non-admins.
+ *  - `GET /api/session/properties` that can be used by any user (returns `200`), but some settings might be omitted (unavailable).
  */
 export type Settings = InstanceSettings &
   PublicSettings &
@@ -748,6 +770,8 @@ export interface EnterpriseSettings extends Settings {
   "llm-openai-model"?: string;
   "llm-metabot-configured?"?: boolean | null;
   "llm-openrouter-api-key"?: string | null;
+  "llm-zai-api-key"?: string | null;
+  "llm-mistral-api-key"?: string | null;
   "session-timeout": TimeoutValue | null;
   "search-engine": SearchEngineSettingValue | null;
   "scim-enabled"?: boolean | null;

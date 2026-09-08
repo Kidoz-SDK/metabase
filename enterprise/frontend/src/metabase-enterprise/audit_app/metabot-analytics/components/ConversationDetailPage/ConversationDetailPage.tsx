@@ -2,11 +2,11 @@ import { useMemo } from "react";
 import type { WithRouterProps } from "react-router";
 import { t } from "ttag";
 
+import { MetabotAdminLayout } from "metabase/admin/ai/MetabotAdminLayout";
 import { skipToken, useGetAdhocQueryMetadataQuery } from "metabase/api";
 import { CodeEditor } from "metabase/common/components/CodeEditor";
 import { ExternalLink } from "metabase/common/components/ExternalLink";
 import { LoadingAndErrorWrapper } from "metabase/common/components/LoadingAndErrorWrapper";
-import { MetabotAdminLayout } from "metabase/metabot/components/MetabotAdmin/MetabotAdminLayout";
 import {
   AgentMessage,
   Messages,
@@ -198,7 +198,12 @@ function FeedbackCard({
           />
           <Text fw={700}>{feedback.positive ? t`Positive` : t`Negative`}</Text>
           {!feedback.positive && feedback.issue_type && (
-            <Badge variant="light" bg="background-error" c="error" ml="xs">
+            <Badge
+              variant="light"
+              bg="background_surface-error"
+              c="feedback-negative"
+              ml="xs"
+            >
               {getIssueTypeLabel(feedback.issue_type)}
             </Badge>
           )}
@@ -215,12 +220,11 @@ function FeedbackCard({
             readonly
             hideActions
             getCopyText={noopGetCopyText}
-            showFeedbackButtons={false}
             submittedFeedback={undefined}
-            bg="background-secondary"
+            bg="background_page-secondary"
             p="md"
             pb="0"
-            bd="1px solid var(--mb-color-border)"
+            bd="1px solid var(--mb-color-border-neutral)"
             bdrs="1rem"
           />
         )}

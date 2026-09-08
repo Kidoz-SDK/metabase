@@ -61,6 +61,7 @@
    [goog.object :as gobject]
    [medley.core :as m]
    [metabase.analytics-interface.core :as analytics.interface]
+   [metabase.analytics.experiment]
    [metabase.analytics.impl]
    ^{:clj-kondo/ignore [:discouraged-namespace]} [metabase.legacy-mbql.normalize :as mbql.normalize]
    [metabase.lib.aggregation :as lib.aggregation]
@@ -98,8 +99,10 @@
 
 ;;; This ensures that all of metabase.lib.* is loaded, so all the `defmethod`s are properly registered.
 ;;; metabase.analytics.impl registers the CLJS reporter for [[metabase.analytics-interface.core]].
+;;; metabase.analytics.experiment wires the default experiment report fn.
 
 (comment lib.core/keep-me
+         metabase.analytics.experiment/keep-me
          metabase.analytics.impl/keep-me)
 
 ;; Expose for E2E testing
@@ -237,16 +240,16 @@
     (if (and
          (empty? (lib.core/aggregations a-query stage-number))
          (empty? (lib.core/breakouts a-query stage-number)))
-    ;; No extra stage needed with no aggregations.
+      ;; No extra stage needed with no aggregations.
       #js {:query      a-query
            :stageIndex stage-number}
-    ;; An extra stage is needed, so see if one already exists.
+      ;; An extra stage is needed, so see if one already exists.
       (if-let [next-stage (->> (lib.util/canonical-stage-index a-query stage-number)
                                (lib.util/next-stage-number a-query))]
-      ;; Already an extra stage, so use it.
+        ;; Already an extra stage, so use it.
         #js {:query      a-query
              :stageIndex next-stage}
-      ;; No new stage, so append one.
+        ;; No new stage, so append one.
         #js {:query      (lib.core/append-stage a-query)
              :stageIndex -1}))))
 
@@ -1786,10 +1789,10 @@
   > **Code health:** Healthy"
   [a-query stage-number expression-position]
   (lib.cache/side-channel-cache
-    ;; Caching is based on both the stage and expression position, since they can return different sets.
-    ;; TODO: Since these caches are mainly here to avoid expensively recomputing things in rapid succession, it would
-    ;; probably suffice to cache only the last position, and evict if it's different. But the lib.cache system doesn't
-    ;; support that currently.
+   ;; Caching is based on both the stage and expression position, since they can return different sets.
+   ;; TODO: Since these caches are mainly here to avoid expensively recomputing things in rapid succession, it would
+   ;; probably suffice to cache only the last position, and evict if it's different. But the lib.cache system doesn't
+   ;; support that currently.
    (keyword "expressionable-columns" (str "stage-" stage-number "-" expression-position)) a-query
    (fn [_]
      (to-array (lib.core/expressionable-columns a-query stage-number expression-position)))))
@@ -1807,10 +1810,10 @@
   > **Code health:** Healthy"
   [a-query stage-number expression-position]
   (lib.cache/side-channel-cache
-    ;; Caching is based on both the stage and expression position, since they can return different sets.
-    ;; TODO: Since these caches are mainly here to avoid expensively recomputing things in rapid succession, it would
-    ;; probably suffice to cache only the last position, and evict if it's different. But the lib.cache system doesn't
-    ;; support that currently.
+   ;; Caching is based on both the stage and expression position, since they can return different sets.
+   ;; TODO: Since these caches are mainly here to avoid expensively recomputing things in rapid succession, it would
+   ;; probably suffice to cache only the last position, and evict if it's different. But the lib.cache system doesn't
+   ;; support that currently.
    (keyword "aggregable-columns" (str "stage-" stage-number "-" expression-position)) a-query
    (fn [_]
      (to-array (lib.core/aggregable-columns a-query stage-number expression-position)))))
@@ -1997,37 +2000,48 @@
 (defn- remove-undefined-properties
   [obj]
   (cond-> obj
-    (object? obj) (gobject/filter (fn [e _ _] (not (undefined? e))))))
+    (object? obj) (gobject/filter (fn [v _k _object] (not (undefined? v))))))
 
 (defn- template-tags-js->cljs
-  [tags]
-  (-> tags
-      (gobject/map (fn [e _ _]
-                     (remove-undefined-properties e)))
-      js->clj
-      (update-vals (fn [tag]
-                     (-> tag
-                         (perf/update-keys keyword)
-                         (update :type keyword)
-                         (m/update-existing :widget-type #(some-> % keyword))
-                         (m/update-existing :dimension #(some-> % legacy-ref->mbql5)))))))
+  "Convert a JavaScript Object containing template `tags` to a ClojureScript sequence."
+  [tags-object]
+  (perf/mapv (fn [tag-name]
+               (let [tag-object (gobject/get tags-object tag-name)]
+                 (-> tag-object
+                     remove-undefined-properties
+                     js->clj
+                     ;; TODO (Cam 2026-07-09) why not just normalize template tags the same way we do everything else?
+                     ;; Not changing this now in case there's some sort of good reason for doing it manually
+                     (perf/update-keys keyword)
+                     (assoc :name tag-name) ; prefer the tag name used as a map key in case it's unset in the tag itself or differs
+                     (update :type keyword)
+                     (m/update-existing :widget-type #(some-> % keyword))
+                     (m/update-existing :dimension #(some-> % legacy-ref->mbql5)))))
+             (gobject/getKeys tags-object)))
+
+(defn- template-tag-cljs->js [tag]
+  (-> tag
+      (update :type name)
+      (m/update-existing :widget-type #(some-> % u/qualified-name))
+      (m/update-existing :dimension #(some-> % ref->legacy-ref))
+      (clj->js :keyword-fn u/qualified-name)))
 
 (defn- template-tags-cljs->js
+  "Convert a sequence of template `tags` to a JavaScript Object."
   [tags]
-  (-> tags
-      (update-vals (fn [tag]
-                     (-> tag
-                         (update :type name)
-                         (m/update-existing :widget-type #(some-> % u/qualified-name))
-                         (m/update-existing :dimension #(some-> % ref->legacy-ref)))))
-      (clj->js :keyword-fn u/qualified-name)))
+  (reduce
+   (fn [obj {tag-name :name, :as tag}]
+     (doto obj
+       (gobject/set (u/qualified-name tag-name) (template-tag-cljs->js tag))))
+   #js {}
+   tags))
 
 (defn ^:export with-template-tags
   "Updates the native first stage of `a-query`'s template tags to the provided `tags`.
 
   > **Code health:** Healthy"
-  [a-query tags]
-  (lib.core/with-template-tags a-query (template-tags-js->cljs tags)))
+  [a-query tags-object]
+  (lib.core/with-template-tags a-query (template-tags-js->cljs tags-object)))
 
 (defn ^:export raw-native-query
   "Returns the native query string for the native first stage of `a-query`.
@@ -2673,7 +2687,7 @@
    (lib.cache/side-channel-cache
     (keyword "can-save" card-type) a-query
     (fn [_]
-      (lib.core/can-save a-query (keyword card-type))))))
+      (lib.core/can-save? a-query (keyword card-type))))))
 
 (defn ^:export ensure-filter-stage
   "Adds an empty stage to `query` if its last stage contains both breakouts and aggregations.

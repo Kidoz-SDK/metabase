@@ -1,8 +1,8 @@
 import { createMockMetadata } from "__support__/metadata";
-import * as Lib from "metabase-lib";
 import {
   createMockColumn,
   createMockDatasetData,
+  createMockField,
 } from "metabase-types/api/mocks";
 import {
   ORDERS,
@@ -643,6 +643,9 @@ describe("Question", () => {
     it("should return the template tags of a native question", () => {
       const nativeQuestionWithTemplateTags = {
         ...native_orders_count_card,
+        param_fields: {
+          bbb: [createMockField({ id: PRODUCTS.CATEGORY })],
+        },
         dataset_query: {
           ...native_orders_count_card.dataset_query,
           native: {
@@ -741,46 +744,6 @@ describe("Question", () => {
           value: null,
         },
       ]);
-    });
-  });
-
-  describe("Question.prototype.convertParametersToMbql", () => {
-    it("should do nothing to a native question", () => {
-      expect(
-        native_orders_count_question._convertParametersToMbql({
-          isComposed: false,
-        }),
-      ).toBe(native_orders_count_question);
-    });
-
-    it("should convert a question with parameters into a new question with filters", () => {
-      const parameters = [
-        {
-          type: "string/starts-with",
-          name: "foo",
-          id: "foo_id",
-          target: ["dimension", ["field", PRODUCTS.CATEGORY, null]],
-        },
-        {
-          type: "string/=",
-          name: "bar",
-          id: "bar_id",
-          target: ["dimension", ["field", PRODUCTS.CATEGORY, null]],
-        },
-      ];
-
-      const question = base_question
-        .setParameters(parameters)
-        .setParameterValues({
-          foo_id: "abc",
-        });
-
-      const questionWithFilters = question._convertParametersToMbql({
-        isComposed: false,
-      });
-
-      expect(Lib.stageCount(questionWithFilters.query())).toBe(1);
-      expect(Lib.filters(questionWithFilters.query())).toHaveLength(1);
     });
   });
 
