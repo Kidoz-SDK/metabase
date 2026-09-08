@@ -2,7 +2,11 @@
 # STAGE 1: builder
 ###################
 
-FROM node:22-bullseye AS builder
+# Kidoz: upstream uses node:22-bullseye, but Debian 11 is EOL -- its Release files are no
+# longer re-signed, so apt rejects them as expired and the build fails. Bookworm (Debian 12)
+# is security-supported and Adoptium ships the same temurin-25-jdk for it. Revisit on the next
+# upstream merge: if upstream has moved off bullseye, prefer their base image.
+FROM node:22-bookworm AS builder
 
 ARG MB_EDITION=oss
 ARG VERSION=63.16
