@@ -812,6 +812,72 @@
                      {:description "Number of entries currently held in a monitored in-memory memoization cache."
                       :labels [:cache]})])
 
+(defn- mcp-collectors
+  "Metrics for the MCP endpoint (`/api/metabase-mcp`, `/api/mcp`). Recorded by [[metabase.mcp.metrics]]."
+  []
+  (let [;; 1ms -> 5 minutes; tool calls and queries are bounded by the 30s agent-api timeout and QP limits,
+        ;; but SSE-less long batches can run longer.
+        duration-buckets [1 10 50 100 250 500 1000 2500 5000 10000 30000 60000 120000 300000]]
+    [;; transport
+     (prometheus/counter :metabase-mcp/requests
+                         {:description "HTTP responses from the MCP endpoint by HTTP method, status code, and how the request authenticated (session, bearer, none)."
+                          :labels [:http-method :status :auth]})
+     (prometheus/counter :metabase-mcp/rpc-requests
+                         {:description "JSON-RPC messages handled by the MCP endpoint by method (initialize, tools/list, tools/call, resources/read, ping, ...) and status (ok, error, notification)."
+                          :labels [:rpc-method :status]})
+     (prometheus/counter :metabase-mcp/rpc-errors
+                         {:description "JSON-RPC error responses from the MCP endpoint by method and JSON-RPC error code."
+                          :labels [:rpc-method :code]})
+     (prometheus/histogram :metabase-mcp/rpc-duration-ms
+                           {:description "Duration in milliseconds of handling one JSON-RPC message, by method. For tools/call this includes the tool's execution."
+                            :labels [:rpc-method]
+                            :buckets duration-buckets})
+     (prometheus/histogram :metabase-mcp/batch-size
+                           {:description "Number of JSON-RPC messages carried by one MCP POST request."
+                            :buckets [1 2 3 5 10 20 50 100]})
+     (prometheus/counter :metabase-mcp/sessions-created
+                         {:description "MCP sessions created (successful initialize) by client name/version and user."
+                          :labels [:client-name :client-version :user-id]})
+     (prometheus/counter :metabase-mcp/sessions-deleted
+                         {:description "MCP sessions explicitly torn down by the client (DELETE)."})
+     (prometheus/gauge :metabase-mcp/sse-streams-active
+                       {:description "Server-sent-event keepalive streams (GET) currently open on the MCP endpoint."})
+     (prometheus/counter :metabase-mcp/resource-reads
+                         {:description "MCP resources/read calls by resource URI and status (ok, not-found, scope-denied). The URI is only recorded for successful reads."
+                          :labels [:uri :status]})
+     (prometheus/gauge :metabase-mcp/user-info
+                       {:description "Info metric (always 1) mapping an MCP user id to their email, for joining onto the user_id label of the other MCP metrics."
+                        :labels [:user-id :email]})
+     ;; tools
+     (prometheus/counter :metabase-mcp/tool-calls
+                         {:description "MCP tools/call invocations by tool name, status (ok, error), and the calling user."
+                          :labels [:tool :status :user-id]})
+     (prometheus/counter :metabase-mcp/tool-call-errors
+                         {:description "Failed MCP tool calls by tool and reason (unknown-tool, scope-denied, missing-extension, handle-not-found, exception, api-<http status>)."
+                          :labels [:tool :reason]})
+     (prometheus/histogram :metabase-mcp/tool-call-duration-ms
+                           {:description "Wall-clock duration in milliseconds of MCP tool calls, by tool."
+                            :labels [:tool]
+                            :buckets duration-buckets})
+     ;; queries
+     (prometheus/counter :metabase-mcp/queries
+                         {:description "Queries executed through MCP (query, execute_query, execute_sql, execute_question) by tool, database name, query type (mbql, native), QP status (completed, failed), and user."
+                          :labels [:tool :database :query-type :status :user-id]})
+     (prometheus/histogram :metabase-mcp/query-duration-ms
+                           {:description "Query-processor running time in milliseconds of queries executed through MCP, by tool and database."
+                            :labels [:tool :database]
+                            :buckets duration-buckets})
+     (prometheus/histogram :metabase-mcp/query-rows
+                           {:description "Rows returned by queries executed through MCP, by tool."
+                            :labels [:tool]
+                            :buckets [0 1 10 50 100 200 500 1000 2000 10000]})
+     (prometheus/counter :metabase-mcp/query-tables
+                         {:description "Tables (or MongoDB collections) touched by queries executed through MCP, by database, schema, table and user. Includes joins and the tables underneath referenced cards, models and metrics; one increment per table per query."
+                          :labels [:database :schema :table :user-id]})
+     (prometheus/counter :metabase-mcp/query-table-extraction-errors
+                         {:description "Queries executed through MCP whose tables could not be (fully) determined, by reason (query-build, native-parse, query-walk, card-lookup). The query itself is still counted in metabase_mcp_queries."
+                          :labels [:reason]})]))
+
 (defn- quartz-collectors
   []
   [(prometheus/counter :metabase-tasks/quartz-tasks-executed
@@ -864,6 +930,7 @@
                                 [@c3p0-collector
                                  @product-pull-collectors]
                                 (product-collectors)
+                                (mcp-collectors)
                                 (quartz-collectors)))]
     (when @jvm-hiccup-thread (@jvm-hiccup-thread))
     (reset! jvm-hiccup-thread

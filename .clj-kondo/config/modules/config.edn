@@ -1234,15 +1234,19 @@
            metabase.mcp.core
            metabase.mcp.init}
    :uses #{agent-api
+           analytics-interface
            api
            app-db
            config
+           lib
+           lib-be
            llm
            oauth-server
            request
            server
            session
            settings
+           sql-tools
            system
            util}}
 

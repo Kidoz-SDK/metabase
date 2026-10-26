@@ -10,6 +10,7 @@
    [metabase.api.macros.scope :as scope]
    [metabase.api.open-api :as open-api]
    [metabase.mcp.core :as mcp]
+   [metabase.mcp.metrics :as mcp.metrics]
    [metabase.mcp.resources :as mcp.resources]
    [metabase.mcp.session :as mcp.session]
    [metabase.mcp.tools :as mcp.tools]
@@ -52,8 +53,10 @@
   {:jsonrpc "2.0" :id id :error {:code code :message message}})
 
 (defn- handle-initialize [id params]
-  (when-let [client-info (:clientInfo params)]
-    (log/infof "MCP client connected: %s %s" (:name client-info) (:version client-info)))
+  (let [client-info (:clientInfo params)]
+    (when client-info
+      (log/infof "MCP client connected: %s %s" (:name client-info) (:version client-info)))
+    (mcp.metrics/record-session-created! client-info))
   (jsonrpc-response
    id
    {:protocolVersion protocol-version
@@ -93,6 +96,7 @@
     (if (or (not (string? uri)) (str/blank? uri))
       (jsonrpc-error id -32602 "Missing required parameter: uri")
       (let [result (mcp.resources/read-resource uri token-scopes {})]
+        (mcp.metrics/record-resource-read! uri (:status result))
         (case (:status result)
           (:not-found :scope-denied) (jsonrpc-error id -32602 "Resource not found")
           :ok                        (jsonrpc-response id {:contents (:contents result)}))))))
@@ -100,23 +104,31 @@
 (defn- handle-ping [id _params]
   (jsonrpc-response id {}))
 
+(def ^:private known-methods
+  "JSON-RPC methods this server handles. Anything else is recorded under the `unknown` method label so a client
+   probing random method names cannot inflate the metric series count."
+  #{"initialize" "notifications/initialized" "tools/list" "tools/call" "resources/list" "resources/read" "ping"})
+
 (defn- dispatch-request
   "Dispatch a single JSON-RPC request. Returns a response map or nil for notifications."
   [{:keys [id method params] :as _msg} session-id token-scopes]
-  (try
-    (case method
-      "notifications/initialized" nil
-      "tools/list"                (handle-tools-list id params session-id token-scopes)
-      "tools/call"                (handle-tools-call id params session-id token-scopes)
-      "resources/list"            (handle-resources-list id params token-scopes)
-      "resources/read"            (handle-resources-read id params token-scopes)
-      "ping"                      (handle-ping id params)
-      (if id
-        (jsonrpc-error id -32601 (str "Method not found: " method))
-        nil))
-    (catch Throwable e
-      (log/error "Error dispatching JSON-RPC method" method (ex-message e))
-      (jsonrpc-error id -32603 (or (ex-message e) "Internal error")))))
+  (mcp.metrics/timed-rpc
+   (if (contains? known-methods method) method "unknown")
+   (fn []
+     (try
+       (case method
+         "notifications/initialized" nil
+         "tools/list"                (handle-tools-list id params session-id token-scopes)
+         "tools/call"                (handle-tools-call id params session-id token-scopes)
+         "resources/list"            (handle-resources-list id params token-scopes)
+         "resources/read"            (handle-resources-read id params token-scopes)
+         "ping"                      (handle-ping id params)
+         (if id
+           (jsonrpc-error id -32601 (str "Method not found: " method))
+           nil))
+       (catch Throwable e
+         (log/error "Error dispatching JSON-RPC method" method (ex-message e))
+         (jsonrpc-error id -32603 (or (ex-message e) "Internal error")))))))
 
 ;;; ----------------------------------------------------- SSE ------------------------------------------------------
 
@@ -237,7 +249,8 @@
             supports-mcp-ui? (mcp-app-ui-capability? params)
             session-id       (mcp.session/create! user-id {:supports-mcp-ui?
                                                            supports-mcp-ui?})
-            init-response (handle-initialize (:id body) (:params body))]
+            init-response    (mcp.metrics/timed-rpc "initialize"
+                                                    #(handle-initialize (:id body) (:params body)))]
         (if (accepts-sse? request)
           (sse-response [init-response] {"Mcp-Session-Id" session-id})
           (json-response 200 init-response {"Mcp-Session-Id" session-id})))
@@ -248,6 +261,7 @@
         (if error
           error
           (let [messages  (if batch? body [body])
+                _         (mcp.metrics/record-batch-size! (count messages))
                 responses (into [] (keep #(dispatch-request % session-id (:token-scopes request))) messages)]
             (cond
               (empty? responses)
@@ -286,16 +300,20 @@
                    :status       200}
                   [os canceled-chan]
                    (let [writer (BufferedWriter. (OutputStreamWriter. os StandardCharsets/UTF_8))]
-                     (loop [last-hash (mcp.tools/tools-hash token-scopes)]
-                       (when-not (a/poll! canceled-chan)
-                         (.write writer ": keepalive\n\n")
-                         (.flush writer)
-                         (Thread/sleep 30000)
-                         (let [current-hash (mcp.tools/tools-hash token-scopes)]
-                           (when (not= current-hash last-hash)
-                             (.write writer ^String (sse-body [tools-list-changed-notification]))
-                             (.flush writer))
-                           (recur current-hash))))))]
+                     (mcp.metrics/sse-stream-opened!)
+                     (try
+                       (loop [last-hash (mcp.tools/tools-hash token-scopes)]
+                         (when-not (a/poll! canceled-chan)
+                           (.write writer ": keepalive\n\n")
+                           (.flush writer)
+                           (Thread/sleep 30000)
+                           (let [current-hash (mcp.tools/tools-hash token-scopes)]
+                             (when (not= current-hash last-hash)
+                               (.write writer ^String (sse-body [tools-list-changed-notification]))
+                               (.flush writer))
+                             (recur current-hash))))
+                       (finally
+                         (mcp.metrics/sse-stream-closed!)))))]
         (compojure.response/send* resp request respond raise)))))
 
 (defn- handle-delete
@@ -305,6 +323,7 @@
         {:keys [session-id error]} (require-valid-session user-id session-id-header)]
     (or error
         (do (mcp.session/delete! session-id user-id)
+            (mcp.metrics/record-session-deleted!)
             {:status 200 :headers {"Content-Type" "application/json"} :body ""}))))
 
 ;;; -------------------------------------------------- Throttling --------------------------------------------------
@@ -363,9 +382,14 @@
      (let [origin-error (validate-origin request)
            bearer-token (oauth-server/extract-bearer-token request)
            session-auth api/*current-user-id*
-           token-scopes (:token-scopes request)]
+           token-scopes (:token-scopes request)
+           auth         (cond session-auth :session bearer-token :bearer :else :none)
+           ;; Every response (and every raised exception) the handler produces is counted once.
+           respond      (mcp.metrics/wrap-respond request auth respond)
+           raise        (mcp.metrics/wrap-raise request auth raise)]
        (letfn [(dispatch [user-id token-scopes]
                  (request/with-current-user user-id
+                   (mcp.metrics/record-user!)
                    (if-let [throttle-err (check-throttle user-id)]
                      (respond throttle-err)
                      (try

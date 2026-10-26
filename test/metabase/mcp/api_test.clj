@@ -1691,3 +1691,85 @@
                :body   [{:id     1
                          :result {:contents some?}}]}
               batch-response)))))
+
+;;; -------------------------------------------------- Prometheus ---------------------------------------------------
+
+(deftest prometheus-metrics-test
+  (testing "MCP requests, sessions, tool calls and executed queries are recorded in Prometheus"
+    (mt/with-prometheus-system! [_ system]
+      (let [user-id        (str (mt/user->id :crowberto))
+            db-name        (t2/select-one-fn :name :model/Database (mt/id))
+            external-query {:lib/type "mbql/query"
+                            :stages   [{:lib/type     "mbql.stage/mbql"
+                                        :source-table [db-name "PUBLIC" "ORDERS"]
+                                        :limit        5}]}
+            [session-id _] (initialize-with-params! {:capabilities mcp-app-ui-capabilities
+                                                     :clientInfo   {:name "metrics-test-client" :version "1.2.3"}})]
+        (call-tool session-id "query" {:query external-query})
+        (call-tool session-id "execute_sql" {:database_id (mt/id) :sql "SELECT * FROM ORDERS LIMIT 1"})
+        (mcp-request (jsonrpc-request "tools/call" {:name "no_such_tool" :arguments {}})
+                     {"mcp-session-id" session-id})
+        (mcp-request (jsonrpc-request "resources/read" {:uri "metabase://docs/construct-query.md"})
+                     {"mcp-session-id" session-id})
+        (mcp-request (jsonrpc-request "resources/read" {:uri "metabase://docs/does-not-exist.md"})
+                     {"mcp-session-id" session-id})
+        (mcp-request (jsonrpc-request "bogus/method") {"mcp-session-id" session-id})
+        (mcp-request-unauthenticated (jsonrpc-request "ping"))
+        (mcp-delete {"mcp-session-id" session-id})
+
+        (testing "transport"
+          (is (pos? (mt/metric-value system :metabase-mcp/requests
+                                     {:http-method "post" :status "200" :auth "session"})))
+          (is (== 1 (mt/metric-value system :metabase-mcp/requests
+                                     {:http-method "post" :status "401" :auth "none"})))
+          (is (== 1 (mt/metric-value system :metabase-mcp/requests
+                                     {:http-method "delete" :status "200" :auth "session"})))
+          (is (== 1 (mt/metric-value system :metabase-mcp/rpc-requests
+                                     {:rpc-method "initialize" :status "ok"})))
+          (is (== 1 (mt/metric-value system :metabase-mcp/rpc-requests
+                                     {:rpc-method "notifications/initialized" :status "notification"})))
+          ;; tools/call is a successful JSON-RPC exchange even when the tool itself reports isError
+          (is (== 3 (mt/metric-value system :metabase-mcp/rpc-requests
+                                     {:rpc-method "tools/call" :status "ok"})))
+          (is (== 1 (mt/metric-value system :metabase-mcp/rpc-requests
+                                     {:rpc-method "unknown" :status "error"})))
+          (is (== 1 (mt/metric-value system :metabase-mcp/rpc-errors
+                                     {:rpc-method "unknown" :code "-32601"})))
+          (is (== 1 (mt/metric-value system :metabase-mcp/rpc-errors
+                                     {:rpc-method "resources/read" :code "-32602"})))
+          (is (== 3 (:count (mt/metric-value system :metabase-mcp/rpc-duration-ms {:rpc-method "tools/call"}))))
+          (is (== 1 (mt/metric-value system :metabase-mcp/sessions-created
+                                     {:client-name "metrics-test-client" :client-version "1.2.3" :user-id user-id})))
+          (is (== 1 (mt/metric-value system :metabase-mcp/sessions-deleted)))
+          (is (== 1 (mt/metric-value system :metabase-mcp/user-info
+                                     {:user-id user-id :email "crowberto@metabase.com"})))
+          (is (== 1 (mt/metric-value system :metabase-mcp/resource-reads
+                                     {:uri "metabase://docs/construct-query.md" :status "ok"})))
+          (is (== 1 (mt/metric-value system :metabase-mcp/resource-reads
+                                     {:uri "unknown" :status "not-found"}))))
+
+        (testing "tools"
+          (is (== 1 (mt/metric-value system :metabase-mcp/tool-calls
+                                     {:tool "query" :status "ok" :user-id user-id})))
+          (is (== 1 (mt/metric-value system :metabase-mcp/tool-calls
+                                     {:tool "execute_sql" :status "ok" :user-id user-id})))
+          (is (== 1 (mt/metric-value system :metabase-mcp/tool-calls
+                                     {:tool "no_such_tool" :status "error" :user-id user-id})))
+          (is (== 1 (mt/metric-value system :metabase-mcp/tool-call-errors
+                                     {:tool "no_such_tool" :reason "unknown-tool"})))
+          (is (== 1 (:count (mt/metric-value system :metabase-mcp/tool-call-duration-ms {:tool "query"})))))
+
+        (testing "queries"
+          (is (== 1 (mt/metric-value system :metabase-mcp/queries
+                                     {:tool "query" :database db-name :query-type "mbql"
+                                      :status "completed" :user-id user-id})))
+          (is (== 1 (mt/metric-value system :metabase-mcp/queries
+                                     {:tool "execute_sql" :database db-name :query-type "native"
+                                      :status "completed" :user-id user-id})))
+          (is (== 1 (:count (mt/metric-value system :metabase-mcp/query-duration-ms
+                                             {:tool "query" :database db-name}))))
+          (is (== 5 (:sum (mt/metric-value system :metabase-mcp/query-rows {:tool "query"}))))
+          (is (== 1 (:sum (mt/metric-value system :metabase-mcp/query-rows {:tool "execute_sql"}))))
+          (testing "both the MBQL and the native query touched ORDERS"
+            (is (== 2 (mt/metric-value system :metabase-mcp/query-tables
+                                       {:database db-name :schema "PUBLIC" :table "ORDERS" :user-id user-id})))))))))

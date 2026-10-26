@@ -167,6 +167,10 @@ The implementation lives in these files:
 - **[`scope.clj`](scope.clj)** - Scope matching logic. Supports exact matches, wildcard patterns, and the
   `::unrestricted` sentinel for session-based auth.
 
+- **[`metrics.clj`](metrics.clj)** - Prometheus instrumentation. Records HTTP/JSON-RPC traffic, sessions, tool
+  calls, and - for the query-running tools - the database, tables, running time and row count of each executed
+  query. See [Observability](#observability) below.
+
 ### Request flow
 
 ```
@@ -179,6 +183,37 @@ MCP client
   -> Response materialized as MCP content
   -> JSON or SSE back to client
 ```
+
+## Observability
+
+When Prometheus metrics are enabled (`MB_PROMETHEUS_SERVER_PORT`), the MCP server exports a set of
+`metabase_mcp_*` metrics. All of them are recorded by [`metrics.clj`](metrics.clj) and declared in
+`metabase.analytics.prometheus`.
+
+| Metric                                                | Type      | Labels                                               | What it measures                                                                                                                    |
+| ----------------------------------------------------- | --------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `metabase_mcp_requests_total`                         | counter   | `http_method`, `status`, `auth`                      | Every HTTP response from the endpoint. `auth` is `session`, `bearer` or `none`; 401/403/429 show up here.                           |
+| `metabase_mcp_rpc_requests_total`                     | counter   | `rpc_method`, `status`                               | JSON-RPC messages by method (`initialize`, `tools/list`, `tools/call`, `resources/read`, `ping`, `unknown`) and `ok`/`error`/`notification`. |
+| `metabase_mcp_rpc_errors_total`                       | counter   | `rpc_method`, `code`                                 | JSON-RPC error responses by error code.                                                                                             |
+| `metabase_mcp_rpc_duration_ms`                        | histogram | `rpc_method`                                         | Time to handle one JSON-RPC message (for `tools/call`, includes the tool run).                                                       |
+| `metabase_mcp_batch_size`                             | histogram | -                                                    | JSON-RPC messages per POST.                                                                                                         |
+| `metabase_mcp_sessions_created_total`                 | counter   | `client_name`, `client_version`, `user_id`           | Successful `initialize` calls, i.e. which clients people connect with.                                                              |
+| `metabase_mcp_sessions_deleted_total`                 | counter   | -                                                    | Sessions torn down with `DELETE`.                                                                                                   |
+| `metabase_mcp_sse_streams_active`                     | gauge     | -                                                    | Open `GET` keepalive streams.                                                                                                       |
+| `metabase_mcp_resource_reads_total`                   | counter   | `uri`, `status`                                      | `resources/read` calls. The URI is only labelled on success.                                                                        |
+| `metabase_mcp_user_info`                              | gauge     | `user_id`, `email`                                   | Always `1`; join it onto `user_id` elsewhere (`group_left`) to show emails in dashboards.                                           |
+| `metabase_mcp_tool_calls_total`                       | counter   | `tool`, `status`, `user_id`                          | Tool calls by tool, `ok`/`error`, and user.                                                                                         |
+| `metabase_mcp_tool_call_errors_total`                 | counter   | `tool`, `reason`                                     | Why tool calls failed: `unknown-tool`, `scope-denied`, `missing-extension`, `handle-not-found`, `exception`, `api-<status>`.        |
+| `metabase_mcp_tool_call_duration_ms`                  | histogram | `tool`                                               | Wall-clock time of a tool call.                                                                                                     |
+| `metabase_mcp_queries_total`                          | counter   | `tool`, `database`, `query_type`, `status`, `user_id` | Queries run via `query`, `execute_query`, `execute_sql`, `execute_question`; `query_type` is `mbql` or `native`, `status` is the QP status (`completed`/`failed`). |
+| `metabase_mcp_query_duration_ms`                      | histogram | `tool`, `database`                                   | Query-processor running time.                                                                                                       |
+| `metabase_mcp_query_rows`                             | histogram | `tool`                                               | Rows returned per query.                                                                                                            |
+| `metabase_mcp_query_tables_total`                     | counter   | `database`, `schema`, `table`, `user_id`             | One increment per table (MongoDB: collection) a query touched, including joins and the tables underneath referenced cards/models/metrics. |
+| `metabase_mcp_query_table_extraction_errors_total`    | counter   | `reason`                                             | Queries whose tables could not be fully determined (e.g. unparsable native SQL). The query is still counted in `metabase_mcp_queries_total`. |
+
+`user_id` is a label on the tool, query and table metrics on purpose: these metrics exist to show who drives what
+load through MCP. The series count therefore grows with users x tools and users x tables, which is fine for a
+single organisation's instance but worth keeping in mind on very large deployments.
 
 ## Further reading
 

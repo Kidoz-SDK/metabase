@@ -9,6 +9,7 @@
    [metabase.api.common :as api]
    [metabase.api.macros.defendpoint.tools-manifest :as tools-manifest]
    [metabase.config.core :as config]
+   [metabase.mcp.metrics :as mcp.metrics]
    [metabase.mcp.resources :as mcp.resources]
    [metabase.mcp.scope :as mcp.scope]
    [metabase.mcp.session :as mcp.session]
@@ -353,6 +354,12 @@
   [message]
   {:content [{:type "text" :text message}] :isError true})
 
+(defn- tool-error
+  "Record a failed tool call under `reason` (see [[mcp.metrics/record-tool-error!]]) and return error content."
+  [tool-name reason message]
+  (mcp.metrics/record-tool-error! tool-name reason)
+  (error-content message))
+
 (comment streaming-response/keep-me) ; ensure StreamingResponse class is loaded
 
 (defn- capture-streaming-response
@@ -403,7 +410,7 @@
 
    `body-transform-fn`, when provided, is applied to the 200 response body before
    wrapping with text-content. Used to post-process construct_query results."
-  [method path token-scopes params & {:keys [body-transform-fn]}]
+  [method path token-scopes params & {:keys [body-transform-fn tool-name]}]
   (let [result (promise)]
     (deliver-agent-api-response result method path token-scopes params)
     (let [response (deref result 30000 {:status 504 :body {:message "Timeout"}})]
@@ -417,7 +424,7 @@
                         body-transform-fn (body-transform-fn)))
 
         :else
-        (error-content (extract-error-message response))))))
+        (tool-error tool-name (str "api-" (:status response)) (extract-error-message response))))))
 
 (defn- interpolate-path
   "Replace `{param}` placeholders in `path` with values from `arguments`.
@@ -458,7 +465,8 @@
                                 (make-store-construct-query-result
                                  session-id api/*current-user-id*))]
     (invoke-agent-api method api-path token-scopes remaining-args
-                      :body-transform-fn body-transform-fn)))
+                      :body-transform-fn body-transform-fn
+                      :tool-name tool-name)))
 
 ;; --- Design note: centralized null-stripping at the MCP boundary --------------------------------
 ;; The MCP inputSchema we publish makes every optional field required-and-nullable, because strict
@@ -485,36 +493,51 @@
   (when arguments
     (into {} (remove (comp nil? val)) arguments)))
 
+(defn- call-tool*
+  "Impl for [[call-tool]]: resolve the tool, check scope/extensions, and dispatch."
+  [token-scopes session-id tool-name arguments options]
+  (let [arguments (drop-nil-args arguments)
+        supported (supported-extensions options)]
+    (if-let [ui-tool (some #(when (= tool-name (:name %)) %) (mcp.resources/list-ui-tools))]
+      (if-not (mcp.scope/matches? token-scopes (:scope ui-tool))
+        (tool-error tool-name :scope-denied (str "Insufficient scope to call tool: " tool-name))
+        (if-let [missing-extensions (missing-required-extensions ui-tool supported)]
+          (tool-error tool-name :missing-extension (missing-extensions-error tool-name missing-extensions))
+          ((:response-fn ui-tool) arguments {:session-id session-id})))
+      (if-let [tool-def (get (tool-index) tool-name)]
+        (if-not (mcp.scope/matches? token-scopes (:scope tool-def))
+          (tool-error tool-name :scope-denied (str "Insufficient scope to call tool: " tool-name))
+          (if-let [missing-extensions (missing-required-extensions tool-def supported)]
+            (tool-error tool-name :missing-extension (missing-extensions-error tool-name missing-extensions))
+            (let [arguments (if (tools-accepting-query-handle tool-name)
+                              (resolve-query-arg session-id tool-name arguments)
+                              arguments)]
+              (if (= arguments ::handle-not-found)
+                (tool-error tool-name :handle-not-found
+                            "Query handle not found. The query may have expired — try running construct_query again.")
+                (try
+                  (dispatch-via-agent-api tool-def arguments token-scopes session-id)
+                  (catch Exception e
+                    (tool-error tool-name :exception (or (ex-message e) "Internal error"))))))))
+        (tool-error tool-name :unknown-tool (str "Unknown tool: " tool-name))))))
+
 (defn call-tool
   "Dispatch an MCP `tools/call` request to the appropriate handler.
    `token-scopes` from the original MCP session are propagated to the synthetic
    agent-api request so that scope restrictions are enforced by the agent API's
    `defendpoint` middleware. UI tool response-fns receive `{:session-id session-id}`
    as opts in case a tool needs to scope reads to the calling MCP session.
-   Returns MCP content on success, or error content on failure."
+   Returns MCP content on success, or error content on failure.
+
+   Every call is recorded in Prometheus (see [[metabase.mcp.metrics]]): count + duration by tool, and for the
+   query-running tools the database, tables, running time and row count of the query that was executed."
   ([token-scopes session-id tool-name arguments]
    (call-tool token-scopes session-id tool-name arguments {:supports-mcp-ui? true}))
   ([token-scopes session-id tool-name arguments options]
-   (let [arguments (drop-nil-args arguments)
-         supported (supported-extensions options)]
-     (if-let [ui-tool (some #(when (= tool-name (:name %)) %) (mcp.resources/list-ui-tools))]
-       (if-not (mcp.scope/matches? token-scopes (:scope ui-tool))
-         (error-content (str "Insufficient scope to call tool: " tool-name))
-         (if-let [missing-extensions (missing-required-extensions ui-tool supported)]
-           (error-content (missing-extensions-error tool-name missing-extensions))
-           ((:response-fn ui-tool) arguments {:session-id session-id})))
-       (if-let [tool-def (get (tool-index) tool-name)]
-         (if-not (mcp.scope/matches? token-scopes (:scope tool-def))
-           (error-content (str "Insufficient scope to call tool: " tool-name))
-           (if-let [missing-extensions (missing-required-extensions tool-def supported)]
-             (error-content (missing-extensions-error tool-name missing-extensions))
-             (let [arguments (if (tools-accepting-query-handle tool-name)
-                               (resolve-query-arg session-id tool-name arguments)
-                               arguments)]
-               (if (= arguments ::handle-not-found)
-                 (error-content "Query handle not found. The query may have expired — try running construct_query again.")
-                 (try
-                   (dispatch-via-agent-api tool-def arguments token-scopes session-id)
-                   (catch Exception e
-                     (error-content (or (ex-message e) "Internal error"))))))))
-         (error-content (str "Unknown tool: " tool-name)))))))
+   (let [start  (System/nanoTime)
+         result (call-tool* token-scopes session-id tool-name arguments options)]
+     (mcp.metrics/record-tool-call! tool-name result start)
+     (when (and (contains? mcp.metrics/query-tools tool-name)
+                (not (:isError result)))
+       (mcp.metrics/record-query-result! tool-name (:structuredContent result)))
+     result)))

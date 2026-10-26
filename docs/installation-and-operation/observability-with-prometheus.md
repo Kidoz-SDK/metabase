@@ -164,6 +164,26 @@ Metrics exported by Metabase include:
 - `metabase_email_message_errors_created`
 - `metabase_security_center_last_sync_timestamp_seconds`
 - `metabase_security_center_vulnerable_advisories`
+- `metabase_mcp_requests_total`
+- `metabase_mcp_rpc_requests_total`
+- `metabase_mcp_rpc_errors_total`
+- `metabase_mcp_rpc_duration_ms`
+- `metabase_mcp_batch_size`
+- `metabase_mcp_sessions_created_total`
+- `metabase_mcp_sessions_deleted_total`
+- `metabase_mcp_sse_streams_active`
+- `metabase_mcp_resource_reads_total`
+- `metabase_mcp_user_info`
+- `metabase_mcp_tool_calls_total`
+- `metabase_mcp_tool_call_errors_total`
+- `metabase_mcp_tool_call_duration_ms`
+- `metabase_mcp_queries_total`
+- `metabase_mcp_query_duration_ms`
+- `metabase_mcp_query_rows`
+- `metabase_mcp_query_tables_total`
+- `metabase_mcp_query_table_extraction_errors_total`
+
+See the [MCP server README](https://github.com/metabase/metabase/blob/master/src/metabase/mcp/README.md#observability) for what each `metabase_mcp_*` metric and label means.
 
 ## Further reading
 
